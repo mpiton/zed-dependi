@@ -3,7 +3,7 @@
 use tower_lsp::lsp_types::{InlayHint, InlayHintKind, InlayHintLabel, Position};
 
 use crate::parsers::Dependency;
-use crate::registries::VersionInfo;
+use crate::registries::{VersionInfo, VulnerabilitySeverity};
 
 /// Result of comparing a dependency version with the latest available
 #[derive(Debug, Clone)]
@@ -23,18 +23,12 @@ pub fn create_inlay_hint(dep: &Dependency, version_info: Option<&VersionInfo>) -
         None => VersionStatus::Unknown,
     };
 
-    let (label, tooltip) = match &status {
-        VersionStatus::UpToDate => ("✓".to_string(), Some("Up to date".to_string())),
-        VersionStatus::UpdateAvailable(latest) => {
-            let label = format!("⬆ {}", latest);
-            let tooltip = format!("Update available: {} → {}", dep.version, latest);
-            (label, Some(tooltip))
-        }
-        VersionStatus::Unknown => (
-            "?".to_string(),
-            Some("Could not fetch version info".to_string()),
-        ),
-    };
+    // Check for vulnerabilities
+    let vuln_count = version_info
+        .map(|info| info.vulnerabilities.len())
+        .unwrap_or(0);
+
+    let (label, tooltip) = create_hint_label_and_tooltip(&status, vuln_count, dep, version_info);
 
     InlayHint {
         position: Position {
@@ -48,6 +42,94 @@ pub fn create_inlay_hint(dep: &Dependency, version_info: Option<&VersionInfo>) -
         padding_left: Some(true),
         padding_right: None,
         data: None,
+    }
+}
+
+/// Create label and tooltip based on version status and vulnerabilities
+fn create_hint_label_and_tooltip(
+    status: &VersionStatus,
+    vuln_count: usize,
+    dep: &Dependency,
+    version_info: Option<&VersionInfo>,
+) -> (String, Option<String>) {
+    // Handle vulnerabilities first (they take priority)
+    if vuln_count > 0 {
+        let vuln_label = format!("⚠ {}", vuln_count);
+        let vuln_tooltip = format_vulnerability_tooltip(version_info.unwrap());
+
+        // Combine with update info if available
+        return match status {
+            VersionStatus::UpdateAvailable(latest) => {
+                let label = format!("{} ⬆ {}", vuln_label, latest);
+                let tooltip = format!(
+                    "{}\n\n---\n**Update available:** {} → {}",
+                    vuln_tooltip, dep.version, latest
+                );
+                (label, Some(tooltip))
+            }
+            _ => (vuln_label, Some(vuln_tooltip)),
+        };
+    }
+
+    // No vulnerabilities - show version status
+    match status {
+        VersionStatus::UpToDate => ("✓".to_string(), Some("Up to date".to_string())),
+        VersionStatus::UpdateAvailable(latest) => {
+            let label = format!("⬆ {}", latest);
+            let tooltip = format!("Update available: {} → {}", dep.version, latest);
+            (label, Some(tooltip))
+        }
+        VersionStatus::Unknown => (
+            "?".to_string(),
+            Some("Could not fetch version info".to_string()),
+        ),
+    }
+}
+
+/// Format vulnerability details for tooltip
+fn format_vulnerability_tooltip(info: &VersionInfo) -> String {
+    let mut lines = vec![format!(
+        "**⚠ {} Security Vulnerabilities Found**\n",
+        info.vulnerabilities.len()
+    )];
+
+    for (i, vuln) in info.vulnerabilities.iter().take(5).enumerate() {
+        let severity_icon = match vuln.severity {
+            VulnerabilitySeverity::Critical => "🔴 CRITICAL",
+            VulnerabilitySeverity::High => "🟠 HIGH",
+            VulnerabilitySeverity::Medium => "🟡 MEDIUM",
+            VulnerabilitySeverity::Low => "🟢 LOW",
+        };
+
+        lines.push(format!(
+            "{}. **{}** ({})\n   {}",
+            i + 1,
+            vuln.id,
+            severity_icon,
+            truncate_string(&vuln.description, 100)
+        ));
+
+        if let Some(url) = &vuln.url {
+            lines.push(format!("   [View Advisory]({})", url));
+        }
+    }
+
+    if info.vulnerabilities.len() > 5 {
+        lines.push(format!(
+            "\n... and {} more vulnerabilities",
+            info.vulnerabilities.len() - 5
+        ));
+    }
+
+    lines.join("\n")
+}
+
+/// Truncate a string to max length with ellipsis
+fn truncate_string(s: &str, max_len: usize) -> String {
+    if s.len() <= max_len {
+        s.to_string()
+    } else {
+        format!("{}...", &s[..max_len.saturating_sub(3)])
     }
 }
 

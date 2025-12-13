@@ -5,6 +5,9 @@ use serde::Deserialize;
 /// Default cache TTL (1 hour)
 const DEFAULT_CACHE_TTL_SECS: u64 = 3600;
 
+/// Default vulnerability cache TTL (6 hours)
+const DEFAULT_VULN_CACHE_TTL_SECS: u64 = 6 * 3600;
+
 /// LSP configuration
 #[derive(Debug, Clone, Deserialize, Default)]
 #[serde(default)]
@@ -15,6 +18,8 @@ pub struct Config {
     pub diagnostics: DiagnosticsConfig,
     /// Cache configuration
     pub cache: CacheConfig,
+    /// Security/vulnerability configuration
+    pub security: SecurityConfig,
     /// Packages to ignore (glob patterns)
     #[serde(default)]
     pub ignore: Vec<String>,
@@ -65,6 +70,46 @@ impl Default for CacheConfig {
     fn default() -> Self {
         Self {
             ttl_secs: DEFAULT_CACHE_TTL_SECS,
+        }
+    }
+}
+
+/// Security/vulnerability scanning configuration
+#[derive(Debug, Clone, Deserialize)]
+#[serde(default)]
+pub struct SecurityConfig {
+    /// Enable vulnerability scanning
+    pub enabled: bool,
+    /// Show vulnerabilities in inlay hints
+    pub show_in_hints: bool,
+    /// Show vulnerabilities as diagnostics
+    pub show_diagnostics: bool,
+    /// Minimum severity level to display ("low", "medium", "high", "critical")
+    pub min_severity: String,
+    /// Vulnerability cache TTL in seconds (default: 6 hours)
+    pub cache_ttl_secs: u64,
+}
+
+impl Default for SecurityConfig {
+    fn default() -> Self {
+        Self {
+            enabled: true,
+            show_in_hints: true,
+            show_diagnostics: true,
+            min_severity: "low".to_string(),
+            cache_ttl_secs: DEFAULT_VULN_CACHE_TTL_SECS,
+        }
+    }
+}
+
+impl SecurityConfig {
+    /// Parse minimum severity level to VulnerabilitySeverity
+    pub fn min_severity_level(&self) -> crate::registries::VulnerabilitySeverity {
+        match self.min_severity.to_lowercase().as_str() {
+            "critical" => crate::registries::VulnerabilitySeverity::Critical,
+            "high" => crate::registries::VulnerabilitySeverity::High,
+            "medium" => crate::registries::VulnerabilitySeverity::Medium,
+            _ => crate::registries::VulnerabilitySeverity::Low,
         }
     }
 }

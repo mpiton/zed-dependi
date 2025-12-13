@@ -29,3 +29,7 @@ anyhow = "1"
 thiserror = "2"
 rusqlite = { version = "0.32", features = ["bundled"] }
 dirs = "6"
+serde_yaml = "0.9"
+chrono = "0.4"
+# rustsec = "0.30"  # TODO: Re-enable when API is stable
+# parking_lot = "0.12"  # For rustsec client

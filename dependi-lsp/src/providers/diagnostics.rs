@@ -1,10 +1,11 @@
-//! Diagnostics provider for outdated dependencies
+//! Diagnostics provider for outdated dependencies and vulnerabilities
 
 use tower_lsp::lsp_types::*;
 
 use crate::cache::Cache;
 use crate::parsers::Dependency;
-use crate::providers::inlay_hints::{VersionStatus, compare_versions};
+use crate::providers::inlay_hints::{compare_versions, VersionStatus};
+use crate::registries::{Vulnerability, VulnerabilitySeverity};
 
 /// Create diagnostics for a list of dependencies
 pub fn create_diagnostics(
@@ -12,14 +13,28 @@ pub fn create_diagnostics(
     cache: &impl Cache,
     cache_key_fn: impl Fn(&str) -> String,
 ) -> Vec<Diagnostic> {
-    dependencies
-        .iter()
-        .filter_map(|dep| create_diagnostic_for_dependency(dep, cache, &cache_key_fn))
-        .collect()
+    let mut diagnostics = Vec::new();
+
+    for dep in dependencies {
+        // Add outdated version diagnostic
+        if let Some(diag) = create_outdated_diagnostic(dep, cache, &cache_key_fn) {
+            diagnostics.push(diag);
+        }
+
+        // Add vulnerability diagnostics
+        let cache_key = cache_key_fn(&dep.name);
+        if let Some(version_info) = cache.get(&cache_key) {
+            for vuln in &version_info.vulnerabilities {
+                diagnostics.push(create_vulnerability_diagnostic(dep, vuln));
+            }
+        }
+    }
+
+    diagnostics
 }
 
-/// Create a diagnostic for a single dependency if it's outdated
-fn create_diagnostic_for_dependency(
+/// Create a diagnostic for an outdated dependency
+fn create_outdated_diagnostic(
     dep: &Dependency,
     cache: &impl Cache,
     cache_key_fn: impl Fn(&str) -> String,
@@ -49,6 +64,72 @@ fn create_diagnostic_for_dependency(
             data: None,
         }),
         VersionStatus::UpToDate | VersionStatus::Unknown => None,
+    }
+}
+
+/// Create a diagnostic for a security vulnerability
+fn create_vulnerability_diagnostic(dep: &Dependency, vuln: &Vulnerability) -> Diagnostic {
+    // Map vulnerability severity to diagnostic severity
+    let severity = match vuln.severity {
+        VulnerabilitySeverity::Critical | VulnerabilitySeverity::High => DiagnosticSeverity::ERROR,
+        VulnerabilitySeverity::Medium => DiagnosticSeverity::WARNING,
+        VulnerabilitySeverity::Low => DiagnosticSeverity::HINT,
+    };
+
+    let severity_text = match vuln.severity {
+        VulnerabilitySeverity::Critical => "CRITICAL",
+        VulnerabilitySeverity::High => "HIGH",
+        VulnerabilitySeverity::Medium => "MEDIUM",
+        VulnerabilitySeverity::Low => "LOW",
+    };
+
+    let message = format!(
+        "Security vulnerability {} ({}): {}",
+        vuln.id,
+        severity_text,
+        truncate_string(&vuln.description, 150)
+    );
+
+    Diagnostic {
+        range: Range {
+            start: Position {
+                line: dep.line,
+                character: dep.version_start,
+            },
+            end: Position {
+                line: dep.line,
+                character: dep.version_end,
+            },
+        },
+        severity: Some(severity),
+        code: Some(NumberOrString::String(vuln.id.clone())),
+        source: Some("dependi-security".to_string()),
+        message,
+        related_information: vuln.url.as_ref().map(|url| {
+            vec![DiagnosticRelatedInformation {
+                location: Location {
+                    uri: Url::parse(url).unwrap_or_else(|_| {
+                        Url::parse("https://osv.dev").expect("Invalid fallback URL")
+                    }),
+                    range: Range::default(),
+                },
+                message: "View security advisory".to_string(),
+            }]
+        }),
+        tags: None,
+        code_description: vuln.url.as_ref().and_then(|url| {
+            Url::parse(url).ok().map(|href| CodeDescription { href })
+        }),
+        data: None,
+    }
+}
+
+/// Truncate a string to max length with ellipsis
+fn truncate_string(s: &str, max_len: usize) -> String {
+    if s.len() <= max_len {
+        s.to_string()
+    } else {
+        format!("{}...", &s[..max_len.saturating_sub(3)])
     }
 }
 

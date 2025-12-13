@@ -59,9 +59,7 @@ pub trait Registry: Send + Sync {
 pub mod crates_io;
 pub mod go_proxy;
 pub mod npm;
+pub mod nuget;
 pub mod packagist;
+pub mod pub_dev;
 pub mod pypi;
-
-// TODO: Implement additional registry clients
-// pub mod pub_dev;
-// pub mod nuget;

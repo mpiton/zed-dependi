@@ -96,6 +96,14 @@ fn format_version(version: &str, file_type: FileType) -> String {
                 format!("v{}", version)
             }
         }
+        FileType::Dart => {
+            // Dart pubspec.yaml uses caret syntax (^1.0.0) or simple versions
+            version.to_string()
+        }
+        FileType::Csharp => {
+            // C# .csproj uses simple version strings
+            version.to_string()
+        }
     }
 }
 

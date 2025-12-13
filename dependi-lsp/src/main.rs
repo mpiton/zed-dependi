@@ -4,6 +4,7 @@ mod config;
 mod parsers;
 mod providers;
 mod registries;
+mod vulnerabilities;
 
 use tower_lsp::{LspService, Server};
 use tracing_subscriber::{EnvFilter, layer::SubscriberExt, util::SubscriberInitExt};

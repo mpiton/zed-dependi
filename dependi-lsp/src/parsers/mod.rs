@@ -32,11 +32,9 @@ pub trait Parser: Send + Sync {
 }
 
 pub mod cargo;
+pub mod csharp;
+pub mod dart;
 pub mod go;
 pub mod npm;
 pub mod php;
 pub mod python;
-
-// TODO: Implement additional parsers
-// pub mod dart;
-// pub mod csharp;
