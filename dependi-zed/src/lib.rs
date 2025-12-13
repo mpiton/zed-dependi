@@ -23,8 +23,8 @@ impl DependiExtension {
             zed::Os::Windows => "dependi-lsp.exe",
         };
 
-        let asset_name = format!(
-            "dependi-lsp-{}-{}.tar.gz",
+        let target = format!(
+            "{}-{}",
             match arch {
                 zed::Architecture::Aarch64 => "aarch64",
                 zed::Architecture::X8664 => "x86_64",
@@ -36,6 +36,17 @@ impl DependiExtension {
                 zed::Os::Windows => "pc-windows-msvc",
             }
         );
+
+        let (asset_name, file_type) = match platform {
+            zed::Os::Windows => (
+                format!("dependi-lsp-{}.zip", target),
+                zed::DownloadedFileType::Zip,
+            ),
+            _ => (
+                format!("dependi-lsp-{}.tar.gz", target),
+                zed::DownloadedFileType::GzipTar,
+            ),
+        };
 
         let release = zed::latest_github_release(
             "mpiton/zed-dependi",
@@ -66,7 +77,7 @@ impl DependiExtension {
             zed::download_file(
                 &asset.download_url,
                 &version_dir,
-                zed::DownloadedFileType::GzipTar,
+                file_type,
             )
             .map_err(|e| format!("Failed to download: {e}"))?;
 

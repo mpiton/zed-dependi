@@ -25,6 +25,10 @@ jobs:
             target: aarch64-apple-darwin
             artifact_name: dependi-lsp
             asset_name: dependi-lsp-aarch64-apple-darwin
+          - os: windows-latest
+            target: x86_64-pc-windows-msvc
+            artifact_name: dependi-lsp.exe
+            asset_name: dependi-lsp-x86_64-pc-windows-msvc
 
     runs-on: ${{ matrix.os }}
 
@@ -41,17 +45,34 @@ jobs:
           cd dependi-lsp
           cargo build --release --target ${{ matrix.target }}
 
-      - name: Package
+      - name: Package (Unix)
+        if: matrix.os != 'windows-latest'
         run: |
           cd dependi-lsp/target/${{ matrix.target }}/release
           tar -czvf ${{ matrix.asset_name }}.tar.gz ${{ matrix.artifact_name }}
           mv ${{ matrix.asset_name }}.tar.gz ../../../../
 
-      - name: Upload artifact
+      - name: Package (Windows)
+        if: matrix.os == 'windows-latest'
+        run: |
+          cd dependi-lsp/target/${{ matrix.target }}/release
+          7z a ${{ matrix.asset_name }}.zip ${{ matrix.artifact_name }}
+          mv ${{ matrix.asset_name }}.zip ../../../../
+        shell: bash
+
+      - name: Upload artifact (Unix)
+        if: matrix.os != 'windows-latest'
         uses: actions/upload-artifact@v4
         with:
           name: ${{ matrix.asset_name }}
           path: ${{ matrix.asset_name }}.tar.gz
+
+      - name: Upload artifact (Windows)
+        if: matrix.os == 'windows-latest'
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ matrix.asset_name }}
+          path: ${{ matrix.asset_name }}.zip
 
   release:
     needs: build
@@ -68,7 +89,9 @@ jobs:
       - name: Create Release
         uses: softprops/action-gh-release@v1
         with:
-          files: artifacts/**/*.tar.gz
+          files: |
+            artifacts/**/*.tar.gz
+            artifacts/**/*.zip
           generate_release_notes: true
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
