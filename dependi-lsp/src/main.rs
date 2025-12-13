@@ -89,14 +89,8 @@ async fn run_scan(
     fail_on_vulns: bool,
 ) -> ExitCode {
     use crate::parsers::{
-        Parser,
-        cargo::CargoParser,
-        csharp::CsharpParser,
-        dart::DartParser,
-        go::GoParser,
-        npm::NpmParser,
-        php::PhpParser,
-        python::PythonParser,
+        Parser, cargo::CargoParser, csharp::CsharpParser, dart::DartParser, go::GoParser,
+        npm::NpmParser, php::PhpParser, python::PythonParser,
     };
     use crate::registries::VulnerabilitySeverity;
     use crate::vulnerabilities::{Ecosystem, VulnerabilityQuery, osv::OsvClient};
