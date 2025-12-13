@@ -102,7 +102,9 @@ impl VulnerabilityCache {
 
     /// Check if a key is in the cache and not expired
     pub fn contains(&self, key: &VulnCacheKey) -> bool {
-        self.entries.get(key).is_some_and(|entry| entry.inserted_at.elapsed() < self.ttl)
+        self.entries
+            .get(key)
+            .is_some_and(|entry| entry.inserted_at.elapsed() < self.ttl)
     }
 
     /// Remove expired entries from cache

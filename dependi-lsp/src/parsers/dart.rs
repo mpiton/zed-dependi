@@ -119,7 +119,9 @@ fn parse_dart_dependency_line(line: &str, line_num: u32, dev: bool) -> Option<De
     }
 
     // Skip if it's a complex dependency (starts with { or contains special keys)
-    if version_part.starts_with('{') || version_part.starts_with('^') == false && version_part.contains(':') {
+    if version_part.starts_with('{')
+        || version_part.starts_with('^') == false && version_part.contains(':')
+    {
         return None;
     }
 
@@ -167,7 +169,11 @@ fn is_complex_dependency(line: &str) -> bool {
 fn is_flutter_sdk_dependency(name: &str) -> bool {
     matches!(
         name,
-        "flutter" | "flutter_test" | "flutter_localizations" | "flutter_driver" | "flutter_web_plugins"
+        "flutter"
+            | "flutter_test"
+            | "flutter_localizations"
+            | "flutter_driver"
+            | "flutter_web_plugins"
     )
 }
 

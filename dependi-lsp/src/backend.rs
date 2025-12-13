@@ -255,10 +255,7 @@ impl DependiBackend {
                         self.version_cache.insert(cache_key, info);
                     }
                 }
-                tracing::info!(
-                    "Cached vulnerability info for {} packages",
-                    queries.len()
-                );
+                tracing::info!("Cached vulnerability info for {} packages", queries.len());
             }
             Err(e) => {
                 tracing::warn!("Failed to fetch vulnerabilities from OSV.dev: {}", e);
@@ -884,7 +881,10 @@ impl LanguageServer for DependiBackend {
         }
     }
 
-    async fn execute_command(&self, params: ExecuteCommandParams) -> Result<Option<serde_json::Value>> {
+    async fn execute_command(
+        &self,
+        params: ExecuteCommandParams,
+    ) -> Result<Option<serde_json::Value>> {
         match params.command.as_str() {
             "dependi/generateReport" => {
                 let report = self.generate_vulnerability_report(&params.arguments).await;

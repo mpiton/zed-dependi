@@ -114,7 +114,7 @@ impl Registry for PubDevRegistry {
             description: pkg.latest.pubspec.description,
             homepage: pkg.latest.pubspec.homepage,
             repository: pkg.latest.pubspec.repository,
-            license: None, // pub.dev doesn't expose license in API
+            license: None,           // pub.dev doesn't expose license in API
             vulnerabilities: vec![], // Will be filled by OSV
             deprecated: pkg.latest.pubspec.discontinued,
             yanked: pkg.latest.retracted,

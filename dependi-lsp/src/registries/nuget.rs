@@ -164,9 +164,7 @@ impl Registry for NuGetRegistry {
         let latest_entry = all_versions.first();
 
         // Check deprecation
-        let deprecated = latest_entry
-            .and_then(|e| e.deprecation.as_ref())
-            .is_some();
+        let deprecated = latest_entry.and_then(|e| e.deprecation.as_ref()).is_some();
 
         Ok(VersionInfo {
             latest: latest_stable,
@@ -175,7 +173,8 @@ impl Registry for NuGetRegistry {
             description: latest_entry.and_then(|e| e.description.clone()),
             homepage: latest_entry.and_then(|e| e.project_url.clone()),
             repository: None, // NuGet doesn't expose repository URL directly
-            license: latest_entry.and_then(|e| e.license_expression.clone().or(e.license_url.clone())),
+            license: latest_entry
+                .and_then(|e| e.license_expression.clone().or(e.license_url.clone())),
             vulnerabilities: vec![], // Will be filled by OSV
             deprecated,
             yanked: false,

@@ -4,7 +4,7 @@ use tower_lsp::lsp_types::*;
 
 use crate::cache::Cache;
 use crate::parsers::Dependency;
-use crate::providers::inlay_hints::{compare_versions, VersionStatus};
+use crate::providers::inlay_hints::{VersionStatus, compare_versions};
 use crate::registries::{Vulnerability, VulnerabilitySeverity};
 
 /// Create diagnostics for a list of dependencies
@@ -117,9 +117,10 @@ fn create_vulnerability_diagnostic(dep: &Dependency, vuln: &Vulnerability) -> Di
             }]
         }),
         tags: None,
-        code_description: vuln.url.as_ref().and_then(|url| {
-            Url::parse(url).ok().map(|href| CodeDescription { href })
-        }),
+        code_description: vuln
+            .url
+            .as_ref()
+            .and_then(|url| Url::parse(url).ok().map(|href| CodeDescription { href })),
         data: None,
     }
 }

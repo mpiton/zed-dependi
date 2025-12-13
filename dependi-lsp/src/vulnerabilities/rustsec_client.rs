@@ -27,7 +27,11 @@ impl RustSecClient {
     /// Query vulnerabilities for a Rust crate
     ///
     /// Currently returns empty - use OSV.dev for Rust vulnerability data.
-    pub async fn query(&self, _crate_name: &str, _version: &str) -> anyhow::Result<Vec<Vulnerability>> {
+    pub async fn query(
+        &self,
+        _crate_name: &str,
+        _version: &str,
+    ) -> anyhow::Result<Vec<Vulnerability>> {
         // TODO: Implement using rustsec crate when API is stabilized
         // For now, OSV.dev covers RustSec advisories
         Ok(vec![])
