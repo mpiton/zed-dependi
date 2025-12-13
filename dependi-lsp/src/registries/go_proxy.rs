@@ -72,12 +72,7 @@ impl Registry for GoProxyRegistry {
         let latest_stable = latest
             .as_ref()
             .map(|l| l.version.clone())
-            .or_else(|| {
-                sorted_versions
-                    .iter()
-                    .find(|v| !is_prerelease(v))
-                    .cloned()
-            });
+            .or_else(|| sorted_versions.iter().find(|v| !is_prerelease(v)).cloned());
 
         // Find latest prerelease
         let latest_prerelease = sorted_versions.iter().find(|v| is_prerelease(v)).cloned();
@@ -98,7 +93,7 @@ impl Registry for GoProxyRegistry {
             description: None, // Go proxy doesn't provide descriptions
             homepage: None,
             repository,
-            license: None, // Would need to fetch go.mod or LICENSE file
+            license: None,           // Would need to fetch go.mod or LICENSE file
             vulnerabilities: vec![], // TODO: Integrate vuln.go.dev
             deprecated: false,
             yanked: false,
@@ -227,10 +222,7 @@ mod tests {
             encode_module_path("github.com/gin-gonic/gin"),
             "github.com/gin-gonic/gin"
         );
-        assert_eq!(
-            encode_module_path("golang.org/x/text"),
-            "golang.org/x/text"
-        );
+        assert_eq!(encode_module_path("golang.org/x/text"), "golang.org/x/text");
     }
 
     #[test]

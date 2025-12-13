@@ -30,7 +30,10 @@ pub fn create_inlay_hint(dep: &Dependency, version_info: Option<&VersionInfo>) -
             let tooltip = format!("Update available: {} → {}", dep.version, latest);
             (label, Some(tooltip))
         }
-        VersionStatus::Unknown => ("?".to_string(), Some("Could not fetch version info".to_string())),
+        VersionStatus::Unknown => (
+            "?".to_string(),
+            Some("Could not fetch version info".to_string()),
+        ),
     };
 
     InlayHint {

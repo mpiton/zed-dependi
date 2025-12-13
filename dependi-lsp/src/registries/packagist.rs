@@ -77,7 +77,10 @@ impl Registry for PackagistRegistry {
     async fn get_version_info(&self, package_name: &str) -> anyhow::Result<VersionInfo> {
         // Package name format: vendor/package
         if !package_name.contains('/') {
-            anyhow::bail!("Invalid package name: {} (expected vendor/package)", package_name);
+            anyhow::bail!(
+                "Invalid package name: {} (expected vendor/package)",
+                package_name
+            );
         }
 
         let url = format!("{}/p2/{}.json", self.base_url, package_name);
@@ -112,10 +115,7 @@ impl Registry for PackagistRegistry {
         versions.sort_by(|a, b| compare_packagist_versions(b, a));
 
         // Find latest stable version
-        let latest_stable = versions
-            .iter()
-            .find(|v| !is_prerelease(v))
-            .cloned();
+        let latest_stable = versions.iter().find(|v| !is_prerelease(v)).cloned();
 
         // Find latest prerelease
         let latest_prerelease = versions.iter().find(|v| is_prerelease(v)).cloned();
@@ -137,7 +137,12 @@ impl Registry for PackagistRegistry {
         // Check if deprecated/abandoned
         let deprecated = latest_entry
             .and_then(|e| e.abandoned.as_ref())
-            .is_some_and(|a| matches!(a, AbandonedStatus::Bool(true) | AbandonedStatus::Replacement(_)));
+            .is_some_and(|a| {
+                matches!(
+                    a,
+                    AbandonedStatus::Bool(true) | AbandonedStatus::Replacement(_)
+                )
+            });
 
         Ok(VersionInfo {
             latest: latest_stable,
@@ -251,10 +256,7 @@ mod tests {
     fn test_compare_packagist_versions() {
         use std::cmp::Ordering;
 
-        assert_eq!(
-            compare_packagist_versions("1.0.0", "2.0.0"),
-            Ordering::Less
-        );
+        assert_eq!(compare_packagist_versions("1.0.0", "2.0.0"), Ordering::Less);
         assert_eq!(
             compare_packagist_versions("v2.0.0", "v1.0.0"),
             Ordering::Greater

@@ -113,7 +113,11 @@ enum DependencyType {
 
 /// Parse inline dependencies from a single line content
 /// e.g., "pkg": "1.0.0", "pkg2": "2.0.0"}}
-fn parse_inline_dependencies(content: &str, line_num: u32, dep_type: DependencyType) -> Vec<Dependency> {
+fn parse_inline_dependencies(
+    content: &str,
+    line_num: u32,
+    dep_type: DependencyType,
+) -> Vec<Dependency> {
     let mut deps = Vec::new();
     let mut remaining = content;
 
@@ -185,7 +189,11 @@ fn detect_section(line: &str) -> Option<DependencyType> {
     }
 }
 
-fn parse_dependency_line(line: &str, line_num: u32, dep_type: DependencyType) -> Option<Dependency> {
+fn parse_dependency_line(
+    line: &str,
+    line_num: u32,
+    dep_type: DependencyType,
+) -> Option<Dependency> {
     // Match pattern: "package-name": "version"
     // Find the first quoted string (package name)
     let first_quote = line.find('"')?;

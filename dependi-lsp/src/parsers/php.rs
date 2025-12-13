@@ -34,7 +34,9 @@ impl Parser for PhpParser {
                     // Try to parse inline dependencies on the same line
                     if let Some(brace_pos) = trimmed.find('{') {
                         let after_brace = &trimmed[brace_pos + 1..];
-                        if let Some(deps) = parse_inline_dependencies(after_brace, line_num, section, line) {
+                        if let Some(deps) =
+                            parse_inline_dependencies(after_brace, line_num, section, line)
+                        {
                             dependencies.extend(deps);
                         }
                     }
@@ -114,15 +116,15 @@ fn parse_inline_dependencies(
         }
     }
 
-    if deps.is_empty() {
-        None
-    } else {
-        Some(deps)
-    }
+    if deps.is_empty() { None } else { Some(deps) }
 }
 
 /// Parse a single dependency line: "vendor/package": "^1.0.0"
-fn parse_dependency_line(line: &str, line_num: u32, dep_type: DependencyType) -> Option<Dependency> {
+fn parse_dependency_line(
+    line: &str,
+    line_num: u32,
+    dep_type: DependencyType,
+) -> Option<Dependency> {
     let trimmed = line.trim();
 
     // Must contain a colon (key: value)

@@ -15,7 +15,10 @@ impl PythonParser {
 impl Parser for PythonParser {
     fn parse(&self, content: &str) -> Vec<Dependency> {
         // Detect file type based on content
-        if content.trim_start().starts_with('[') || content.contains("[project]") || content.contains("[tool.poetry") {
+        if content.trim_start().starts_with('[')
+            || content.contains("[project]")
+            || content.contains("[tool.poetry")
+        {
             parse_pyproject_toml(content)
         } else {
             parse_requirements_txt(content)
@@ -23,7 +26,12 @@ impl Parser for PythonParser {
     }
 
     fn file_patterns(&self) -> &[&str] {
-        &["requirements.txt", "requirements-dev.txt", "requirements-test.txt", "pyproject.toml"]
+        &[
+            "requirements.txt",
+            "requirements-dev.txt",
+            "requirements-test.txt",
+            "pyproject.toml",
+        ]
     }
 }
 
@@ -40,7 +48,8 @@ fn parse_requirements_txt(content: &str) -> Vec<Dependency> {
         if trimmed.is_empty()
             || trimmed.starts_with('#')
             || trimmed.starts_with('-')  // -r, -e, -c, etc.
-            || trimmed.starts_with("--") // --index-url, etc.
+            || trimmed.starts_with("--")
+        // --index-url, etc.
         {
             continue;
         }
@@ -177,12 +186,17 @@ fn parse_pyproject_toml(content: &str) -> Vec<Dependency> {
         }
 
         // [project.optional-dependencies]
-        if let Some(optional_deps) = project.get("optional-dependencies").and_then(|v| v.as_table()) {
+        if let Some(optional_deps) = project
+            .get("optional-dependencies")
+            .and_then(|v| v.as_table())
+        {
             for (_group, deps) in optional_deps {
                 if let Some(deps_array) = deps.as_array() {
                     for dep_str in deps_array.iter().filter_map(|v| v.as_str()) {
                         if let Some((name, version)) = parse_pep508_dependency(dep_str) {
-                            if let Some(dep) = find_dependency_position(content, &name, &version, true) {
+                            if let Some(dep) =
+                                find_dependency_position(content, &name, &version, true)
+                            {
                                 dependencies.push(dep);
                             }
                         }
@@ -203,7 +217,9 @@ fn parse_pyproject_toml(content: &str) -> Vec<Dependency> {
                         continue;
                     }
                     if let Some(version) = extract_poetry_version(value) {
-                        if let Some(dep) = find_poetry_dependency_position(content, name, &version, false) {
+                        if let Some(dep) =
+                            find_poetry_dependency_position(content, name, &version, false)
+                        {
                             dependencies.push(dep);
                         }
                     }
@@ -214,7 +230,9 @@ fn parse_pyproject_toml(content: &str) -> Vec<Dependency> {
             if let Some(deps) = poetry.get("dev-dependencies").and_then(|v| v.as_table()) {
                 for (name, value) in deps {
                     if let Some(version) = extract_poetry_version(value) {
-                        if let Some(dep) = find_poetry_dependency_position(content, name, &version, true) {
+                        if let Some(dep) =
+                            find_poetry_dependency_position(content, name, &version, true)
+                        {
                             dependencies.push(dep);
                         }
                     }
@@ -226,10 +244,14 @@ fn parse_pyproject_toml(content: &str) -> Vec<Dependency> {
                 for (group_name, group_value) in groups {
                     let is_dev = group_name == "dev" || group_name == "test";
                     if let Some(group_table) = group_value.as_table() {
-                        if let Some(deps) = group_table.get("dependencies").and_then(|v| v.as_table()) {
+                        if let Some(deps) =
+                            group_table.get("dependencies").and_then(|v| v.as_table())
+                        {
                             for (name, value) in deps {
                                 if let Some(version) = extract_poetry_version(value) {
-                                    if let Some(dep) = find_poetry_dependency_position(content, name, &version, is_dev) {
+                                    if let Some(dep) = find_poetry_dependency_position(
+                                        content, name, &version, is_dev,
+                                    ) {
                                         dependencies.push(dep);
                                     }
                                 }
@@ -301,15 +323,21 @@ fn parse_pep508_dependency(dep_str: &str) -> Option<(String, String)> {
 fn extract_poetry_version(value: &toml::Value) -> Option<String> {
     match value {
         toml::Value::String(s) => Some(s.clone()),
-        toml::Value::Table(t) => {
-            t.get("version").and_then(|v| v.as_str()).map(|s| s.to_string())
-        }
+        toml::Value::Table(t) => t
+            .get("version")
+            .and_then(|v| v.as_str())
+            .map(|s| s.to_string()),
         _ => None,
     }
 }
 
 /// Find position of a dependency in PEP 621 format (array of strings)
-fn find_dependency_position(content: &str, name: &str, version: &str, dev: bool) -> Option<Dependency> {
+fn find_dependency_position(
+    content: &str,
+    name: &str,
+    version: &str,
+    dev: bool,
+) -> Option<Dependency> {
     for (line_idx, line) in content.lines().enumerate() {
         // Look for the dependency string in an array
         if line.contains(name) && line.contains(version) {
@@ -343,7 +371,12 @@ fn find_dependency_position(content: &str, name: &str, version: &str, dev: bool)
 }
 
 /// Find position of a Poetry dependency (table format)
-fn find_poetry_dependency_position(content: &str, name: &str, version: &str, dev: bool) -> Option<Dependency> {
+fn find_poetry_dependency_position(
+    content: &str,
+    name: &str,
+    version: &str,
+    dev: bool,
+) -> Option<Dependency> {
     for (line_idx, line) in content.lines().enumerate() {
         let trimmed = line.trim();
 

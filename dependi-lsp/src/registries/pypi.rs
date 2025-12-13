@@ -117,30 +117,22 @@ impl Registry for PyPiRegistry {
         let latest_prerelease = versions.iter().find(|v| is_prerelease(v)).cloned();
 
         // Extract repository URL from project_urls
-        let repository = pypi_response
-            .info
-            .project_urls
-            .as_ref()
-            .and_then(|urls| {
-                urls.get("Repository")
-                    .or_else(|| urls.get("Source"))
-                    .or_else(|| urls.get("Source Code"))
-                    .or_else(|| urls.get("GitHub"))
-                    .cloned()
-            });
+        let repository = pypi_response.info.project_urls.as_ref().and_then(|urls| {
+            urls.get("Repository")
+                .or_else(|| urls.get("Source"))
+                .or_else(|| urls.get("Source Code"))
+                .or_else(|| urls.get("GitHub"))
+                .cloned()
+        });
 
         // Extract homepage
-        let homepage = pypi_response
-            .info
-            .home_page
-            .clone()
-            .or_else(|| {
-                pypi_response
-                    .info
-                    .project_urls
-                    .as_ref()
-                    .and_then(|urls| urls.get("Homepage").cloned())
-            });
+        let homepage = pypi_response.info.home_page.clone().or_else(|| {
+            pypi_response
+                .info
+                .project_urls
+                .as_ref()
+                .and_then(|urls| urls.get("Homepage").cloned())
+        });
 
         // Check if deprecated (via classifiers)
         let deprecated = pypi_response
@@ -172,9 +164,7 @@ impl Registry for PyPiRegistry {
 /// - Lowercase
 /// - Replace underscores and dots with hyphens
 fn normalize_package_name(name: &str) -> String {
-    name.to_lowercase()
-        .replace('_', "-")
-        .replace('.', "-")
+    name.to_lowercase().replace('_', "-").replace('.', "-")
 }
 
 /// Check if a version is a prerelease
@@ -232,7 +222,10 @@ mod tests {
     fn test_normalize_package_name() {
         assert_eq!(normalize_package_name("Flask"), "flask");
         assert_eq!(normalize_package_name("ruamel.yaml"), "ruamel-yaml");
-        assert_eq!(normalize_package_name("typing_extensions"), "typing-extensions");
+        assert_eq!(
+            normalize_package_name("typing_extensions"),
+            "typing-extensions"
+        );
         assert_eq!(normalize_package_name("Pillow"), "pillow");
     }
 
@@ -252,18 +245,9 @@ mod tests {
     fn test_compare_python_versions() {
         use std::cmp::Ordering;
 
-        assert_eq!(
-            compare_python_versions("1.0.0", "2.0.0"),
-            Ordering::Less
-        );
-        assert_eq!(
-            compare_python_versions("2.0.0", "1.0.0"),
-            Ordering::Greater
-        );
-        assert_eq!(
-            compare_python_versions("1.0.0", "1.0.0"),
-            Ordering::Equal
-        );
+        assert_eq!(compare_python_versions("1.0.0", "2.0.0"), Ordering::Less);
+        assert_eq!(compare_python_versions("2.0.0", "1.0.0"), Ordering::Greater);
+        assert_eq!(compare_python_versions("1.0.0", "1.0.0"), Ordering::Equal);
         assert_eq!(
             compare_python_versions("1.10.0", "1.9.0"),
             Ordering::Greater

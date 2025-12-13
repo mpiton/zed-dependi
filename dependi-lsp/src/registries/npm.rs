@@ -164,12 +164,7 @@ impl Registry for NpmRegistry {
             .dist_tags
             .as_ref()
             .and_then(|t| t.next.clone())
-            .or_else(|| {
-                versions
-                    .iter()
-                    .find(|v| is_prerelease(v))
-                    .cloned()
-            });
+            .or_else(|| versions.iter().find(|v| is_prerelease(v)).cloned());
 
         // Check if latest version is deprecated
         let deprecated = pkg

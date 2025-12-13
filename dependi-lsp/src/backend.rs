@@ -131,7 +131,11 @@ impl DependiBackend {
     }
 
     /// Fetch version info for a package (with caching)
-    async fn get_version_info(&self, file_type: FileType, package_name: &str) -> Option<VersionInfo> {
+    async fn get_version_info(
+        &self,
+        file_type: FileType,
+        package_name: &str,
+    ) -> Option<VersionInfo> {
         let cache_key = Self::cache_key(file_type, package_name);
 
         // Check cache first
@@ -328,9 +332,7 @@ impl LanguageServer for DependiBackend {
         self.documents.remove(&uri);
 
         // Clear diagnostics for this document
-        self.client
-            .publish_diagnostics(uri, vec![], None)
-            .await;
+        self.client.publish_diagnostics(uri, vec![], None).await;
     }
 
     async fn inlay_hint(&self, params: InlayHintParams) -> Result<Option<Vec<InlayHint>>> {
@@ -464,12 +466,10 @@ impl LanguageServer for DependiBackend {
         };
 
         let file_type = doc.file_type;
-        let completions = get_completions(
-            &doc.dependencies,
-            position,
-            &self.version_cache,
-            |name| Self::cache_key(file_type, name),
-        );
+        let completions =
+            get_completions(&doc.dependencies, position, &self.version_cache, |name| {
+                Self::cache_key(file_type, name)
+            });
 
         match completions {
             Some(items) => Ok(Some(CompletionResponse::Array(items))),

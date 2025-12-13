@@ -1,9 +1,9 @@
 //! Integration tests for dependi-lsp
 
 use dependi_lsp::cache::MemoryCache;
+use dependi_lsp::parsers::Parser;
 use dependi_lsp::parsers::cargo::CargoParser;
 use dependi_lsp::parsers::npm::NpmParser;
-use dependi_lsp::parsers::Parser;
 use dependi_lsp::providers::inlay_hints::create_inlay_hint;
 use dependi_lsp::registries::VersionInfo;
 
@@ -100,12 +100,18 @@ fn test_parse_realistic_package_json() {
     assert_eq!(deps.len(), 11);
 
     // Check regular dependencies
-    let react = deps.iter().find(|d| d.name == "react" && !d.optional).unwrap();
+    let react = deps
+        .iter()
+        .find(|d| d.name == "react" && !d.optional)
+        .unwrap();
     assert_eq!(react.version, "^18.2.0");
     assert!(!react.dev);
 
     // Check scoped packages
-    let react_query = deps.iter().find(|d| d.name == "@tanstack/react-query").unwrap();
+    let react_query = deps
+        .iter()
+        .find(|d| d.name == "@tanstack/react-query")
+        .unwrap();
     assert_eq!(react_query.version, "^5.0.0");
 
     // Check dev dependencies
@@ -114,7 +120,10 @@ fn test_parse_realistic_package_json() {
     assert_eq!(typescript.version, "^5.3.0");
 
     // Check peer dependencies (marked as optional)
-    let peer_react = deps.iter().find(|d| d.name == "react" && d.optional).unwrap();
+    let peer_react = deps
+        .iter()
+        .find(|d| d.name == "react" && d.optional)
+        .unwrap();
     assert_eq!(peer_react.version, ">=16.8.0");
 }
 
@@ -232,11 +241,26 @@ wildcard = "1.*"
     let deps = parser.parse(cargo_content);
 
     assert_eq!(deps.len(), 5);
-    assert_eq!(deps.iter().find(|d| d.name == "caret").unwrap().version, "^1.0");
-    assert_eq!(deps.iter().find(|d| d.name == "tilde").unwrap().version, "~1.0.0");
-    assert_eq!(deps.iter().find(|d| d.name == "exact").unwrap().version, "=1.0.0");
-    assert_eq!(deps.iter().find(|d| d.name == "range").unwrap().version, ">=1.0, <2.0");
-    assert_eq!(deps.iter().find(|d| d.name == "wildcard").unwrap().version, "1.*");
+    assert_eq!(
+        deps.iter().find(|d| d.name == "caret").unwrap().version,
+        "^1.0"
+    );
+    assert_eq!(
+        deps.iter().find(|d| d.name == "tilde").unwrap().version,
+        "~1.0.0"
+    );
+    assert_eq!(
+        deps.iter().find(|d| d.name == "exact").unwrap().version,
+        "=1.0.0"
+    );
+    assert_eq!(
+        deps.iter().find(|d| d.name == "range").unwrap().version,
+        ">=1.0, <2.0"
+    );
+    assert_eq!(
+        deps.iter().find(|d| d.name == "wildcard").unwrap().version,
+        "1.*"
+    );
 }
 
 /// Test parsing npm packages with various version formats
@@ -258,10 +282,22 @@ fn test_npm_version_formats() {
     let deps = parser.parse(content);
 
     assert_eq!(deps.len(), 7);
-    assert_eq!(deps.iter().find(|d| d.name == "caret").unwrap().version, "^1.0.0");
-    assert_eq!(deps.iter().find(|d| d.name == "range").unwrap().version, ">=1.0.0 <2.0.0");
-    assert_eq!(deps.iter().find(|d| d.name == "latest").unwrap().version, "*");
-    assert_eq!(deps.iter().find(|d| d.name == "tag").unwrap().version, "latest");
+    assert_eq!(
+        deps.iter().find(|d| d.name == "caret").unwrap().version,
+        "^1.0.0"
+    );
+    assert_eq!(
+        deps.iter().find(|d| d.name == "range").unwrap().version,
+        ">=1.0.0 <2.0.0"
+    );
+    assert_eq!(
+        deps.iter().find(|d| d.name == "latest").unwrap().version,
+        "*"
+    );
+    assert_eq!(
+        deps.iter().find(|d| d.name == "tag").unwrap().version,
+        "latest"
+    );
 }
 
 /// Test that positions are correctly tracked

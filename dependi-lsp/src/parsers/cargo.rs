@@ -34,7 +34,9 @@ impl Parser for CargoParser {
                 // If this is a table dependency like [dependencies.reqwest],
                 // we need to track it separately and NOT set current_section
                 if let Some(name) = section.table_dependency {
-                    let dep_section = section.dependency_section.unwrap_or(DependencySection::Normal);
+                    let dep_section = section
+                        .dependency_section
+                        .unwrap_or(DependencySection::Normal);
                     in_table_dependency = Some(TableDependency {
                         name,
                         section: dep_section,
@@ -189,7 +191,11 @@ fn parse_section_header(line: &str) -> Option<SectionHeader> {
     })
 }
 
-fn parse_dependency_line(line: &str, line_num: u32, section: DependencySection) -> Option<Dependency> {
+fn parse_dependency_line(
+    line: &str,
+    line_num: u32,
+    section: DependencySection,
+) -> Option<Dependency> {
     // Find the '=' sign
     let eq_pos = line.find('=')?;
 
@@ -263,7 +269,8 @@ fn parse_inline_table(line: &str, eq_pos: usize) -> Option<(String, u32, u32, bo
     let quote_start = after_eq.find(quote_char)?;
     let version_content_start = quote_start + 1;
     let version_content_end = after_eq[version_content_start..].find(quote_char)?;
-    let version = after_eq[version_content_start..version_content_start + version_content_end].to_string();
+    let version =
+        after_eq[version_content_start..version_content_start + version_content_end].to_string();
 
     // Calculate absolute positions
     let base_offset = eq_pos + 1 + version_pos + version_key.len() + eq_in_table + 1;

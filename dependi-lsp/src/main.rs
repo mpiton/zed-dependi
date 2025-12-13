@@ -5,7 +5,7 @@ mod providers;
 mod registries;
 
 use tower_lsp::{LspService, Server};
-use tracing_subscriber::{layer::SubscriberExt, util::SubscriberInitExt, EnvFilter};
+use tracing_subscriber::{EnvFilter, layer::SubscriberExt, util::SubscriberInitExt};
 
 use crate::backend::DependiBackend;
 

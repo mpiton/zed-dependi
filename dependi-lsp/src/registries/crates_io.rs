@@ -160,10 +160,7 @@ impl Registry for CratesIoRegistry {
             .and_then(|v| v.license.clone());
 
         // Check if any version is yanked
-        let yanked = crate_response
-            .versions
-            .first()
-            .is_some_and(|v| v.yanked);
+        let yanked = crate_response.versions.first().is_some_and(|v| v.yanked);
 
         Ok(VersionInfo {
             latest: latest_stable,

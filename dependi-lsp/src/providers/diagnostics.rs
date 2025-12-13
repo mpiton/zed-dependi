@@ -4,7 +4,7 @@ use tower_lsp::lsp_types::*;
 
 use crate::cache::MemoryCache;
 use crate::parsers::Dependency;
-use crate::providers::inlay_hints::{compare_versions, VersionStatus};
+use crate::providers::inlay_hints::{VersionStatus, compare_versions};
 
 /// Create diagnostics for a list of dependencies
 pub fn create_diagnostics(
@@ -28,31 +28,26 @@ fn create_diagnostic_for_dependency(
     let version_info = cache.get(&cache_key)?;
 
     match compare_versions(&dep.version, &version_info) {
-        VersionStatus::UpdateAvailable(new_version) => {
-            Some(Diagnostic {
-                range: Range {
-                    start: Position {
-                        line: dep.line,
-                        character: dep.version_start,
-                    },
-                    end: Position {
-                        line: dep.line,
-                        character: dep.version_end,
-                    },
+        VersionStatus::UpdateAvailable(new_version) => Some(Diagnostic {
+            range: Range {
+                start: Position {
+                    line: dep.line,
+                    character: dep.version_start,
                 },
-                severity: Some(DiagnosticSeverity::HINT),
-                code: Some(NumberOrString::String("outdated".to_string())),
-                source: Some("dependi".to_string()),
-                message: format!(
-                    "Update available: {} → {}",
-                    dep.version, new_version
-                ),
-                related_information: None,
-                tags: None,
-                code_description: None,
-                data: None,
-            })
-        }
+                end: Position {
+                    line: dep.line,
+                    character: dep.version_end,
+                },
+            },
+            severity: Some(DiagnosticSeverity::HINT),
+            code: Some(NumberOrString::String("outdated".to_string())),
+            source: Some("dependi".to_string()),
+            message: format!("Update available: {} → {}", dep.version, new_version),
+            related_information: None,
+            tags: None,
+            code_description: None,
+            data: None,
+        }),
         VersionStatus::UpToDate | VersionStatus::Unknown => None,
     }
 }

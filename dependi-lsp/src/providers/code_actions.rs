@@ -7,7 +7,7 @@ use tower_lsp::lsp_types::*;
 use crate::backend::FileType;
 use crate::cache::MemoryCache;
 use crate::parsers::Dependency;
-use crate::providers::inlay_hints::{compare_versions, VersionStatus};
+use crate::providers::inlay_hints::{VersionStatus, compare_versions};
 
 /// Create code actions for dependencies in the given range
 pub fn create_code_actions(
@@ -132,18 +132,19 @@ mod tests {
         let deps = vec![create_test_dependency("serde", "1.0.0", 5)];
         let uri = Url::parse("file:///test/Cargo.toml").unwrap();
         let range = Range {
-            start: Position { line: 0, character: 0 },
-            end: Position { line: 10, character: 0 },
+            start: Position {
+                line: 0,
+                character: 0,
+            },
+            end: Position {
+                line: 10,
+                character: 0,
+            },
         };
 
-        let actions = create_code_actions(
-            &deps,
-            &cache,
-            &uri,
-            range,
-            FileType::Cargo,
-            |name| format!("test:{}", name),
-        );
+        let actions = create_code_actions(&deps, &cache, &uri, range, FileType::Cargo, |name| {
+            format!("test:{}", name)
+        });
 
         assert_eq!(actions.len(), 1);
         match &actions[0] {
@@ -169,18 +170,19 @@ mod tests {
         let deps = vec![create_test_dependency("serde", "1.0.0", 5)];
         let uri = Url::parse("file:///test/Cargo.toml").unwrap();
         let range = Range {
-            start: Position { line: 0, character: 0 },
-            end: Position { line: 10, character: 0 },
+            start: Position {
+                line: 0,
+                character: 0,
+            },
+            end: Position {
+                line: 10,
+                character: 0,
+            },
         };
 
-        let actions = create_code_actions(
-            &deps,
-            &cache,
-            &uri,
-            range,
-            FileType::Cargo,
-            |name| format!("test:{}", name),
-        );
+        let actions = create_code_actions(&deps, &cache, &uri, range, FileType::Cargo, |name| {
+            format!("test:{}", name)
+        });
 
         assert_eq!(actions.len(), 0);
     }
