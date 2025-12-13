@@ -225,7 +225,7 @@ Configure Dependi in your Zed `settings.json`:
 
 ## Contributing
 
-Contributions are welcome! Please see [TASKS.md](TASKS.md) for the current task list and priorities.
+Contributions are welcome! Please open an issue or submit a pull request.
 
 ## License
 
