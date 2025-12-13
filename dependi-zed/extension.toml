@@ -13,4 +13,4 @@ name = "Dependi LSP"
 # - JSON: package.json, composer.json
 # - Go: go.mod
 # - Plain Text: requirements.txt (Python)
-languages = ["TOML", "JSON", "Go", "Plain Text"]
+languages = ["TOML", "JSON", "Go Mod", "Plain Text"]
