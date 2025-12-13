@@ -1,5 +1,6 @@
 mod backend;
 mod cache;
+mod config;
 mod parsers;
 mod providers;
 mod registries;

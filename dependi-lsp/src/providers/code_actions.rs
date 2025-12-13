@@ -5,14 +5,14 @@ use std::collections::HashMap;
 use tower_lsp::lsp_types::*;
 
 use crate::backend::FileType;
-use crate::cache::MemoryCache;
+use crate::cache::Cache;
 use crate::parsers::Dependency;
 use crate::providers::inlay_hints::{VersionStatus, compare_versions};
 
 /// Create code actions for dependencies in the given range
 pub fn create_code_actions(
     dependencies: &[Dependency],
-    cache: &MemoryCache,
+    cache: &impl Cache,
     uri: &Url,
     range: Range,
     file_type: FileType,
@@ -28,7 +28,7 @@ pub fn create_code_actions(
 /// Create an "Update to X.Y.Z" code action for a dependency
 fn create_update_action(
     dep: &Dependency,
-    cache: &MemoryCache,
+    cache: &impl Cache,
     uri: &Url,
     file_type: FileType,
     cache_key_fn: impl Fn(&str) -> String,
@@ -102,6 +102,7 @@ fn format_version(version: &str, file_type: FileType) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::cache::MemoryCache;
     use crate::registries::VersionInfo;
 
     fn create_test_dependency(name: &str, version: &str, line: u32) -> Dependency {

@@ -1,11 +1,12 @@
-use std::sync::Arc;
+use std::sync::{Arc, RwLock};
 
 use dashmap::DashMap;
 use tower_lsp::jsonrpc::Result;
 use tower_lsp::lsp_types::*;
 use tower_lsp::{Client, LanguageServer};
 
-use crate::cache::MemoryCache;
+use crate::cache::HybridCache;
+use crate::config::Config;
 use crate::parsers::cargo::CargoParser;
 use crate::parsers::go::GoParser;
 use crate::parsers::npm::NpmParser;
@@ -43,10 +44,12 @@ struct DocumentState {
 
 pub struct DependiBackend {
     client: Client,
+    /// Configuration
+    config: RwLock<Config>,
     /// Cache for documents and their parsed state
     documents: DashMap<Url, DocumentState>,
     /// Cache for version information (keyed by "registry:package")
-    version_cache: Arc<MemoryCache>,
+    version_cache: Arc<HybridCache>,
     /// Parsers
     cargo_parser: CargoParser,
     npm_parser: NpmParser,
@@ -65,8 +68,9 @@ impl DependiBackend {
     pub fn new(client: Client) -> Self {
         Self {
             client,
+            config: RwLock::new(Config::default()),
             documents: DashMap::new(),
-            version_cache: Arc::new(MemoryCache::new()),
+            version_cache: Arc::new(HybridCache::new()),
             cargo_parser: CargoParser::new(),
             npm_parser: NpmParser::new(),
             python_parser: PythonParser::new(),
@@ -239,14 +243,21 @@ impl DependiBackend {
             },
         );
 
-        // Publish diagnostics
-        let diagnostics = create_diagnostics(&dependencies, &self.version_cache, |name| {
-            Self::cache_key(file_type, name)
-        });
+        // Publish diagnostics (if enabled)
+        let diagnostics_enabled = self
+            .config
+            .read()
+            .map(|c| c.diagnostics.enabled)
+            .unwrap_or(true);
+        if diagnostics_enabled {
+            let diagnostics = create_diagnostics(&dependencies, &self.version_cache, |name| {
+                Self::cache_key(file_type, name)
+            });
 
-        self.client
-            .publish_diagnostics(uri.clone(), diagnostics, None)
-            .await;
+            self.client
+                .publish_diagnostics(uri.clone(), diagnostics, None)
+                .await;
+        }
 
         // Refresh inlay hints
         self.client
@@ -258,7 +269,16 @@ impl DependiBackend {
 
 #[tower_lsp::async_trait]
 impl LanguageServer for DependiBackend {
-    async fn initialize(&self, _: InitializeParams) -> Result<InitializeResult> {
+    async fn initialize(&self, params: InitializeParams) -> Result<InitializeResult> {
+        // Parse configuration from initialization options
+        let config = Config::from_init_options(params.initialization_options);
+        tracing::info!("Configuration: {:?}", config);
+
+        // Store the configuration
+        if let Ok(mut cfg) = self.config.write() {
+            *cfg = config;
+        }
+
         Ok(InitializeResult {
             server_info: Some(ServerInfo {
                 name: "dependi-lsp".to_string(),
@@ -330,6 +350,15 @@ impl LanguageServer for DependiBackend {
     }
 
     async fn inlay_hint(&self, params: InlayHintParams) -> Result<Option<Vec<InlayHint>>> {
+        // Check if inlay hints are enabled
+        let config = self.config.read().unwrap();
+        if !config.inlay_hints.enabled {
+            return Ok(Some(vec![]));
+        }
+        let show_up_to_date = config.inlay_hints.show_up_to_date;
+        let ignored_packages = config.ignore.clone();
+        drop(config);
+
         let uri = &params.text_document.uri;
 
         let Some(doc) = self.documents.get(uri) else {
@@ -345,10 +374,39 @@ impl LanguageServer for DependiBackend {
                 let line = dep.line;
                 line >= params.range.start.line && line <= params.range.end.line
             })
-            .map(|dep| {
+            .filter(|dep| {
+                // Skip ignored packages
+                !ignored_packages.iter().any(|pattern| {
+                    if pattern.contains('*') {
+                        let parts: Vec<&str> = pattern.split('*').collect();
+                        if parts.len() == 2 {
+                            dep.name.starts_with(parts[0]) && dep.name.ends_with(parts[1])
+                        } else {
+                            dep.name.starts_with(parts[0])
+                        }
+                    } else {
+                        dep.name == *pattern
+                    }
+                })
+            })
+            .filter_map(|dep| {
                 let cache_key = Self::cache_key(file_type, &dep.name);
                 let version_info = self.version_cache.get(&cache_key);
-                create_inlay_hint(dep, version_info.as_ref())
+                let hint = create_inlay_hint(dep, version_info.as_ref());
+
+                // Optionally filter out up-to-date hints
+                if !show_up_to_date {
+                    let label_text = match &hint.label {
+                        InlayHintLabel::String(s) => s.clone(),
+                        InlayHintLabel::LabelParts(parts) => {
+                            parts.iter().map(|p| p.value.as_str()).collect()
+                        }
+                    };
+                    if label_text.contains('✓') {
+                        return None;
+                    }
+                }
+                Some(hint)
             })
             .collect();
 

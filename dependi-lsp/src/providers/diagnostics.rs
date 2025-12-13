@@ -2,14 +2,14 @@
 
 use tower_lsp::lsp_types::*;
 
-use crate::cache::MemoryCache;
+use crate::cache::Cache;
 use crate::parsers::Dependency;
 use crate::providers::inlay_hints::{VersionStatus, compare_versions};
 
 /// Create diagnostics for a list of dependencies
 pub fn create_diagnostics(
     dependencies: &[Dependency],
-    cache: &MemoryCache,
+    cache: &impl Cache,
     cache_key_fn: impl Fn(&str) -> String,
 ) -> Vec<Diagnostic> {
     dependencies
@@ -21,7 +21,7 @@ pub fn create_diagnostics(
 /// Create a diagnostic for a single dependency if it's outdated
 fn create_diagnostic_for_dependency(
     dep: &Dependency,
-    cache: &MemoryCache,
+    cache: &impl Cache,
     cache_key_fn: impl Fn(&str) -> String,
 ) -> Option<Diagnostic> {
     let cache_key = cache_key_fn(&dep.name);
@@ -55,6 +55,7 @@ fn create_diagnostic_for_dependency(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::cache::MemoryCache;
     use crate::registries::VersionInfo;
 
     fn create_test_dependency(name: &str, version: &str, line: u32) -> Dependency {

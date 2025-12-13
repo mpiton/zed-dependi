@@ -2,14 +2,14 @@
 
 use tower_lsp::lsp_types::*;
 
-use crate::cache::MemoryCache;
+use crate::cache::Cache;
 use crate::parsers::Dependency;
 
 /// Get completions for a position in the document
 pub fn get_completions(
     dependencies: &[Dependency],
     position: Position,
-    cache: &MemoryCache,
+    cache: &impl Cache,
     cache_key_fn: impl Fn(&str) -> String,
 ) -> Option<Vec<CompletionItem>> {
     // Find if we're inside a version field
@@ -50,6 +50,7 @@ pub fn get_completions(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::cache::MemoryCache;
     use crate::registries::VersionInfo;
 
     fn create_test_dependency(name: &str, version: &str, line: u32) -> Dependency {

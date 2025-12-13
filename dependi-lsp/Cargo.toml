@@ -27,3 +27,5 @@ tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter"] }
 anyhow = "1"
 thiserror = "2"
+rusqlite = { version = "0.32", features = ["bundled"] }
+dirs = "6"

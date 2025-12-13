@@ -5,6 +5,7 @@
 
 pub mod backend;
 pub mod cache;
+pub mod config;
 pub mod parsers;
 pub mod providers;
 pub mod registries;
