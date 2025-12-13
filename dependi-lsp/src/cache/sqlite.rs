@@ -128,7 +128,6 @@ impl SqliteCache {
         )?;
         Ok(())
     }
-
 }
 
 /// Get current Unix timestamp
