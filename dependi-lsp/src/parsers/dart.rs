@@ -119,8 +119,7 @@ fn parse_dart_dependency_line(line: &str, line_num: u32, dev: bool) -> Option<De
     }
 
     // Skip if it's a complex dependency (starts with { or contains special keys)
-    if version_part.starts_with('{')
-        || !version_part.starts_with('^') && version_part.contains(':')
+    if version_part.starts_with('{') || !version_part.starts_with('^') && version_part.contains(':')
     {
         return None;
     }
