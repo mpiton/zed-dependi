@@ -33,3 +33,6 @@ TASKS.md
 
 # Test files
 test-files/
+
+# Local release builds
+dependi-lsp/release/
