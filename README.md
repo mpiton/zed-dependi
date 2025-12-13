@@ -4,6 +4,8 @@ Dependency management extension for the [Zed](https://zed.dev) editor.
 
 **Version:** 0.2.0
 
+![Demo](docs/demo.gif)
+
 ## Features
 
 - **Inlay Hints**: See latest versions inline next to your dependencies
