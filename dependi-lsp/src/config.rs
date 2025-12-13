@@ -102,6 +102,19 @@ impl Default for SecurityConfig {
     }
 }
 
+impl SecurityConfig {
+    /// Parse minimum severity level to VulnerabilitySeverity
+    pub fn min_severity_level(&self) -> crate::registries::VulnerabilitySeverity {
+        use crate::registries::VulnerabilitySeverity;
+        match self.min_severity.to_lowercase().as_str() {
+            "critical" => VulnerabilitySeverity::Critical,
+            "high" => VulnerabilitySeverity::High,
+            "medium" => VulnerabilitySeverity::Medium,
+            _ => VulnerabilitySeverity::Low,
+        }
+    }
+}
+
 impl Config {
     /// Parse configuration from initialization options
     pub fn from_init_options(options: Option<serde_json::Value>) -> Self {

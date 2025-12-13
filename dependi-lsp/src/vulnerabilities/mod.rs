@@ -1,14 +1,10 @@
 //! Vulnerability scanning for dependencies
 //!
-//! This module provides vulnerability detection using:
-//! - OSV.dev API (primary source for all ecosystems)
-//! - RustSec crate (additional Rust-specific details)
-
-use crate::registries::Vulnerability;
+//! This module provides vulnerability detection using OSV.dev API
+//! as the primary source for all ecosystems.
 
 pub mod cache;
 pub mod osv;
-pub mod rustsec_client;
 
 /// Ecosystem identifiers for vulnerability sources
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
@@ -53,17 +49,4 @@ pub struct VulnerabilityQuery {
     pub version: String,
     /// Target ecosystem
     pub ecosystem: Ecosystem,
-}
-
-/// Trait for vulnerability data sources
-#[allow(async_fn_in_trait, dead_code)]
-pub trait VulnerabilitySource: Send + Sync {
-    /// Query vulnerabilities for a single package
-    async fn query(&self, query: &VulnerabilityQuery) -> anyhow::Result<Vec<Vulnerability>>;
-
-    /// Batch query for multiple packages (more efficient)
-    async fn query_batch(
-        &self,
-        queries: &[VulnerabilityQuery],
-    ) -> anyhow::Result<Vec<Vec<Vulnerability>>>;
 }

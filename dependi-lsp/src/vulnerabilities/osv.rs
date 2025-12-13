@@ -9,7 +9,7 @@ use std::time::Duration;
 use reqwest::Client;
 use serde::{Deserialize, Serialize};
 
-use super::{VulnerabilityQuery, VulnerabilitySource};
+use super::VulnerabilityQuery;
 use crate::registries::{Vulnerability, VulnerabilitySeverity};
 
 const OSV_API_BASE: &str = "https://api.osv.dev/v1";
@@ -118,36 +118,9 @@ fn parse_cvss_severity(score: &str) -> VulnerabilitySeverity {
     VulnerabilitySeverity::Medium
 }
 
-impl VulnerabilitySource for OsvClient {
-    async fn query(&self, query: &VulnerabilityQuery) -> anyhow::Result<Vec<Vulnerability>> {
-        let request = OsvQueryRequest {
-            package: OsvPackage {
-                name: query.package_name.clone(),
-                ecosystem: query.ecosystem.as_osv_str().to_string(),
-            },
-            version: Some(query.version.clone()),
-        };
-
-        let url = format!("{}/query", self.base_url);
-        let response = self.client.post(&url).json(&request).send().await?;
-
-        if !response.status().is_success() {
-            anyhow::bail!("OSV API error: {}", response.status());
-        }
-
-        let osv_response: OsvQueryResponse = response.json().await?;
-
-        let vulns = osv_response
-            .vulns
-            .unwrap_or_default()
-            .iter()
-            .map(Self::convert_vulnerability)
-            .collect();
-
-        Ok(vulns)
-    }
-
-    async fn query_batch(
+impl OsvClient {
+    /// Batch query for multiple packages (more efficient than single queries)
+    pub async fn query_batch(
         &self,
         queries: &[VulnerabilityQuery],
     ) -> anyhow::Result<Vec<Vec<Vulnerability>>> {

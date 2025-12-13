@@ -1,14 +1,14 @@
-//! Vulnerability cache with configurable TTL
+//! Vulnerability cache for tracking queried packages
 //!
-//! Provides in-memory caching for vulnerability data with a default
-//! 6-hour TTL to reduce API calls.
+//! Tracks which packages have been queried for vulnerabilities to avoid
+//! redundant API calls. The actual vulnerability data is stored in the
+//! version cache alongside version information.
 
 use std::time::{Duration, Instant};
 
 use dashmap::DashMap;
 
 use super::Ecosystem;
-use crate::registries::Vulnerability;
 
 /// Default TTL for vulnerability cache (6 hours)
 const DEFAULT_VULN_CACHE_TTL: Duration = Duration::from_secs(6 * 3600);
@@ -33,31 +33,21 @@ impl VulnCacheKey {
             version: version.to_string(),
         }
     }
-
-    /// Convert to a string key for SQLite storage
-    #[allow(dead_code)]
-    pub fn to_sqlite_key(&self) -> String {
-        format!(
-            "vuln:{}:{}:{}",
-            self.ecosystem.as_osv_str(),
-            self.package_name,
-            self.version
-        )
-    }
 }
 
-/// Entry in the vulnerability cache
+/// Tracks when a package was queried for vulnerabilities
 struct VulnCacheEntry {
-    /// Cached vulnerabilities
-    #[allow(dead_code)]
-    vulnerabilities: Vec<Vulnerability>,
     /// When the entry was inserted
     inserted_at: Instant,
 }
 
-/// In-memory vulnerability cache with TTL
+/// Tracks which packages have been queried for vulnerabilities
+///
+/// This is a "seen set" with TTL - it prevents redundant API calls to OSV.dev
+/// by tracking which package@version combinations have already been queried.
+/// The actual vulnerability data is stored in the version cache.
 pub struct VulnerabilityCache {
-    /// Cache entries
+    /// Cache entries (package key -> query timestamp)
     entries: DashMap<VulnCacheKey, VulnCacheEntry>,
     /// Cache TTL
     ttl: Duration,
@@ -72,8 +62,8 @@ impl VulnerabilityCache {
         }
     }
 
-    /// Create a cache with custom TTL
-    #[allow(dead_code)]
+    /// Create a cache with custom TTL in seconds
+    #[cfg(test)]
     pub fn with_ttl(ttl_secs: u64) -> Self {
         Self {
             entries: DashMap::new(),
@@ -81,30 +71,17 @@ impl VulnerabilityCache {
         }
     }
 
-    /// Get vulnerabilities from cache if present and not expired
-    #[allow(dead_code)]
-    pub fn get(&self, key: &VulnCacheKey) -> Option<Vec<Vulnerability>> {
-        self.entries.get(key).and_then(|entry| {
-            if entry.inserted_at.elapsed() < self.ttl {
-                Some(entry.vulnerabilities.clone())
-            } else {
-                None
-            }
-        })
-    }
-
-    /// Insert vulnerabilities into cache
-    pub fn insert(&self, key: VulnCacheKey, vulnerabilities: Vec<Vulnerability>) {
+    /// Mark a package as having been queried for vulnerabilities
+    pub fn insert(&self, key: VulnCacheKey) {
         self.entries.insert(
             key,
             VulnCacheEntry {
-                vulnerabilities,
                 inserted_at: Instant::now(),
             },
         );
     }
 
-    /// Check if a key is in the cache and not expired
+    /// Check if a package has been queried (and the query hasn't expired)
     pub fn contains(&self, key: &VulnCacheKey) -> bool {
         self.entries
             .get(key)
@@ -112,26 +89,26 @@ impl VulnerabilityCache {
     }
 
     /// Remove expired entries from cache
-    #[allow(dead_code)]
+    #[cfg(test)]
     pub fn cleanup(&self) {
         self.entries
             .retain(|_, entry| entry.inserted_at.elapsed() < self.ttl);
     }
 
     /// Clear all entries from cache
-    #[allow(dead_code)]
+    #[cfg(test)]
     pub fn clear(&self) {
         self.entries.clear();
     }
 
     /// Get the number of entries in the cache
-    #[allow(dead_code)]
+    #[cfg(test)]
     pub fn len(&self) -> usize {
         self.entries.len()
     }
 
     /// Check if the cache is empty
-    #[allow(dead_code)]
+    #[cfg(test)]
     pub fn is_empty(&self) -> bool {
         self.entries.is_empty()
     }
@@ -146,36 +123,14 @@ impl Default for VulnerabilityCache {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::registries::VulnerabilitySeverity;
 
     #[test]
-    fn test_cache_insert_and_get() {
+    fn test_cache_insert_and_contains() {
         let cache = VulnerabilityCache::new();
         let key = VulnCacheKey::new(Ecosystem::Npm, "lodash", "4.17.0");
 
-        let vulns = vec![Vulnerability {
-            id: "CVE-2021-23337".to_string(),
-            severity: VulnerabilitySeverity::High,
-            description: "Prototype pollution".to_string(),
-            url: Some("https://nvd.nist.gov/vuln/detail/CVE-2021-23337".to_string()),
-        }];
-
-        cache.insert(key.clone(), vulns.clone());
-
-        let retrieved = cache.get(&key).unwrap();
-        assert_eq!(retrieved.len(), 1);
-        assert_eq!(retrieved[0].id, "CVE-2021-23337");
-    }
-
-    #[test]
-    fn test_cache_contains() {
-        let cache = VulnerabilityCache::new();
-        let key = VulnCacheKey::new(Ecosystem::CratesIo, "serde", "1.0.0");
-
         assert!(!cache.contains(&key));
-
-        cache.insert(key.clone(), vec![]);
-
+        cache.insert(key.clone());
         assert!(cache.contains(&key));
     }
 
@@ -184,17 +139,11 @@ mod tests {
         let cache = VulnerabilityCache::new();
         let key = VulnCacheKey::new(Ecosystem::PyPI, "requests", "2.28.0");
 
-        cache.insert(key.clone(), vec![]);
+        cache.insert(key.clone());
         assert_eq!(cache.len(), 1);
 
         cache.clear();
         assert!(cache.is_empty());
-    }
-
-    #[test]
-    fn test_cache_key_sqlite() {
-        let key = VulnCacheKey::new(Ecosystem::Npm, "lodash", "4.17.21");
-        assert_eq!(key.to_sqlite_key(), "vuln:npm:lodash:4.17.21");
     }
 
     #[test]

@@ -8,10 +8,14 @@ use crate::providers::inlay_hints::{VersionStatus, compare_versions};
 use crate::registries::{Vulnerability, VulnerabilitySeverity};
 
 /// Create diagnostics for a list of dependencies
+///
+/// The `min_severity` parameter filters vulnerabilities to only show those
+/// at or above the specified severity level.
 pub fn create_diagnostics(
     dependencies: &[Dependency],
     cache: &impl Cache,
     cache_key_fn: impl Fn(&str) -> String,
+    min_severity: Option<VulnerabilitySeverity>,
 ) -> Vec<Diagnostic> {
     let mut diagnostics = Vec::new();
 
@@ -25,12 +29,35 @@ pub fn create_diagnostics(
         let cache_key = cache_key_fn(&dep.name);
         if let Some(version_info) = cache.get(&cache_key) {
             for vuln in &version_info.vulnerabilities {
+                // Filter by minimum severity if specified
+                if let Some(min) = min_severity
+                    && !meets_severity_threshold(&vuln.severity, &min)
+                {
+                    continue;
+                }
                 diagnostics.push(create_vulnerability_diagnostic(dep, vuln));
             }
         }
     }
 
     diagnostics
+}
+
+/// Check if a vulnerability severity meets the minimum threshold
+fn meets_severity_threshold(severity: &VulnerabilitySeverity, min: &VulnerabilitySeverity) -> bool {
+    let severity_rank = match severity {
+        VulnerabilitySeverity::Critical => 4,
+        VulnerabilitySeverity::High => 3,
+        VulnerabilitySeverity::Medium => 2,
+        VulnerabilitySeverity::Low => 1,
+    };
+    let min_rank = match min {
+        VulnerabilitySeverity::Critical => 4,
+        VulnerabilitySeverity::High => 3,
+        VulnerabilitySeverity::Medium => 2,
+        VulnerabilitySeverity::Low => 1,
+    };
+    severity_rank >= min_rank
 }
 
 /// Create a diagnostic for an outdated dependency
@@ -166,7 +193,7 @@ mod tests {
         );
 
         let deps = vec![create_test_dependency("serde", "1.0.0", 5)];
-        let diagnostics = create_diagnostics(&deps, &cache, |name| format!("test:{}", name));
+        let diagnostics = create_diagnostics(&deps, &cache, |name| format!("test:{}", name), None);
 
         assert_eq!(diagnostics.len(), 1);
         assert!(diagnostics[0].message.contains("2.0.0"));
@@ -185,7 +212,7 @@ mod tests {
         );
 
         let deps = vec![create_test_dependency("serde", "1.0.0", 5)];
-        let diagnostics = create_diagnostics(&deps, &cache, |name| format!("test:{}", name));
+        let diagnostics = create_diagnostics(&deps, &cache, |name| format!("test:{}", name), None);
 
         assert_eq!(diagnostics.len(), 0);
     }
@@ -194,8 +221,28 @@ mod tests {
     fn test_no_diagnostic_no_cache() {
         let cache = MemoryCache::new();
         let deps = vec![create_test_dependency("unknown", "1.0.0", 5)];
-        let diagnostics = create_diagnostics(&deps, &cache, |name| format!("test:{}", name));
+        let diagnostics = create_diagnostics(&deps, &cache, |name| format!("test:{}", name), None);
 
         assert_eq!(diagnostics.len(), 0);
+    }
+
+    #[test]
+    fn test_severity_filtering() {
+        assert!(meets_severity_threshold(
+            &VulnerabilitySeverity::Critical,
+            &VulnerabilitySeverity::Low
+        ));
+        assert!(meets_severity_threshold(
+            &VulnerabilitySeverity::High,
+            &VulnerabilitySeverity::Medium
+        ));
+        assert!(!meets_severity_threshold(
+            &VulnerabilitySeverity::Low,
+            &VulnerabilitySeverity::High
+        ));
+        assert!(meets_severity_threshold(
+            &VulnerabilitySeverity::Medium,
+            &VulnerabilitySeverity::Medium
+        ));
     }
 }

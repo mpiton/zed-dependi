@@ -30,7 +30,7 @@ use crate::registries::pypi::PyPiRegistry;
 use crate::registries::{Registry, VersionInfo, VulnerabilitySeverity};
 use crate::vulnerabilities::cache::VulnerabilityCache;
 use crate::vulnerabilities::osv::OsvClient;
-use crate::vulnerabilities::{Ecosystem, VulnerabilityQuery, VulnerabilitySource};
+use crate::vulnerabilities::{Ecosystem, VulnerabilityQuery};
 
 /// File type for determining which parser/registry to use
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -243,14 +243,14 @@ impl DependiBackend {
             Ok(results) => {
                 // Update vulnerability cache and version_cache with results
                 for (query, vulns) in queries.iter().zip(results.iter()) {
+                    // Mark this package as queried in vuln_cache
                     let vuln_key =
                         VulnCacheKey::new(ecosystem, &query.package_name, &query.version);
-                    self.vuln_cache.insert(vuln_key, vulns.clone());
+                    self.vuln_cache.insert(vuln_key);
 
-                    // Also update version_cache if we have an entry
+                    // Store vulnerabilities in version_cache
                     let cache_key = Self::cache_key(file_type, &query.package_name);
                     if let Some(mut info) = self.version_cache.get(&cache_key) {
-                        // vulns are already crate::registries::Vulnerability
                         info.vulnerabilities = vulns.clone();
                         self.version_cache.insert(cache_key, info);
                     }
@@ -361,15 +361,35 @@ impl DependiBackend {
         );
 
         // Publish diagnostics (if enabled)
-        let diagnostics_enabled = self
+        let (diagnostics_enabled, security_show_diags, min_severity) = self
             .config
             .read()
-            .map(|c| c.diagnostics.enabled)
-            .unwrap_or(true);
+            .map(|c| {
+                (
+                    c.diagnostics.enabled,
+                    c.security.show_diagnostics,
+                    if c.security.show_diagnostics {
+                        Some(c.security.min_severity_level())
+                    } else {
+                        None
+                    },
+                )
+            })
+            .unwrap_or((true, true, None));
+
         if diagnostics_enabled {
-            let diagnostics = create_diagnostics(&dependencies, &self.version_cache, |name| {
-                Self::cache_key(file_type, name)
-            });
+            // Pass min_severity filter only if security diagnostics are enabled
+            let severity_filter = if security_show_diags {
+                min_severity
+            } else {
+                None
+            };
+            let diagnostics = create_diagnostics(
+                &dependencies,
+                &self.version_cache,
+                |name| Self::cache_key(file_type, name),
+                severity_filter,
+            );
 
             self.client
                 .publish_diagnostics(uri.clone(), diagnostics, None)
