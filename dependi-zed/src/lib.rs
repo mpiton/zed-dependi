@@ -16,12 +16,6 @@ impl DependiExtension {
             }
         }
 
-        // Try to find in PATH first (for local development)
-        if let Some(path) = zed::which("dependi-lsp") {
-            self.cached_binary_path = Some(path.clone());
-            return Ok(path);
-        }
-
         // Download from GitHub releases
         let (platform, arch) = zed::current_platform();
         let binary_name = match platform {
