@@ -88,13 +88,6 @@ impl VulnerabilityCache {
             .is_some_and(|entry| entry.inserted_at.elapsed() < self.ttl)
     }
 
-    /// Remove expired entries from cache
-    #[cfg(test)]
-    pub fn cleanup(&self) {
-        self.entries
-            .retain(|_, entry| entry.inserted_at.elapsed() < self.ttl);
-    }
-
     /// Clear all entries from cache
     #[cfg(test)]
     pub fn clear(&self) {

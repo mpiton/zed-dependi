@@ -52,20 +52,6 @@ impl CratesIoRegistry {
             base_url: "https://crates.io/api/v1".to_string(),
         })
     }
-
-    #[cfg(test)]
-    pub fn with_base_url(base_url: String) -> anyhow::Result<Self> {
-        let client = Client::builder()
-            .user_agent("dependi-lsp (https://github.com/mathieu/zed-dependi)")
-            .timeout(Duration::from_secs(10))
-            .build()?;
-
-        Ok(Self {
-            client,
-            rate_limiter: Arc::new(Mutex::new(RateLimiter::new(100.0))), // No rate limit for tests
-            base_url,
-        })
-    }
 }
 
 impl Default for CratesIoRegistry {

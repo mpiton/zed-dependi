@@ -34,20 +34,6 @@ impl OsvClient {
         })
     }
 
-    /// Create with custom base URL (for testing)
-    #[cfg(test)]
-    pub fn with_base_url(base_url: String) -> anyhow::Result<Self> {
-        let client = Client::builder()
-            .user_agent("dependi-lsp")
-            .timeout(Duration::from_secs(10))
-            .build()?;
-
-        Ok(Self {
-            client: Arc::new(client),
-            base_url,
-        })
-    }
-
     /// Convert OSV vulnerability to our Vulnerability struct
     fn convert_vulnerability(osv: &OsvVulnerability) -> Vulnerability {
         // Get CVE ID if available, otherwise use OSV ID

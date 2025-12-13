@@ -26,16 +26,6 @@ impl PyPiRegistry {
             base_url: "https://pypi.org/pypi".to_string(),
         })
     }
-
-    #[cfg(test)]
-    pub fn with_base_url(base_url: String) -> anyhow::Result<Self> {
-        let client = Client::builder()
-            .user_agent("dependi-lsp (https://github.com/mathieu/zed-dependi)")
-            .timeout(Duration::from_secs(10))
-            .build()?;
-
-        Ok(Self { client, base_url })
-    }
 }
 
 impl Default for PyPiRegistry {

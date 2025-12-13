@@ -27,19 +27,6 @@ impl NuGetRegistry {
             base_url: "https://api.nuget.org/v3".to_string(),
         })
     }
-
-    #[cfg(test)]
-    pub fn with_base_url(base_url: String) -> anyhow::Result<Self> {
-        let client = Client::builder()
-            .user_agent("dependi-lsp")
-            .timeout(Duration::from_secs(10))
-            .build()?;
-
-        Ok(Self {
-            client: Arc::new(client),
-            base_url,
-        })
-    }
 }
 
 impl Default for NuGetRegistry {
