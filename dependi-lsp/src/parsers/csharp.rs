@@ -23,10 +23,11 @@ impl Parser for CsharpParser {
             // Look for PackageReference elements
             // Format 1: <PackageReference Include="Package" Version="1.0.0" />
             // Format 2: <PackageReference Include="Package"><Version>1.0.0</Version></PackageReference>
-            if trimmed.contains("<PackageReference") && trimmed.contains("Include=") {
-                if let Some(dep) = parse_package_reference(line, line_num) {
-                    dependencies.push(dep);
-                }
+            if trimmed.contains("<PackageReference")
+                && trimmed.contains("Include=")
+                && let Some(dep) = parse_package_reference(line, line_num)
+            {
+                dependencies.push(dep);
             }
         }
 
