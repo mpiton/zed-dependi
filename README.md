@@ -11,7 +11,12 @@ Dependency management extension for the [Zed](https://zed.dev) editor.
 - **Inlay Hints**: See latest versions inline next to your dependencies
   - `✓` - Version is up to date
   - `⬆ X.Y.Z` - Update available
+  - `⚠ N` - Vulnerabilities detected
   - `?` - Could not fetch version info
+- **Vulnerability Scanning**: Real-time security scanning via OSV.dev
+  - CVE details in hover tooltips
+  - Severity-based diagnostics (Critical/High → ERROR, Medium → WARNING, Low → HINT)
+  - Generate JSON/Markdown vulnerability reports
 - **Diagnostics**: Outdated dependencies are highlighted with hints
 - **Code Actions**: Quick fix to update dependencies to latest version
 - **Hover Info**: Package descriptions, licenses, and links
@@ -28,6 +33,8 @@ Dependency management extension for the [Zed](https://zed.dev) editor.
 | Python | `requirements.txt`, `pyproject.toml` | PyPI | ✅ |
 | Go | `go.mod` | proxy.golang.org | ✅ |
 | PHP | `composer.json` | Packagist | ✅ |
+| Dart/Flutter | `pubspec.yaml` | pub.dev | ✅ |
+| C#/.NET | `*.csproj` | NuGet | ✅ |
 
 ## Installation
 
@@ -158,6 +165,12 @@ Configure Dependi in your Zed `settings.json`:
         "cache": {
           "ttl_secs": 3600
         },
+        "security": {
+          "enabled": true,
+          "show_in_hints": true,
+          "show_diagnostics": true,
+          "min_severity": "low"
+        },
         "ignore": ["internal-*", "test-pkg"]
       }
     }
@@ -174,6 +187,10 @@ Configure Dependi in your Zed `settings.json`:
 | `diagnostics.enabled` | bool | `true` | Enable/disable diagnostics |
 | `cache.ttl_secs` | number | `3600` | Cache TTL in seconds (1 hour) |
 | `ignore` | string[] | `[]` | Package names/patterns to ignore |
+| `security.enabled` | bool | `true` | Enable/disable vulnerability scanning |
+| `security.show_in_hints` | bool | `true` | Show vulnerability count in inlay hints |
+| `security.show_diagnostics` | bool | `true` | Show vulnerability diagnostics |
+| `security.min_severity` | string | `"low"` | Minimum severity to report (low/medium/high/critical) |
 
 ## How It Works
 
@@ -222,7 +239,7 @@ Configure Dependi in your Zed `settings.json`:
 
 - [x] **v0.1.0 (MVP)**: Cargo.toml + package.json support with inlay hints
 - [x] **v0.2.0**: Python/Go/PHP support, diagnostics, code actions, SQLite cache, configuration
-- [ ] **v0.3.0**: Vulnerability detection (RustSec, npm audit, OSV)
+- [x] **v0.3.0**: Vulnerability detection (OSV.dev), Dart/Flutter and C#/.NET support
 - [ ] **v1.0.0**: Publication to Zed Extensions marketplace
 
 ## Contributing
