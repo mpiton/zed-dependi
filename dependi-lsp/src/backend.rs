@@ -102,11 +102,6 @@ impl DependiBackend {
         }
     }
 
-    /// Check if a document is a supported dependency file
-    fn is_supported_file(uri: &Url) -> bool {
-        Self::detect_file_type(uri).is_some()
-    }
-
     /// Parse a document and extract dependencies
     fn parse_document(&self, uri: &Url, content: &str) -> Vec<Dependency> {
         match Self::detect_file_type(uri) {
@@ -282,7 +277,6 @@ impl LanguageServer for DependiBackend {
                 }),
                 ..Default::default()
             },
-            ..Default::default()
         })
     }
 

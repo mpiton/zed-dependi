@@ -75,10 +75,6 @@ impl Parser for PhpParser {
 
         dependencies
     }
-
-    fn file_patterns(&self) -> &[&str] {
-        &["composer.json"]
-    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq)]

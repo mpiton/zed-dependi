@@ -25,10 +25,10 @@ impl Parser for CargoParser {
             // Check for section headers
             if let Some(section) = parse_section_header(trimmed) {
                 // If we were parsing a table dependency, finalize it
-                if let Some(table_dep) = in_table_dependency.take() {
-                    if let Some(dep) = table_dep.into_dependency() {
-                        dependencies.push(dep);
-                    }
+                if let Some(table_dep) = in_table_dependency.take()
+                    && let Some(dep) = table_dep.into_dependency()
+                {
+                    dependencies.push(dep);
                 }
 
                 // If this is a table dependency like [dependencies.reqwest],
@@ -44,7 +44,6 @@ impl Parser for CargoParser {
                         version_line: 0,
                         version_start: 0,
                         version_end: 0,
-                        name_line: line_num,
                         name_start: 0,
                         name_end: 0,
                         optional: false,
@@ -62,20 +61,20 @@ impl Parser for CargoParser {
                 Some(s) => s,
                 None => {
                     // Check if we're in a table dependency section
-                    if let Some(ref mut table_dep) = in_table_dependency {
-                        if let Some((key, value, value_start, value_end)) = parse_key_value(line) {
-                            match key {
-                                "version" => {
-                                    table_dep.version = Some(unquote(&value));
-                                    table_dep.version_line = line_num;
-                                    table_dep.version_start = value_start;
-                                    table_dep.version_end = value_end;
-                                }
-                                "optional" => {
-                                    table_dep.optional = value.trim() == "true";
-                                }
-                                _ => {}
+                    if let Some(ref mut table_dep) = in_table_dependency
+                        && let Some((key, value, value_start, value_end)) = parse_key_value(line)
+                    {
+                        match key {
+                            "version" => {
+                                table_dep.version = Some(unquote(&value));
+                                table_dep.version_line = line_num;
+                                table_dep.version_start = value_start;
+                                table_dep.version_end = value_end;
                             }
+                            "optional" => {
+                                table_dep.optional = value.trim() == "true";
+                            }
+                            _ => {}
                         }
                     }
                     continue;
@@ -94,17 +93,13 @@ impl Parser for CargoParser {
         }
 
         // Finalize any remaining table dependency
-        if let Some(table_dep) = in_table_dependency {
-            if let Some(dep) = table_dep.into_dependency() {
-                dependencies.push(dep);
-            }
+        if let Some(table_dep) = in_table_dependency
+            && let Some(dep) = table_dep.into_dependency()
+        {
+            dependencies.push(dep);
         }
 
         dependencies
-    }
-
-    fn file_patterns(&self) -> &[&str] {
-        &["Cargo.toml"]
     }
 }
 
@@ -127,7 +122,6 @@ struct TableDependency {
     version_line: u32,
     version_start: u32,
     version_end: u32,
-    name_line: u32,
     name_start: u32,
     name_end: u32,
     optional: bool,

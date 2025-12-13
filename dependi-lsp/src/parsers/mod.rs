@@ -29,9 +29,6 @@ pub struct Dependency {
 pub trait Parser: Send + Sync {
     /// Parse the given file content and extract dependencies
     fn parse(&self, content: &str) -> Vec<Dependency>;
-
-    /// Returns the file patterns this parser handles (e.g., "Cargo.toml")
-    fn file_patterns(&self) -> &[&str];
 }
 
 pub mod cargo;

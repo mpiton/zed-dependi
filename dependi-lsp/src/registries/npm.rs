@@ -47,7 +47,6 @@ impl Default for NpmRegistry {
 // API response structures
 #[derive(Debug, Deserialize)]
 struct PackageResponse {
-    name: String,
     description: Option<String>,
     homepage: Option<String>,
     repository: Option<Repository>,

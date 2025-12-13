@@ -60,12 +60,13 @@ impl Parser for NpmParser {
             }
 
             // If we're looking for the opening brace of a section
-            if current_section.is_some() && !in_section_object {
-                if trimmed.starts_with('{') || trimmed == "{" {
-                    in_section_object = true;
-                    section_brace_depth = 1;
-                    continue;
-                }
+            if current_section.is_some()
+                && !in_section_object
+                && (trimmed.starts_with('{') || trimmed == "{")
+            {
+                in_section_object = true;
+                section_brace_depth = 1;
+                continue;
             }
 
             // Track brace depth within section
@@ -86,20 +87,15 @@ impl Parser for NpmParser {
             }
 
             // Parse dependency lines within sections
-            if let Some(section) = current_section {
-                if in_section_object {
-                    if let Some(dep) = parse_dependency_line(line, line_num, section) {
-                        dependencies.push(dep);
-                    }
-                }
+            if let Some(section) = current_section
+                && in_section_object
+                && let Some(dep) = parse_dependency_line(line, line_num, section)
+            {
+                dependencies.push(dep);
             }
         }
 
         dependencies
-    }
-
-    fn file_patterns(&self) -> &[&str] {
-        &["package.json"]
     }
 }
 

@@ -54,11 +54,6 @@ pub enum VulnerabilitySeverity {
 pub trait Registry: Send + Sync {
     /// Get version information for a package
     async fn get_version_info(&self, package_name: &str) -> anyhow::Result<VersionInfo>;
-
-    /// Get the latest version of a package
-    async fn get_latest_version(&self, package_name: &str) -> anyhow::Result<Option<String>> {
-        Ok(self.get_version_info(package_name).await?.latest)
-    }
 }
 
 pub mod crates_io;

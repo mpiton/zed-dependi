@@ -87,7 +87,6 @@ struct CrateInfo {
     description: Option<String>,
     homepage: Option<String>,
     repository: Option<String>,
-    max_version: String,
     max_stable_version: Option<String>,
 }
 
@@ -96,11 +95,6 @@ struct VersionEntry {
     num: String,
     yanked: bool,
     license: Option<String>,
-}
-
-#[derive(Debug, Deserialize)]
-struct VersionsOnlyResponse {
-    versions: Vec<VersionEntry>,
 }
 
 impl Registry for CratesIoRegistry {

@@ -48,8 +48,6 @@ impl Default for GoProxyRegistry {
 struct LatestInfo {
     #[serde(rename = "Version")]
     version: String,
-    #[serde(rename = "Time")]
-    time: Option<String>,
 }
 
 impl Registry for GoProxyRegistry {
@@ -77,14 +75,13 @@ impl Registry for GoProxyRegistry {
         // Find latest prerelease
         let latest_prerelease = sorted_versions.iter().find(|v| is_prerelease(v)).cloned();
 
-        // Build repository URL (for github.com modules)
-        let repository = if module_path.starts_with("github.com/") {
-            Some(format!("https://{}", module_path))
-        } else if module_path.starts_with("gitlab.com/") {
-            Some(format!("https://{}", module_path))
-        } else {
-            None
-        };
+        // Build repository URL for common hosts
+        let repository =
+            if module_path.starts_with("github.com/") || module_path.starts_with("gitlab.com/") {
+                Some(format!("https://{}", module_path))
+            } else {
+                None
+            };
 
         Ok(VersionInfo {
             latest: latest_stable,

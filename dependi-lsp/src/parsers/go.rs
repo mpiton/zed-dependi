@@ -48,18 +48,12 @@ impl Parser for GoParser {
             }
 
             // Parse lines inside require block
-            if in_require_block {
-                if let Some(dep) = parse_require_line(line, trimmed, line_num) {
-                    dependencies.push(dep);
-                }
+            if in_require_block && let Some(dep) = parse_require_line(line, trimmed, line_num) {
+                dependencies.push(dep);
             }
         }
 
         dependencies
-    }
-
-    fn file_patterns(&self) -> &[&str] {
-        &["go.mod"]
     }
 }
 

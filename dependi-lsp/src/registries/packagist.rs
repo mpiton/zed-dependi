@@ -53,24 +53,17 @@ struct PackagistResponse {
 #[derive(Debug, Clone, Deserialize)]
 struct VersionEntry {
     version: String,
-    version_normalized: Option<String>,
     description: Option<String>,
     homepage: Option<String>,
     license: Option<Vec<String>>,
     source: Option<SourceInfo>,
-    abandoned: Option<AbandonedStatus>,
+    /// Can be bool or string (replacement package name). We only care if it's truthy.
+    abandoned: Option<serde_json::Value>,
 }
 
 #[derive(Debug, Clone, Deserialize)]
 struct SourceInfo {
     url: Option<String>,
-}
-
-#[derive(Debug, Clone, Deserialize)]
-#[serde(untagged)]
-enum AbandonedStatus {
-    Bool(bool),
-    Replacement(String),
 }
 
 impl Registry for PackagistRegistry {
@@ -134,15 +127,10 @@ impl Registry for PackagistRegistry {
             .and_then(|s| s.url.clone())
             .map(|url| normalize_repo_url(&url));
 
-        // Check if deprecated/abandoned
+        // Check if deprecated/abandoned (truthy value = abandoned)
         let deprecated = latest_entry
             .and_then(|e| e.abandoned.as_ref())
-            .is_some_and(|a| {
-                matches!(
-                    a,
-                    AbandonedStatus::Bool(true) | AbandonedStatus::Replacement(_)
-                )
-            });
+            .is_some_and(|v| !matches!(v, serde_json::Value::Bool(false)));
 
         Ok(VersionInfo {
             latest: latest_stable,

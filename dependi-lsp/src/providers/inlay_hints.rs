@@ -44,7 +44,7 @@ pub fn create_inlay_hint(dep: &Dependency, version_info: Option<&VersionInfo>) -
         label: InlayHintLabel::String(format!(" {}", label)),
         kind: Some(InlayHintKind::PARAMETER),
         text_edits: None,
-        tooltip: tooltip.map(|t| tower_lsp::lsp_types::InlayHintTooltip::String(t)),
+        tooltip: tooltip.map(tower_lsp::lsp_types::InlayHintTooltip::String),
         padding_left: Some(true),
         padding_right: None,
         data: None,

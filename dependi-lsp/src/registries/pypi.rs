@@ -164,7 +164,7 @@ impl Registry for PyPiRegistry {
 /// - Lowercase
 /// - Replace underscores and dots with hyphens
 fn normalize_package_name(name: &str) -> String {
-    name.to_lowercase().replace('_', "-").replace('.', "-")
+    name.to_lowercase().replace(['_', '.'], "-")
 }
 
 /// Check if a version is a prerelease
