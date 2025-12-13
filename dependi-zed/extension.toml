@@ -1,0 +1,16 @@
+id = "dependi"
+name = "Dependi"
+description = "Dependency management for Zed - version hints, updates, and vulnerability detection"
+version = "0.1.0"
+schema_version = 1
+authors = ["Mathieu"]
+repository = "https://github.com/mpiton/zed-dependi"
+
+[language_servers.dependi]
+name = "Dependi LSP"
+# Supported file types:
+# - TOML: Cargo.toml, pyproject.toml
+# - JSON: package.json, composer.json
+# - Go: go.mod
+# - Plain Text: requirements.txt (Python)
+languages = ["TOML", "JSON", "Go", "Plain Text"]

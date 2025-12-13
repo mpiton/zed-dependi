@@ -1,0 +1,29 @@
+[package]
+name = "dependi-lsp"
+version = "0.1.0"
+edition = "2024"
+license = "MIT"
+description = "Language server for dependency management in Zed"
+authors = ["Mathieu"]
+
+[lib]
+name = "dependi_lsp"
+path = "src/lib.rs"
+
+[[bin]]
+name = "dependi-lsp"
+path = "src/main.rs"
+
+[dependencies]
+tower-lsp = "0.20"
+tokio = { version = "1", features = ["full"] }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+reqwest = { version = "0.12", features = ["json", "rustls-tls"], default-features = false }
+dashmap = "6"
+toml = "0.8"
+semver = "1"
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+anyhow = "1"
+thiserror = "2"

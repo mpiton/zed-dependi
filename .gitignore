@@ -1,0 +1,35 @@
+# Rust build artifacts
+/target/
+**/target/
+
+# Cargo.lock for binaries, but you may want to commit it
+# See https://doc.rust-lang.org/cargo/faq.html#why-have-cargolock-in-version-control
+# Cargo.lock
+
+# Backup files
+**/*.rs.bk
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+*~
+
+# OS files
+.DS_Store
+Thumbs.db
+
+# Logs
+*.log
+
+# Environment
+.env
+.env.local
+
+# Project docs (private)
+PRD.md
+TASKS.md
+
+# Test files
+test-files/

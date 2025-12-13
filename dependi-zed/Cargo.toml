@@ -1,0 +1,13 @@
+[package]
+name = "dependi-zed"
+version = "0.1.0"
+edition = "2024"
+license = "MIT"
+description = "Zed extension for dependency management"
+authors = ["Mathieu"]
+
+[lib]
+crate-type = ["cdylib"]
+
+[dependencies]
+zed_extension_api = "0.5"

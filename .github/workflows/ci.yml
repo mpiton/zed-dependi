@@ -1,0 +1,51 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Rust
+        uses: dtolnay/rust-action@stable
+
+      - name: Check formatting
+        run: |
+          cd dependi-lsp
+          cargo fmt --check
+
+      - name: Clippy
+        run: |
+          cd dependi-lsp
+          cargo clippy -- -D warnings
+
+      - name: Run tests
+        run: |
+          cd dependi-lsp
+          cargo test
+
+  build-extension:
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Rust
+        uses: dtolnay/rust-action@stable
+        with:
+          targets: wasm32-wasip1
+
+      - name: Build extension
+        run: |
+          cd dependi-zed
+          cargo build --release --target wasm32-wasip1
