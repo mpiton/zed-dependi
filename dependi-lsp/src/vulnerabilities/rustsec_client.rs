@@ -14,10 +14,12 @@ use crate::registries::Vulnerability;
 /// The rustsec crate API has changed significantly. For now, we rely on
 /// OSV.dev which aggregates RustSec advisories. This client can be
 /// implemented later for additional Rust-specific details like affected functions.
+#[allow(dead_code)]
 pub struct RustSecClient {
     _enabled: bool,
 }
 
+#[allow(dead_code)]
 impl RustSecClient {
     /// Create a new RustSec client
     pub fn new() -> Self {

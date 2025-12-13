@@ -35,6 +35,7 @@ impl VulnCacheKey {
     }
 
     /// Convert to a string key for SQLite storage
+    #[allow(dead_code)]
     pub fn to_sqlite_key(&self) -> String {
         format!(
             "vuln:{}:{}:{}",
@@ -48,6 +49,7 @@ impl VulnCacheKey {
 /// Entry in the vulnerability cache
 struct VulnCacheEntry {
     /// Cached vulnerabilities
+    #[allow(dead_code)]
     vulnerabilities: Vec<Vulnerability>,
     /// When the entry was inserted
     inserted_at: Instant,
@@ -71,6 +73,7 @@ impl VulnerabilityCache {
     }
 
     /// Create a cache with custom TTL
+    #[allow(dead_code)]
     pub fn with_ttl(ttl_secs: u64) -> Self {
         Self {
             entries: DashMap::new(),
@@ -79,6 +82,7 @@ impl VulnerabilityCache {
     }
 
     /// Get vulnerabilities from cache if present and not expired
+    #[allow(dead_code)]
     pub fn get(&self, key: &VulnCacheKey) -> Option<Vec<Vulnerability>> {
         self.entries.get(key).and_then(|entry| {
             if entry.inserted_at.elapsed() < self.ttl {
@@ -108,22 +112,26 @@ impl VulnerabilityCache {
     }
 
     /// Remove expired entries from cache
+    #[allow(dead_code)]
     pub fn cleanup(&self) {
         self.entries
             .retain(|_, entry| entry.inserted_at.elapsed() < self.ttl);
     }
 
     /// Clear all entries from cache
+    #[allow(dead_code)]
     pub fn clear(&self) {
         self.entries.clear();
     }
 
     /// Get the number of entries in the cache
+    #[allow(dead_code)]
     pub fn len(&self) -> usize {
         self.entries.len()
     }
 
     /// Check if the cache is empty
+    #[allow(dead_code)]
     pub fn is_empty(&self) -> bool {
         self.entries.is_empty()
     }

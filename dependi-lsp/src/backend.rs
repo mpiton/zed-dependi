@@ -46,7 +46,7 @@ pub enum FileType {
 
 impl FileType {
     /// Convert to vulnerability ecosystem
-    pub fn to_ecosystem(&self) -> Ecosystem {
+    pub fn to_ecosystem(self) -> Ecosystem {
         match self {
             FileType::Cargo => Ecosystem::CratesIo,
             FileType::Npm => Ecosystem::Npm,

@@ -56,7 +56,7 @@ pub struct VulnerabilityQuery {
 }
 
 /// Trait for vulnerability data sources
-#[allow(async_fn_in_trait)]
+#[allow(async_fn_in_trait, dead_code)]
 pub trait VulnerabilitySource: Send + Sync {
     /// Query vulnerabilities for a single package
     async fn query(&self, query: &VulnerabilityQuery) -> anyhow::Result<Vec<Vulnerability>>;
