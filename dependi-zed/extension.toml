@@ -1,7 +1,7 @@
 id = "dependi"
 name = "Dependi"
 description = "Dependency management for Zed - version hints, updates, and vulnerability detection"
-version = "0.1.0"
+version = "0.3.0"
 schema_version = 1
 authors = ["Mathieu Piton"]
 repository = "https://github.com/mpiton/zed-dependi"
@@ -13,4 +13,6 @@ name = "Dependi LSP"
 # - JSON: package.json, composer.json
 # - Go: go.mod
 # - Plain Text: requirements.txt (Python)
-languages = ["TOML", "JSON", "Go Mod", "Plain Text"]
+# - YAML: pubspec.yaml (Dart/Flutter)
+# - XML: *.csproj (C#/.NET)
+languages = ["TOML", "JSON", "Go Mod", "Plain Text", "YAML", "XML"]
