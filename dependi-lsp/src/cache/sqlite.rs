@@ -9,12 +9,12 @@ use rusqlite::{Connection, params};
 use crate::registries::VersionInfo;
 
 /// Default TTL for cache entries (1 hour)
-const DEFAULT_TTL_SECS: u64 = 3600;
+const DEFAULT_TTL_SECS: i64 = 3600;
 
 /// SQLite-based persistent cache
 pub struct SqliteCache {
     conn: Mutex<Connection>,
-    ttl_secs: u64,
+    ttl_secs: i64,
 }
 
 impl SqliteCache {
@@ -81,7 +81,7 @@ impl SqliteCache {
         let conn = self.conn.lock().unwrap();
         let now = current_timestamp();
 
-        let result: Result<(String, u64, u64), _> = conn.query_row(
+        let result: Result<(String, i64, i64), _> = conn.query_row(
             "SELECT data, inserted_at, ttl_secs FROM packages WHERE key = ?",
             [key],
             |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
@@ -131,11 +131,11 @@ impl SqliteCache {
 }
 
 /// Get current Unix timestamp
-fn current_timestamp() -> u64 {
+fn current_timestamp() -> i64 {
     SystemTime::now()
         .duration_since(UNIX_EPOCH)
         .unwrap_or_default()
-        .as_secs()
+        .as_secs() as i64
 }
 
 #[cfg(test)]
