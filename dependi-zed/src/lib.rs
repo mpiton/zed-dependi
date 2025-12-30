@@ -10,10 +10,10 @@ impl DependiExtension {
         language_server_id: &LanguageServerId,
     ) -> Result<String> {
         // Return cached path if valid
-        if let Some(path) = &self.cached_binary_path {
-            if std::fs::metadata(path).map(|m| m.is_file()).unwrap_or(false) {
-                return Ok(path.clone());
-            }
+        if let Some(path) = &self.cached_binary_path
+            && std::fs::metadata(path).map(|m| m.is_file()).unwrap_or(false)
+        {
+            return Ok(path.clone());
         }
 
         // Download from GitHub releases
