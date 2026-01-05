@@ -38,9 +38,15 @@ Dependency management extension for the [Zed](https://zed.dev) editor.
 
 ## Installation
 
-### From Zed Extensions (Coming Soon)
+### From Zed Extensions
 
-Once published, you'll be able to install directly from Zed's extension marketplace.
+1. Open Zed editor
+2. Press `Cmd+Shift+P` (Mac) or `Ctrl+Shift+P` (Linux/Windows)
+3. Type "extensions" and select `zed: extensions`
+4. Search for "Dependi"
+5. Click Install
+
+The extension will automatically download and install the language server.
 
 ### Manual Installation (Development)
 
@@ -240,7 +246,7 @@ Configure Dependi in your Zed `settings.json`:
 - [x] **v0.1.0 (MVP)**: Cargo.toml + package.json support with inlay hints
 - [x] **v0.2.0**: Python/Go/PHP support, diagnostics, code actions, SQLite cache, configuration
 - [x] **v0.3.0**: Vulnerability detection (OSV.dev), Dart/Flutter and C#/.NET support
-- [ ] **v1.0.0**: Publication to Zed Extensions marketplace
+- [x] **v1.0.0**: Published to Zed Extensions marketplace ✨
 
 ## Contributing
 
