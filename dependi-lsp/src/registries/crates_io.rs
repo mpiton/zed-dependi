@@ -150,8 +150,8 @@ impl Registry for CratesIoRegistry {
             homepage: crate_response.crate_info.homepage,
             repository: crate_response.crate_info.repository,
             license,
-            vulnerabilities: vec![], // TODO: Integrate RustSec
-            deprecated: false,
+            vulnerabilities: vec![], // Filled by OSV
+            deprecated: false,       // Filled by OSV
             yanked,
         })
     }

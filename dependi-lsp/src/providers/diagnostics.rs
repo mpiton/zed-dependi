@@ -29,18 +29,23 @@ pub fn create_diagnostics(
         let cache_key = cache_key_fn(&dep.name);
         if let Some(version_info) = cache.get(&cache_key) {
             if version_info.deprecated {
+                tracing::debug!(
+                    "Package {} {} is deprecated, creating diagnostic",
+                    dep.name,
+                    dep.version
+                );
                 diagnostics.push(create_deprecation_diagnostic(dep, &version_info));
-            }
-
-            // Add vulnerability diagnostics
-            for vuln in &version_info.vulnerabilities {
-                // Filter by minimum severity if specified
-                if let Some(min) = min_severity
-                    && !meets_severity_threshold(&vuln.severity, &min)
-                {
-                    continue;
+            } else {
+                // Add vulnerability diagnostics only if not deprecated
+                for vuln in &version_info.vulnerabilities {
+                    // Filter by minimum severity if specified
+                    if let Some(min) = min_severity
+                        && !meets_severity_threshold(&vuln.severity, &min)
+                    {
+                        continue;
+                    }
+                    diagnostics.push(create_vulnerability_diagnostic(dep, vuln));
                 }
-                diagnostics.push(create_vulnerability_diagnostic(dep, vuln));
             }
         }
     }
@@ -50,19 +55,7 @@ pub fn create_diagnostics(
 
 /// Check if a vulnerability severity meets the minimum threshold
 fn meets_severity_threshold(severity: &VulnerabilitySeverity, min: &VulnerabilitySeverity) -> bool {
-    let severity_rank = match severity {
-        VulnerabilitySeverity::Critical => 4,
-        VulnerabilitySeverity::High => 3,
-        VulnerabilitySeverity::Medium => 2,
-        VulnerabilitySeverity::Low => 1,
-    };
-    let min_rank = match min {
-        VulnerabilitySeverity::Critical => 4,
-        VulnerabilitySeverity::High => 3,
-        VulnerabilitySeverity::Medium => 2,
-        VulnerabilitySeverity::Low => 1,
-    };
-    severity_rank >= min_rank
+    severity.meets_threshold(min)
 }
 
 /// Create a diagnostic for an outdated dependency
@@ -433,6 +426,10 @@ mod tests {
             .collect();
 
         assert_eq!(deprecation_diags.len(), 1);
-        assert_eq!(vuln_diags.len(), 1);
+        assert_eq!(
+            vuln_diags.len(),
+            0,
+            "Deprecated packages should not show individual vulnerability diagnostics"
+        );
     }
 }

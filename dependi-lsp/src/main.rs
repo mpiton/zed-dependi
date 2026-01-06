@@ -95,8 +95,8 @@ async fn run_scan(
     use crate::registries::VulnerabilitySeverity;
     use crate::vulnerabilities::{Ecosystem, VulnerabilityQuery, osv::OsvClient};
 
-    // Read file
-    let content = match std::fs::read_to_string(&file) {
+    // Read file (using async I/O)
+    let content = match tokio::fs::read_to_string(&file).await {
         Ok(c) => c,
         Err(e) => {
             eprintln!("Error reading file: {}", e);
@@ -157,13 +157,8 @@ async fn run_scan(
         }
     };
 
-    // Parse minimum severity
-    let min_sev = match min_severity.to_lowercase().as_str() {
-        "critical" => VulnerabilitySeverity::Critical,
-        "high" => VulnerabilitySeverity::High,
-        "medium" => VulnerabilitySeverity::Medium,
-        _ => VulnerabilitySeverity::Low,
-    };
+    // Parse minimum severity using shared method
+    let min_sev = VulnerabilitySeverity::from_str_loose(&min_severity);
 
     // Filter and collect vulnerabilities
     let mut total_vulns = 0;
@@ -173,23 +168,10 @@ async fn run_scan(
     let mut low_count = 0;
     let mut vuln_details: Vec<serde_json::Value> = Vec::new();
 
-    for (dep, vulns) in dependencies.iter().zip(results.iter()) {
-        for vuln in vulns {
-            // Filter by severity
-            let severity_rank = match vuln.severity {
-                VulnerabilitySeverity::Critical => 4,
-                VulnerabilitySeverity::High => 3,
-                VulnerabilitySeverity::Medium => 2,
-                VulnerabilitySeverity::Low => 1,
-            };
-            let min_rank = match min_sev {
-                VulnerabilitySeverity::Critical => 4,
-                VulnerabilitySeverity::High => 3,
-                VulnerabilitySeverity::Medium => 2,
-                VulnerabilitySeverity::Low => 1,
-            };
-
-            if severity_rank < min_rank {
+    for (dep, result) in dependencies.iter().zip(results.iter()) {
+        for vuln in &result.vulnerabilities {
+            // Filter by severity using shared method
+            if !vuln.severity.meets_threshold(&min_sev) {
                 continue;
             }
 
@@ -205,7 +187,7 @@ async fn run_scan(
                 "package": dep.name,
                 "version": dep.version,
                 "id": vuln.id,
-                "severity": format!("{:?}", vuln.severity).to_lowercase(),
+                "severity": vuln.severity.as_str(),
                 "description": vuln.description,
                 "url": vuln.url
             }));

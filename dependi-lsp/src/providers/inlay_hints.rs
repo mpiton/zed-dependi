@@ -23,10 +23,16 @@ pub fn create_inlay_hint(dep: &Dependency, version_info: Option<&VersionInfo>) -
         None => VersionStatus::Unknown,
     };
 
-    // Check for vulnerabilities
+    // Check for vulnerabilities and deprecation
     let vuln_count = version_info
         .map(|info| info.vulnerabilities.len())
         .unwrap_or(0);
+
+    let is_deprecated = version_info.map(|info| info.deprecated).unwrap_or(false);
+
+    if is_deprecated {
+        tracing::debug!("Package {} {} is deprecated", dep.name, dep.version);
+    }
 
     let (label, tooltip) = create_hint_label_and_tooltip(&status, vuln_count, dep, version_info);
 

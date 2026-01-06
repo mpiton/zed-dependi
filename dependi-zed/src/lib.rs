@@ -16,6 +16,16 @@ impl DependiExtension {
             return Ok(path.clone());
         }
 
+        // Check for local binary first
+        let local_binary = "dependi-lsp-1.0.0/dependi-lsp";
+        if std::fs::metadata(local_binary).map(|m| m.is_file()).unwrap_or(false) {
+            zed::log(&format!("Using local binary: {}", local_binary));
+            self.cached_binary_path = Some(local_binary.to_string());
+            return Ok(local_binary.to_string());
+        }
+
+        zed::log("Local binary not found, downloading from GitHub");
+
         // Download from GitHub releases
         let (platform, arch) = zed::current_platform();
         let binary_name = match platform {

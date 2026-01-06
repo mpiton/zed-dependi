@@ -36,3 +36,13 @@ test-files/
 
 # Local release builds
 dependi-lsp/release/
+
+# Local binary for development
+dependi-zed/dependi-lsp*
+
+# Claude Code
+.claude/
+CLAUDE.md
+
+# Local scripts
+build-and-deploy.sh
