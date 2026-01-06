@@ -16,6 +16,7 @@ impl DependiExtension {
             return Ok(path.clone());
         }
 
+
         // Download from GitHub releases
         let (platform, arch) = zed::current_platform();
         let binary_name = match platform {

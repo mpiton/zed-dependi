@@ -72,10 +72,10 @@ struct NuGetCatalogEntry {
 
 #[derive(Debug, Deserialize, Clone)]
 struct NuGetDeprecation {
-    #[allow(dead_code)]
-    message: Option<String>,
-    #[allow(dead_code)]
-    reasons: Option<Vec<String>>,
+    #[serde(rename = "message")]
+    _message: Option<String>,
+    #[serde(rename = "reasons")]
+    _reasons: Option<Vec<String>>,
 }
 
 impl Registry for NuGetRegistry {

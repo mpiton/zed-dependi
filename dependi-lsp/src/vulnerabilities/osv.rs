@@ -14,6 +14,13 @@ use crate::registries::{Vulnerability, VulnerabilitySeverity};
 
 const OSV_API_BASE: &str = "https://api.osv.dev/v1";
 
+/// Result of a vulnerability query
+#[derive(Debug, Clone, Default)]
+pub struct QueryResult {
+    pub vulnerabilities: Vec<Vulnerability>,
+    pub deprecated: bool,
+}
+
 /// OSV.dev API client
 pub struct OsvClient {
     client: Arc<Client>,
@@ -21,7 +28,6 @@ pub struct OsvClient {
 }
 
 impl OsvClient {
-    /// Create a new OSV client
     pub fn new() -> anyhow::Result<Self> {
         let client = Client::builder()
             .user_agent("dependi-lsp (https://github.com/mathieu/zed-dependi)")
@@ -34,9 +40,7 @@ impl OsvClient {
         })
     }
 
-    /// Convert OSV vulnerability to our Vulnerability struct
     fn convert_vulnerability(osv: &OsvVulnerability) -> Vulnerability {
-        // Get CVE ID if available, otherwise use OSV ID
         let id = osv
             .aliases
             .as_ref()
@@ -44,7 +48,6 @@ impl OsvClient {
             .cloned()
             .unwrap_or_else(|| osv.id.clone());
 
-        // Parse severity from CVSS score
         let severity = osv
             .severity
             .as_ref()
@@ -52,17 +55,15 @@ impl OsvClient {
             .map(|s| parse_cvss_severity(&s.score))
             .unwrap_or(VulnerabilitySeverity::Medium);
 
-        // Get description
         let description = osv
             .summary
             .clone()
             .or_else(|| osv.details.clone())
             .unwrap_or_else(|| format!("Vulnerability {}", osv.id));
 
-        // Get advisory URL
         let url = osv.references.as_ref().and_then(|refs| {
             refs.iter()
-                .find(|r| r.ref_type == "ADVISORY" || r.ref_type == "WEB")
+                .find(|r| r._ref_type == "ADVISORY" || r._ref_type == "WEB")
                 .map(|r| r.url.clone())
         });
 
@@ -81,10 +82,7 @@ impl Default for OsvClient {
     }
 }
 
-/// Parse CVSS score to severity level
 fn parse_cvss_severity(score: &str) -> VulnerabilitySeverity {
-    // Try to parse as CVSS score (float) first
-    // CVSS v3 score ranges: 0-3.9 Low, 4-6.9 Medium, 7-8.9 High, 9-10 Critical
     if let Ok(score) = score.parse::<f64>() {
         return match score {
             s if s >= 9.0 => VulnerabilitySeverity::Critical,
@@ -94,22 +92,18 @@ fn parse_cvss_severity(score: &str) -> VulnerabilitySeverity {
         };
     }
 
-    // Try to extract score from CVSS vector string (e.g., "CVSS:3.1/AV:N/AC:L/...")
     if score.starts_with("CVSS:") {
-        // The score isn't directly in the vector, default to Medium
         return VulnerabilitySeverity::Medium;
     }
 
-    // Default
     VulnerabilitySeverity::Medium
 }
 
 impl OsvClient {
-    /// Batch query for multiple packages (more efficient than single queries)
     pub async fn query_batch(
         &self,
         queries: &[VulnerabilityQuery],
-    ) -> anyhow::Result<Vec<Vec<Vulnerability>>> {
+    ) -> anyhow::Result<Vec<QueryResult>> {
         if queries.is_empty() {
             return Ok(vec![]);
         }
@@ -136,24 +130,116 @@ impl OsvClient {
 
         let batch_response: OsvBatchResponse = response.json().await?;
 
-        let results = batch_response
-            .results
-            .iter()
-            .map(|r| {
-                r.vulns
-                    .as_ref()
-                    .unwrap_or(&vec![])
-                    .iter()
-                    .map(Self::convert_vulnerability)
-                    .collect()
-            })
-            .collect();
+        let mut results = Vec::new();
+
+        for r in &batch_response.results {
+            let vulnerabilities = r
+                .vulns
+                .as_ref()
+                .unwrap_or(&vec![])
+                .iter()
+                .map(Self::convert_vulnerability)
+                .collect();
+
+            let rustsec_ids: Vec<String> = r
+                .vulns
+                .as_ref()
+                .unwrap_or(&vec![])
+                .iter()
+                .filter(|v| v.id.starts_with("RUSTSEC-"))
+                .map(|v| v.id.clone())
+                .collect();
+
+            let has_unmaintained = self.check_rustsec_unmaintained(&rustsec_ids).await;
+
+            results.push(QueryResult {
+                vulnerabilities,
+                deprecated: has_unmaintained,
+            });
+        }
 
         Ok(results)
     }
-}
 
-// OSV API Request/Response structures
+    async fn check_rustsec_unmaintained(&self, ids: &[String]) -> bool {
+        if ids.is_empty() {
+            return false;
+        }
+
+        tracing::debug!(
+            "Checking {} RUSTSEC advisories for unmaintained status",
+            ids.len()
+        );
+
+        // Spawn all tasks in parallel
+        let tasks: Vec<_> = ids
+            .iter()
+            .map(|id| {
+                let url = format!("{}/vulns/{}", self.base_url, id);
+                let client = Arc::clone(&self.client);
+                let id_clone = id.clone();
+
+                tokio::spawn(async move {
+                    let response = match client.get(&url).send().await {
+                        Ok(r) => r,
+                        Err(e) => {
+                            tracing::warn!("Failed to fetch advisory {}: {}", id_clone, e);
+                            return false;
+                        }
+                    };
+
+                    let details: Option<OsvVulnerabilityDetails> = match response.json().await {
+                        Ok(d) => d,
+                        Err(e) => {
+                            tracing::warn!("Failed to parse advisory {}: {}", id_clone, e);
+                            return false;
+                        }
+                    };
+
+                    let is_unmaintained = details.as_ref().is_some_and(|v| {
+                        // Check summary for "maintained" or "deprecated" keywords
+                        let summary_match = v.summary.as_ref().is_some_and(|s| {
+                            let lower = s.to_lowercase();
+                            lower.contains("maintained") || lower.contains("deprecated")
+                        });
+
+                        // Check database_specific.informational for "unmaintained"
+                        let informational_match = v.affected.as_ref().is_some_and(|affected| {
+                            affected.iter().any(|a| {
+                                a.database_specific.as_ref().is_some_and(|db| {
+                                    db.informational
+                                        .as_ref()
+                                        .is_some_and(|i| i == "unmaintained")
+                                })
+                            })
+                        });
+
+                        summary_match || informational_match
+                    });
+
+                    if is_unmaintained {
+                        tracing::info!(
+                            "Advisory {} indicates unmaintained package: {}",
+                            id_clone,
+                            details
+                                .as_ref()
+                                .and_then(|v| v.summary.as_ref())
+                                .unwrap_or(&String::new())
+                        );
+                    }
+
+                    is_unmaintained
+                })
+            })
+            .collect();
+
+        // Wait for ALL tasks to complete in parallel using join_all
+        let results = futures::future::join_all(tasks).await;
+
+        // Check if any task returned true (found unmaintained package)
+        results.into_iter().any(|r| r.unwrap_or(false))
+    }
+}
 
 #[derive(Debug, Serialize)]
 struct OsvQueryRequest {
@@ -190,61 +276,37 @@ struct OsvVulnerability {
     details: Option<String>,
     severity: Option<Vec<OsvSeverity>>,
     references: Option<Vec<OsvReference>>,
-    #[allow(dead_code)]
-    affected: Option<Vec<OsvAffected>>,
     aliases: Option<Vec<String>>,
 }
 
 #[derive(Debug, Deserialize)]
 struct OsvSeverity {
-    #[allow(dead_code)]
     #[serde(rename = "type")]
-    severity_type: String,
+    _type: String,
     score: String,
 }
 
 #[derive(Debug, Deserialize)]
 struct OsvReference {
     #[serde(rename = "type")]
-    ref_type: String,
+    _ref_type: String,
     url: String,
 }
 
 #[derive(Debug, Deserialize)]
+struct OsvVulnerabilityDetails {
+    summary: Option<String>,
+    affected: Option<Vec<OsvAffected>>,
+}
+
+#[derive(Debug, Deserialize)]
 struct OsvAffected {
-    #[allow(dead_code)]
-    package: Option<OsvAffectedPackage>,
-    #[allow(dead_code)]
-    ranges: Option<Vec<OsvRange>>,
-    #[allow(dead_code)]
-    versions: Option<Vec<String>>,
+    database_specific: Option<OsvDatabaseSpecific>,
 }
 
 #[derive(Debug, Deserialize)]
-struct OsvAffectedPackage {
-    #[allow(dead_code)]
-    ecosystem: String,
-    #[allow(dead_code)]
-    name: String,
-}
-
-#[derive(Debug, Deserialize)]
-struct OsvRange {
-    #[allow(dead_code)]
-    #[serde(rename = "type")]
-    range_type: String,
-    #[allow(dead_code)]
-    events: Vec<OsvRangeEvent>,
-}
-
-#[derive(Debug, Deserialize)]
-struct OsvRangeEvent {
-    #[allow(dead_code)]
-    introduced: Option<String>,
-    #[allow(dead_code)]
-    fixed: Option<String>,
-    #[allow(dead_code)]
-    last_affected: Option<String>,
+struct OsvDatabaseSpecific {
+    informational: Option<String>,
 }
 
 #[cfg(test)]
@@ -284,14 +346,13 @@ mod tests {
             summary: Some("Test vulnerability".to_string()),
             details: None,
             severity: Some(vec![OsvSeverity {
-                severity_type: "CVSS_V3".to_string(),
+                _type: "CVSS_V3".to_string(),
                 score: "7.5".to_string(),
             }]),
             references: Some(vec![OsvReference {
-                ref_type: "ADVISORY".to_string(),
+                _ref_type: "ADVISORY".to_string(),
                 url: "https://example.com/advisory".to_string(),
             }]),
-            affected: None,
             aliases: Some(vec!["CVE-2021-12345".to_string()]),
         };
 
@@ -301,5 +362,62 @@ mod tests {
         assert_eq!(vuln.severity, VulnerabilitySeverity::High);
         assert_eq!(vuln.description, "Test vulnerability");
         assert_eq!(vuln.url, Some("https://example.com/advisory".to_string()));
+    }
+
+    #[test]
+    fn test_unmaintained_detection() {
+        let rustsec_vuln = OsvVulnerability {
+            id: "RUSTSEC-2025-0057".to_string(),
+            summary: Some("fxhash - no longer maintained".to_string()),
+            details: None,
+            severity: None,
+            references: None,
+            aliases: None,
+        };
+
+        let is_unmaintained = rustsec_vuln.id.starts_with("RUSTSEC")
+            && rustsec_vuln.summary.as_ref().is_some_and(|s| {
+                s.to_lowercase().contains("maintained") || s.to_lowercase().contains("deprecated")
+            });
+
+        assert!(is_unmaintained);
+
+        let normal_vuln = OsvVulnerability {
+            id: "CVE-2024-1234".to_string(),
+            summary: Some("Buffer overflow vulnerability".to_string()),
+            details: None,
+            severity: None,
+            references: None,
+            aliases: None,
+        };
+
+        let is_not_unmaintained = normal_vuln.id.starts_with("RUSTSEC")
+            && normal_vuln.summary.as_ref().is_some_and(|s| {
+                s.to_lowercase().contains("maintained") || s.to_lowercase().contains("deprecated")
+            });
+
+        assert!(!is_not_unmaintained);
+    }
+
+    #[tokio::test]
+    async fn test_fxhash_deprecated_detection() {
+        let client = OsvClient::new().unwrap();
+
+        let query = VulnerabilityQuery {
+            ecosystem: crate::vulnerabilities::Ecosystem::CratesIo,
+            package_name: "fxhash".to_string(),
+            version: "0.2.1".to_string(),
+        };
+
+        let results = client.query_batch(&[query]).await.unwrap();
+
+        assert!(!results.is_empty());
+
+        let result = &results[0];
+        assert!(!result.vulnerabilities.is_empty());
+        assert!(result.deprecated, "fxhash should be marked as deprecated");
+
+        let vuln = &result.vulnerabilities[0];
+        assert!(vuln.id.starts_with("RUSTSEC"));
     }
 }

@@ -23,10 +23,16 @@ pub fn create_inlay_hint(dep: &Dependency, version_info: Option<&VersionInfo>) -
         None => VersionStatus::Unknown,
     };
 
-    // Check for vulnerabilities
+    // Check for vulnerabilities and deprecation
     let vuln_count = version_info
         .map(|info| info.vulnerabilities.len())
         .unwrap_or(0);
+
+    let is_deprecated = version_info.map(|info| info.deprecated).unwrap_or(false);
+
+    if is_deprecated {
+        tracing::debug!("Package {} {} is deprecated", dep.name, dep.version);
+    }
 
     let (label, tooltip) = create_hint_label_and_tooltip(&status, vuln_count, dep, version_info);
 
@@ -52,7 +58,28 @@ fn create_hint_label_and_tooltip(
     dep: &Dependency,
     version_info: Option<&VersionInfo>,
 ) -> (String, Option<String>) {
-    // Handle vulnerabilities first (they take priority)
+    // Handle deprecation (highest priority)
+    if let Some(info) = version_info
+        && info.deprecated
+    {
+        let dep_label = "⚠ Deprecated".to_string();
+        let dep_tooltip = format_deprecation_tooltip(dep, info);
+
+        // Combine with update info if available
+        return match status {
+            VersionStatus::UpdateAvailable(latest) => {
+                let label = format!("{} -> {}", dep_label, latest);
+                let tooltip = format!(
+                    "{}\n\n---\n**Update available:** {} → {}",
+                    dep_tooltip, dep.version, latest
+                );
+                (label, Some(tooltip))
+            }
+            _ => (dep_label, Some(dep_tooltip)),
+        };
+    }
+
+    // Handle vulnerabilities
     if vuln_count > 0 {
         let vuln_label = format!("⚠ {}", vuln_count);
         let vuln_tooltip = format_vulnerability_tooltip(version_info.unwrap());
@@ -118,6 +145,47 @@ fn format_vulnerability_tooltip(info: &VersionInfo) -> String {
         lines.push(format!(
             "\n... and {} more vulnerabilities",
             info.vulnerabilities.len() - 5
+        ));
+    }
+
+    lines.join("\n")
+}
+
+/// Format deprecation warning for tooltip
+fn format_deprecation_tooltip(dep: &Dependency, info: &VersionInfo) -> String {
+    let mut lines = vec![
+        format!(
+            "**⚠️ PACKAGE DEPRECATED**\n\nThe package \"{}\" is deprecated.",
+            dep.name
+        ),
+        "".to_string(),
+        "**Why was it deprecated?**".to_string(),
+        "• Superseded by a better alternative".to_string(),
+        "• Has unresolved critical bugs".to_string(),
+        "• Known security vulnerabilities".to_string(),
+        "• No longer maintained".to_string(),
+        "• Has been renamed".to_string(),
+        "".to_string(),
+        "**What should you do?**".to_string(),
+    ];
+
+    if let Some(homepage) = &info.homepage {
+        lines.push(format!("• Check the package homepage: {}", homepage));
+    }
+
+    if let Some(repo) = &info.repository {
+        lines.push(format!(
+            "• View the repository for more information: {}",
+            repo
+        ));
+    }
+
+    lines.push("• Search for an alternative package on the registry".to_string());
+
+    if let Some(latest) = &info.latest {
+        lines.push(format!(
+            "• Consider the latest version: {} (may not be deprecated)",
+            latest
         ));
     }
 
@@ -197,11 +265,26 @@ fn normalize_version(version: &str) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::registries::Vulnerability;
 
     fn make_version_info(latest: &str) -> VersionInfo {
         VersionInfo {
             latest: Some(latest.to_string()),
             ..Default::default()
+        }
+    }
+
+    fn make_test_dep(name: &str, version: &str) -> Dependency {
+        Dependency {
+            name: name.to_string(),
+            version: version.to_string(),
+            line: 5,
+            name_start: 0,
+            name_end: name.len() as u32,
+            version_start: name.len() as u32 + 4,
+            version_end: name.len() as u32 + 4 + version.len() as u32,
+            dev: false,
+            optional: false,
         }
     }
 
@@ -253,17 +336,7 @@ mod tests {
 
     #[test]
     fn test_create_inlay_hint_up_to_date() {
-        let dep = Dependency {
-            name: "serde".to_string(),
-            version: "1.0.0".to_string(),
-            line: 5,
-            name_start: 0,
-            name_end: 5,
-            version_start: 9,
-            version_end: 16,
-            dev: false,
-            optional: false,
-        };
+        let dep = make_test_dep("serde", "1.0.0");
         let info = make_version_info("1.0.0");
         let hint = create_inlay_hint(&dep, Some(&info));
 
@@ -276,17 +349,7 @@ mod tests {
 
     #[test]
     fn test_create_inlay_hint_update_available() {
-        let dep = Dependency {
-            name: "serde".to_string(),
-            version: "1.0.0".to_string(),
-            line: 5,
-            name_start: 0,
-            name_end: 5,
-            version_start: 9,
-            version_end: 16,
-            dev: false,
-            optional: false,
-        };
+        let dep = make_test_dep("serde", "1.0.0");
         let info = make_version_info("2.0.0");
         let hint = create_inlay_hint(&dep, Some(&info));
 
@@ -294,6 +357,92 @@ mod tests {
             InlayHintLabel::String(s) => {
                 assert!(s.contains("⬆"));
                 assert!(s.contains("2.0.0"));
+            }
+            _ => panic!("Expected string label"),
+        }
+    }
+
+    #[test]
+    fn test_deprecated_inlay_hint() {
+        let dep = make_test_dep("old-dep", "1.0.0");
+        let info = VersionInfo {
+            deprecated: true,
+            latest: Some("2.0.0".to_string()),
+            description: Some("Superseded by new-package".to_string()),
+            homepage: Some("https://example.com".to_string()),
+            ..Default::default()
+        };
+        let hint = create_inlay_hint(&dep, Some(&info));
+
+        match hint.label {
+            InlayHintLabel::String(s) => {
+                assert!(s.contains("Deprecated"));
+                assert!(s.contains("⚠"));
+            }
+            _ => panic!("Expected string label"),
+        }
+    }
+
+    #[test]
+    fn test_deprecated_with_update() {
+        let dep = make_test_dep("old-dep", "1.0.0");
+        let info = VersionInfo {
+            deprecated: true,
+            latest: Some("2.0.0".to_string()),
+            ..Default::default()
+        };
+        let hint = create_inlay_hint(&dep, Some(&info));
+
+        match hint.label {
+            InlayHintLabel::String(s) => {
+                assert!(s.contains("Deprecated"));
+                assert!(s.contains("2.0.0"));
+                assert!(s.contains("->"));
+            }
+            _ => panic!("Expected string label"),
+        }
+    }
+
+    #[test]
+    fn test_no_deprecated_warning() {
+        let dep = make_test_dep("serde", "1.0.0");
+        let info = VersionInfo {
+            deprecated: false,
+            latest: Some("1.0.0".to_string()),
+            ..Default::default()
+        };
+        let hint = create_inlay_hint(&dep, Some(&info));
+
+        match hint.label {
+            InlayHintLabel::String(s) => {
+                assert!(!s.contains("Deprecated"));
+                assert!(!s.contains("⚠"));
+                assert!(s.contains("✓"));
+            }
+            _ => panic!("Expected string label"),
+        }
+    }
+
+    #[test]
+    fn test_deprecated_priority_over_vulnerabilities() {
+        let dep = make_test_dep("dep", "1.0.0");
+        let info = VersionInfo {
+            deprecated: true,
+            latest: None,
+            vulnerabilities: vec![Vulnerability {
+                id: "CVE-2024-1234".to_string(),
+                severity: VulnerabilitySeverity::High,
+                description: "Test vulnerability".to_string(),
+                url: None,
+            }],
+            ..Default::default()
+        };
+        let hint = create_inlay_hint(&dep, Some(&info));
+
+        match hint.label {
+            InlayHintLabel::String(s) => {
+                assert!(s.contains("Deprecated"));
+                assert!(!s.contains("1"));
             }
             _ => panic!("Expected string label"),
         }

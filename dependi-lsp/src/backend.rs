@@ -242,17 +242,37 @@ impl DependiBackend {
         match self.osv_client.query_batch(&queries).await {
             Ok(results) => {
                 // Update vulnerability cache and version_cache with results
-                for (query, vulns) in queries.iter().zip(results.iter()) {
+                for (query, result) in queries.iter().zip(results.iter()) {
                     // Mark this package as queried in vuln_cache
                     let vuln_key =
                         VulnCacheKey::new(ecosystem, &query.package_name, &query.version);
                     self.vuln_cache.insert(vuln_key);
 
-                    // Store vulnerabilities in version_cache
+                    // Store vulnerabilities and deprecated status in version_cache
                     let cache_key = Self::cache_key(file_type, &query.package_name);
                     if let Some(mut info) = self.version_cache.get(&cache_key) {
-                        info.vulnerabilities = vulns.clone();
+                        info.vulnerabilities = result.vulnerabilities.clone();
+                        info.deprecated = result.deprecated;
+                        if result.deprecated {
+                            tracing::info!(
+                                "Package {} {} is deprecated (unmaintained)",
+                                query.package_name,
+                                query.version
+                            );
+                        }
+                        tracing::debug!(
+                            "Updated {} {} with {} vulnerabilities, deprecated={}",
+                            query.package_name,
+                            query.version,
+                            result.vulnerabilities.len(),
+                            result.deprecated
+                        );
                         self.version_cache.insert(cache_key, info);
+                    } else {
+                        tracing::warn!(
+                            "Could not update vulnerabilities for {}: not found in version cache",
+                            query.package_name
+                        );
                     }
                 }
                 tracing::info!("Cached vulnerability info for {} packages", queries.len());

@@ -5,7 +5,7 @@ use tower_lsp::lsp_types::*;
 use crate::cache::Cache;
 use crate::parsers::Dependency;
 use crate::providers::inlay_hints::{VersionStatus, compare_versions};
-use crate::registries::{Vulnerability, VulnerabilitySeverity};
+use crate::registries::{VersionInfo, Vulnerability, VulnerabilitySeverity};
 
 /// Create diagnostics for a list of dependencies
 ///
@@ -25,17 +25,27 @@ pub fn create_diagnostics(
             diagnostics.push(diag);
         }
 
-        // Add vulnerability diagnostics
+        // Add deprecation diagnostic
         let cache_key = cache_key_fn(&dep.name);
         if let Some(version_info) = cache.get(&cache_key) {
-            for vuln in &version_info.vulnerabilities {
-                // Filter by minimum severity if specified
-                if let Some(min) = min_severity
-                    && !meets_severity_threshold(&vuln.severity, &min)
-                {
-                    continue;
+            if version_info.deprecated {
+                tracing::debug!(
+                    "Package {} {} is deprecated, creating diagnostic",
+                    dep.name,
+                    dep.version
+                );
+                diagnostics.push(create_deprecation_diagnostic(dep, &version_info));
+            } else {
+                // Add vulnerability diagnostics only if not deprecated
+                for vuln in &version_info.vulnerabilities {
+                    // Filter by minimum severity if specified
+                    if let Some(min) = min_severity
+                        && !meets_severity_threshold(&vuln.severity, &min)
+                    {
+                        continue;
+                    }
+                    diagnostics.push(create_vulnerability_diagnostic(dep, vuln));
                 }
-                diagnostics.push(create_vulnerability_diagnostic(dep, vuln));
             }
         }
     }
@@ -45,19 +55,7 @@ pub fn create_diagnostics(
 
 /// Check if a vulnerability severity meets the minimum threshold
 fn meets_severity_threshold(severity: &VulnerabilitySeverity, min: &VulnerabilitySeverity) -> bool {
-    let severity_rank = match severity {
-        VulnerabilitySeverity::Critical => 4,
-        VulnerabilitySeverity::High => 3,
-        VulnerabilitySeverity::Medium => 2,
-        VulnerabilitySeverity::Low => 1,
-    };
-    let min_rank = match min {
-        VulnerabilitySeverity::Critical => 4,
-        VulnerabilitySeverity::High => 3,
-        VulnerabilitySeverity::Medium => 2,
-        VulnerabilitySeverity::Low => 1,
-    };
-    severity_rank >= min_rank
+    severity.meets_threshold(min)
 }
 
 /// Create a diagnostic for an outdated dependency
@@ -91,6 +89,72 @@ fn create_outdated_diagnostic(
             data: None,
         }),
         VersionStatus::UpToDate | VersionStatus::Unknown => None,
+    }
+}
+
+/// Create a diagnostic for a deprecated package
+fn create_deprecation_diagnostic(dep: &Dependency, version_info: &VersionInfo) -> Diagnostic {
+    let mut message = format!(
+        "The package '{}' is deprecated. Consider migrating to an alternative.",
+        dep.name
+    );
+
+    if let Some(latest) = &version_info.latest {
+        message.push_str(&format!(
+            " Latest version: {} (may not be deprecated).",
+            latest
+        ));
+    }
+
+    let mut related_info = Vec::new();
+
+    if let Some(homepage) = &version_info.homepage {
+        related_info.push(DiagnosticRelatedInformation {
+            location: Location {
+                uri: Url::parse(homepage).unwrap_or_else(|_| {
+                    Url::parse("https://example.com").expect("Invalid fallback URL")
+                }),
+                range: Range::default(),
+            },
+            message: "Visit package homepage".to_string(),
+        });
+    }
+
+    if let Some(repo) = &version_info.repository {
+        related_info.push(DiagnosticRelatedInformation {
+            location: Location {
+                uri: Url::parse(repo).unwrap_or_else(|_| {
+                    Url::parse("https://github.com").expect("Invalid fallback URL")
+                }),
+                range: Range::default(),
+            },
+            message: "View repository for migration guide".to_string(),
+        });
+    }
+
+    Diagnostic {
+        range: Range {
+            start: Position {
+                line: dep.line,
+                character: dep.version_start,
+            },
+            end: Position {
+                line: dep.line,
+                character: dep.version_end,
+            },
+        },
+        severity: Some(DiagnosticSeverity::WARNING),
+        code: Some(NumberOrString::String("deprecated-package".to_string())),
+        source: Some("dependi".to_string()),
+        message,
+        related_information: if related_info.is_empty() {
+            None
+        } else {
+            Some(related_info)
+        },
+        tags: None,
+        code_description: None,
+        data: None,
     }
 }
 
@@ -244,5 +308,128 @@ mod tests {
             &VulnerabilitySeverity::Medium,
             &VulnerabilitySeverity::Medium
         ));
+    }
+
+    #[test]
+    fn test_deprecated_diagnostic() {
+        let deps = vec![create_test_dependency("old-dep", "1.0.0", 5)];
+        let cache = MemoryCache::new();
+        cache.insert(
+            "test:old-dep".to_string(),
+            VersionInfo {
+                deprecated: true,
+                latest: Some("2.0.0".to_string()),
+                homepage: Some("https://example.com".to_string()),
+                ..Default::default()
+            },
+        );
+
+        let diagnostics = create_diagnostics(&deps, &cache, |name| format!("test:{}", name), None);
+
+        let deprecation_diags: Vec<_> = diagnostics
+            .iter()
+            .filter(|d| {
+                d.code
+                    .as_ref()
+                    .and_then(|c| match c {
+                        NumberOrString::String(s) => Some(s.contains("deprecated")),
+                        _ => None,
+                    })
+                    .unwrap_or(false)
+            })
+            .collect();
+
+        assert_eq!(deprecation_diags.len(), 1);
+        assert!(deprecation_diags[0].message.contains("deprecated"));
+        assert_eq!(
+            deprecation_diags[0].severity,
+            Some(DiagnosticSeverity::WARNING)
+        );
+        assert!(deprecation_diags[0].related_information.is_some());
+    }
+
+    #[test]
+    fn test_no_deprecated_diagnostic_for_active() {
+        let deps = vec![create_test_dependency("serde", "1.0.0", 5)];
+        let cache = MemoryCache::new();
+        cache.insert(
+            "test:serde".to_string(),
+            VersionInfo {
+                deprecated: false,
+                latest: Some("1.0.0".to_string()),
+                ..Default::default()
+            },
+        );
+
+        let diagnostics = create_diagnostics(&deps, &cache, |name| format!("test:{}", name), None);
+
+        let deprecation_diags: Vec<_> = diagnostics
+            .iter()
+            .filter(|d| {
+                d.code
+                    .as_ref()
+                    .and_then(|c| match c {
+                        NumberOrString::String(s) => Some(s.contains("deprecated")),
+                        _ => None,
+                    })
+                    .unwrap_or(false)
+            })
+            .collect();
+
+        assert_eq!(deprecation_diags.len(), 0);
+    }
+
+    #[test]
+    fn test_deprecated_with_vulnerabilities() {
+        let deps = vec![create_test_dependency("vuln-dep", "1.0.0", 5)];
+        let cache = MemoryCache::new();
+        cache.insert(
+            "test:vuln-dep".to_string(),
+            VersionInfo {
+                deprecated: true,
+                vulnerabilities: vec![Vulnerability {
+                    id: "CVE-2024-1234".to_string(),
+                    severity: VulnerabilitySeverity::High,
+                    description: "Test vulnerability".to_string(),
+                    url: None,
+                }],
+                ..Default::default()
+            },
+        );
+
+        let diagnostics = create_diagnostics(&deps, &cache, |name| format!("test:{}", name), None);
+
+        let deprecation_diags: Vec<_> = diagnostics
+            .iter()
+            .filter(|d| {
+                d.code
+                    .as_ref()
+                    .and_then(|c| match c {
+                        NumberOrString::String(s) => Some(s.contains("deprecated")),
+                        _ => None,
+                    })
+                    .unwrap_or(false)
+            })
+            .collect();
+
+        let vuln_diags: Vec<_> = diagnostics
+            .iter()
+            .filter(|d| {
+                d.code
+                    .as_ref()
+                    .and_then(|c| match c {
+                        NumberOrString::String(s) => Some(s.starts_with("CVE")),
+                        _ => None,
+                    })
+                    .unwrap_or(false)
+            })
+            .collect();
+
+        assert_eq!(deprecation_diags.len(), 1);
+        assert_eq!(
+            vuln_diags.len(),
+            0,
+            "Deprecated packages should not show individual vulnerability diagnostics"
+        );
     }
 }

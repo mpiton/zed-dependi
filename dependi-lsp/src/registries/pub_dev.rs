@@ -37,8 +37,8 @@ impl Default for PubDevRegistry {
 // pub.dev API response structures
 #[derive(Debug, Deserialize)]
 struct PubPackageResponse {
-    #[allow(dead_code)]
-    name: String,
+    #[serde(rename = "name")]
+    _name: String,
     latest: PubVersionInfo,
     versions: Vec<PubVersionInfo>,
 }
