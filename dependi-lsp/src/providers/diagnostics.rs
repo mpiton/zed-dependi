@@ -5,7 +5,7 @@ use tower_lsp::lsp_types::*;
 use crate::cache::Cache;
 use crate::parsers::Dependency;
 use crate::providers::inlay_hints::{VersionStatus, compare_versions};
-use crate::registries::{Vulnerability, VulnerabilitySeverity, VersionInfo};
+use crate::registries::{VersionInfo, Vulnerability, VulnerabilitySeverity};
 
 /// Create diagnostics for a list of dependencies
 ///
@@ -107,7 +107,10 @@ fn create_deprecation_diagnostic(dep: &Dependency, version_info: &VersionInfo) -
     );
 
     if let Some(latest) = &version_info.latest {
-        message.push_str(&format!(" Latest version: {} (may not be deprecated).", latest));
+        message.push_str(&format!(
+            " Latest version: {} (may not be deprecated).",
+            latest
+        ));
     }
 
     let mut related_info = Vec::new();
@@ -333,7 +336,8 @@ mod tests {
         let deprecation_diags: Vec<_> = diagnostics
             .iter()
             .filter(|d| {
-                d.code.as_ref()
+                d.code
+                    .as_ref()
                     .and_then(|c| match c {
                         NumberOrString::String(s) => Some(s.contains("deprecated")),
                         _ => None,
@@ -344,7 +348,10 @@ mod tests {
 
         assert_eq!(deprecation_diags.len(), 1);
         assert!(deprecation_diags[0].message.contains("deprecated"));
-        assert_eq!(deprecation_diags[0].severity, Some(DiagnosticSeverity::WARNING));
+        assert_eq!(
+            deprecation_diags[0].severity,
+            Some(DiagnosticSeverity::WARNING)
+        );
         assert!(deprecation_diags[0].related_information.is_some());
     }
 
@@ -366,7 +373,8 @@ mod tests {
         let deprecation_diags: Vec<_> = diagnostics
             .iter()
             .filter(|d| {
-                d.code.as_ref()
+                d.code
+                    .as_ref()
                     .and_then(|c| match c {
                         NumberOrString::String(s) => Some(s.contains("deprecated")),
                         _ => None,
@@ -386,14 +394,12 @@ mod tests {
             "test:vuln-dep".to_string(),
             VersionInfo {
                 deprecated: true,
-                vulnerabilities: vec![
-                    Vulnerability {
-                        id: "CVE-2024-1234".to_string(),
-                        severity: VulnerabilitySeverity::High,
-                        description: "Test vulnerability".to_string(),
-                        url: None,
-                    },
-                ],
+                vulnerabilities: vec![Vulnerability {
+                    id: "CVE-2024-1234".to_string(),
+                    severity: VulnerabilitySeverity::High,
+                    description: "Test vulnerability".to_string(),
+                    url: None,
+                }],
                 ..Default::default()
             },
         );
@@ -403,7 +409,8 @@ mod tests {
         let deprecation_diags: Vec<_> = diagnostics
             .iter()
             .filter(|d| {
-                d.code.as_ref()
+                d.code
+                    .as_ref()
                     .and_then(|c| match c {
                         NumberOrString::String(s) => Some(s.contains("deprecated")),
                         _ => None,
@@ -415,7 +422,8 @@ mod tests {
         let vuln_diags: Vec<_> = diagnostics
             .iter()
             .filter(|d| {
-                d.code.as_ref()
+                d.code
+                    .as_ref()
                     .and_then(|c| match c {
                         NumberOrString::String(s) => Some(s.starts_with("CVE")),
                         _ => None,

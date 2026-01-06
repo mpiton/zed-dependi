@@ -164,10 +164,7 @@ fn format_deprecation_tooltip(dep: &Dependency, info: &VersionInfo) -> String {
     ];
 
     if let Some(homepage) = &info.homepage {
-        lines.push(format!(
-            "• Check the package homepage: {}",
-            homepage
-        ));
+        lines.push(format!("• Check the package homepage: {}", homepage));
     }
 
     if let Some(repo) = &info.repository {
@@ -426,14 +423,12 @@ mod tests {
         let info = VersionInfo {
             deprecated: true,
             latest: None,
-            vulnerabilities: vec![
-                Vulnerability {
-                    id: "CVE-2024-1234".to_string(),
-                    severity: VulnerabilitySeverity::High,
-                    description: "Test vulnerability".to_string(),
-                    url: None,
-                },
-            ],
+            vulnerabilities: vec![Vulnerability {
+                id: "CVE-2024-1234".to_string(),
+                severity: VulnerabilitySeverity::High,
+                description: "Test vulnerability".to_string(),
+                url: None,
+            }],
             ..Default::default()
         };
         let hint = create_inlay_hint(&dep, Some(&info));
