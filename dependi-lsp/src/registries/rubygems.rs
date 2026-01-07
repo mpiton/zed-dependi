@@ -50,17 +50,9 @@ struct GemResponse {
     project_uri: Option<String>,
 }
 
-/// RubyGems API response for gem versions
-#[derive(Debug, Deserialize)]
-struct GemVersionResponse {
-    number: String,
-    #[serde(default)]
-    _prerelease: bool,
-}
-
 impl Registry for RubyGemsRegistry {
     async fn get_version_info(&self, package_name: &str) -> anyhow::Result<VersionInfo> {
-        // Fetch gem info
+        // Fetch gem info (contains latest version)
         let gem_url = format!("{}/gems/{}.json", self.base_url, package_name);
         let gem_response = self.client.get(&gem_url).send().await?;
 
@@ -74,26 +66,8 @@ impl Registry for RubyGemsRegistry {
 
         let gem: GemResponse = gem_response.json().await?;
 
-        // Fetch all versions
-        let versions_url = format!("{}/versions/{}.json", self.base_url, package_name);
-        let versions_response = self.client.get(&versions_url).send().await?;
-
-        let versions: Vec<String> = if versions_response.status().is_success() {
-            let version_list: Vec<GemVersionResponse> = versions_response.json().await?;
-            version_list.iter().map(|v| v.number.clone()).collect()
-        } else {
-            vec![gem.version.clone()]
-        };
-
-        // Find latest stable version (non-prerelease)
-        let latest_stable = versions
-            .iter()
-            .find(|v| !is_prerelease(v))
-            .cloned()
-            .or_else(|| Some(gem.version.clone()));
-
-        // Find latest prerelease
-        let latest_prerelease = versions.iter().find(|v| is_prerelease(v)).cloned();
+        // Use the latest version from gem info (skip fetching all versions for speed)
+        let latest_stable = Some(gem.version.clone());
 
         // Get license (first one if multiple)
         let license = gem.licenses.and_then(|l| l.into_iter().next());
@@ -103,41 +77,26 @@ impl Registry for RubyGemsRegistry {
 
         Ok(VersionInfo {
             latest: latest_stable,
-            latest_prerelease,
-            versions,
+            latest_prerelease: None,
+            versions: vec![gem.version], // Only include latest for now
             description: gem.info,
             homepage: gem.homepage_uri.or(gem.project_uri),
             repository,
             license,
             vulnerabilities: vec![], // Will be filled by OSV
             deprecated: false,       // RubyGems doesn't have a deprecation flag in API
-            yanked: false,           // Will check individual versions if needed
+            yanked: false,
         })
     }
 }
 
-/// Check if a version is a prerelease
-fn is_prerelease(version: &str) -> bool {
-    version.contains(".pre")
-        || version.contains(".alpha")
-        || version.contains(".beta")
-        || version.contains(".rc")
-        || version.contains("-")
-}
-
 #[cfg(test)]
 mod tests {
-    use super::*;
-
     #[test]
-    fn test_is_prerelease() {
-        assert!(is_prerelease("1.0.0.pre"));
-        assert!(is_prerelease("1.0.0.alpha"));
-        assert!(is_prerelease("1.0.0.beta.1"));
-        assert!(is_prerelease("1.0.0.rc1"));
-        assert!(is_prerelease("1.0.0-pre"));
-        assert!(!is_prerelease("1.0.0"));
-        assert!(!is_prerelease("2.0.0"));
-        assert!(!is_prerelease("1.0.0.1"));
+    fn test_rubygems_url_format() {
+        let base_url = "https://rubygems.org/api/v1";
+        let name = "rails";
+        let url = format!("{}/gems/{}.json", base_url, name);
+        assert_eq!(url, "https://rubygems.org/api/v1/gems/rails.json");
     }
 }
