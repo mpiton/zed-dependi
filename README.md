@@ -35,6 +35,7 @@ Dependency management extension for the [Zed](https://zed.dev) editor.
 | PHP | `composer.json` | Packagist | ✅ |
 | Dart/Flutter | `pubspec.yaml` | pub.dev | ✅ |
 | C#/.NET | `*.csproj` | NuGet | ✅ |
+| Ruby | `Gemfile` | RubyGems.org | ✅ |
 
 ## Installation
 
@@ -80,13 +81,15 @@ zed-dependi/
 │   │   │   ├── npm.rs     # package.json parser
 │   │   │   ├── python.rs  # requirements.txt, pyproject.toml
 │   │   │   ├── go.rs      # go.mod parser
-│   │   │   └── php.rs     # composer.json parser
+│   │   │   ├── php.rs     # composer.json parser
+│   │   │   └── ruby.rs    # Gemfile parser
 │   │   ├── registries/    # Package registry clients
 │   │   │   ├── crates_io.rs
 │   │   │   ├── npm.rs
 │   │   │   ├── pypi.rs
 │   │   │   ├── go_proxy.rs
-│   │   │   └── packagist.rs
+│   │   │   ├── packagist.rs
+│   │   │   └── rubygems.rs
 │   │   ├── providers/     # LSP feature providers
 │   │   │   ├── inlay_hints.rs
 │   │   │   ├── diagnostics.rs
@@ -230,7 +233,8 @@ Configure Dependi in your Zed `settings.json`:
 │  │ • requirements│ │ • Code Action│  │ • PyPI       │      │
 │  │ • pyproject  │  │ • Completion │  │ • Go Proxy   │      │
 │  │ • go.mod     │  │ • Hover      │  │ • Packagist  │      │
-│  │ • composer   │  └──────────────┘  └──────────────┘      │
+│  │ • composer   │  └──────────────┘  │ • RubyGems   │      │
+│  │ • Gemfile    │                    └──────────────┘      │
 │  └──────────────┘                                           │
 │                                                             │
 │  ┌──────────────────────────────────────────────────────┐  │
