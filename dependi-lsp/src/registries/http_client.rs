@@ -41,6 +41,7 @@ pub fn create_shared_client() -> anyhow::Result<Arc<Client>> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::registries::Registry;
     use crate::registries::crates_io::CratesIoRegistry;
     use crate::registries::go_proxy::GoProxyRegistry;
     use crate::registries::npm::NpmRegistry;
@@ -49,7 +50,6 @@ mod tests {
     use crate::registries::pub_dev::PubDevRegistry;
     use crate::registries::pypi::PyPiRegistry;
     use crate::registries::rubygems::RubyGemsRegistry;
-    use crate::registries::Registry;
 
     #[test]
     fn test_create_shared_client() {
