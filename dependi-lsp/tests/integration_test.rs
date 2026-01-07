@@ -211,19 +211,19 @@ fn test_inlay_hint_generation() {
     let hint = create_inlay_hint(&dep_outdated, Some(&info_outdated));
     match hint.label {
         tower_lsp::lsp_types::InlayHintLabel::String(s) => {
-            assert!(s.contains("⬆"), "Expected arrow for outdated dep");
+            assert!(s.contains("->"), "Expected arrow for outdated dep");
             assert!(s.contains("1.35.0"), "Expected latest version in hint");
         }
         _ => panic!("Expected string label"),
     }
 
-    // Unknown version (no info) - shows ⚡ with troubleshooting tooltip
+    // Unknown version (no info) - shows ? Unknown with troubleshooting tooltip
     let hint = create_inlay_hint(&dep_outdated, None);
     match hint.label {
         tower_lsp::lsp_types::InlayHintLabel::String(s) => {
             assert!(
-                s.contains("⚡"),
-                "Expected lightning bolt for unknown/error status"
+                s.contains("? Unknown"),
+                "Expected question mark for unknown/error status"
             );
         }
         _ => panic!("Expected string label"),
