@@ -1,37 +1,33 @@
 //! Client for PyPI (Python Package Index) registry
 
 use std::collections::HashMap;
-use std::time::Duration;
+use std::sync::Arc;
 
 use chrono::{DateTime, NaiveDateTime, Utc};
 use reqwest::Client;
 use serde::Deserialize;
 
+use super::http_client::create_shared_client;
 use super::{Registry, VersionInfo};
 
 /// Client for the PyPI registry
 pub struct PyPiRegistry {
-    client: Client,
+    client: Arc<Client>,
     base_url: String,
 }
 
 impl PyPiRegistry {
-    pub fn new() -> anyhow::Result<Self> {
-        let client = Client::builder()
-            .user_agent("dependi-lsp (https://github.com/mathieu/zed-dependi)")
-            .timeout(Duration::from_secs(10))
-            .build()?;
-
-        Ok(Self {
+    pub fn with_client(client: Arc<Client>) -> Self {
+        Self {
             client,
             base_url: "https://pypi.org/pypi".to_string(),
-        })
+        }
     }
 }
 
 impl Default for PyPiRegistry {
     fn default() -> Self {
-        Self::new().expect("Failed to create PyPiRegistry")
+        Self::with_client(create_shared_client().expect("Failed to create HTTP client"))
     }
 }
 

@@ -2,12 +2,12 @@
 
 use std::collections::HashMap;
 use std::sync::Arc;
-use std::time::Duration;
 
 use chrono::{DateTime, Utc};
 use reqwest::Client;
 use serde::Deserialize;
 
+use super::http_client::create_shared_client;
 use super::{Registry, VersionInfo};
 
 /// Client for the pub.dev registry
@@ -17,22 +17,17 @@ pub struct PubDevRegistry {
 }
 
 impl PubDevRegistry {
-    pub fn new() -> anyhow::Result<Self> {
-        let client = Client::builder()
-            .user_agent("dependi-lsp (https://github.com/mathieu/zed-dependi)")
-            .timeout(Duration::from_secs(10))
-            .build()?;
-
-        Ok(Self {
-            client: Arc::new(client),
+    pub fn with_client(client: Arc<Client>) -> Self {
+        Self {
+            client,
             base_url: "https://pub.dev/api".to_string(),
-        })
+        }
     }
 }
 
 impl Default for PubDevRegistry {
     fn default() -> Self {
-        Self::new().expect("Failed to create PubDevRegistry")
+        Self::with_client(create_shared_client().expect("Failed to create HTTP client"))
     }
 }
 

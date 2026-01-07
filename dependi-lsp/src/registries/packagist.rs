@@ -1,37 +1,33 @@
 //! Client for Packagist (PHP package registry)
 
 use std::collections::HashMap;
-use std::time::Duration;
+use std::sync::Arc;
 
 use chrono::{DateTime, Utc};
 use reqwest::Client;
 use serde::Deserialize;
 
+use super::http_client::create_shared_client;
 use super::{Registry, VersionInfo};
 
 /// Client for the Packagist registry
 pub struct PackagistRegistry {
-    client: Client,
+    client: Arc<Client>,
     base_url: String,
 }
 
 impl PackagistRegistry {
-    pub fn new() -> anyhow::Result<Self> {
-        let client = Client::builder()
-            .user_agent("dependi-lsp (https://github.com/mathieu/zed-dependi)")
-            .timeout(Duration::from_secs(10))
-            .build()?;
-
-        Ok(Self {
+    pub fn with_client(client: Arc<Client>) -> Self {
+        Self {
             client,
             base_url: "https://repo.packagist.org".to_string(),
-        })
+        }
     }
 }
 
 impl Default for PackagistRegistry {
     fn default() -> Self {
-        Self::new().expect("Failed to create PackagistRegistry")
+        Self::with_client(create_shared_client().expect("Failed to create HTTP client"))
     }
 }
 

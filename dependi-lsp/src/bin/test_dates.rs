@@ -6,7 +6,7 @@ use dependi_lsp::registries::{
 #[tokio::main]
 async fn main() {
     println!("=== Testing crates.io (serde) ===");
-    let registry = CratesIoRegistry::new().unwrap();
+    let registry = CratesIoRegistry::default();
     match registry.get_version_info("serde").await {
         Ok(info) => {
             println!(
@@ -23,7 +23,7 @@ async fn main() {
     }
 
     println!("\n=== Testing npm (express) ===");
-    let registry = NpmRegistry::new().unwrap();
+    let registry = NpmRegistry::default();
     match registry.get_version_info("express").await {
         Ok(info) => {
             println!(
@@ -40,7 +40,7 @@ async fn main() {
     }
 
     println!("\n=== Testing PyPI (flask) ===");
-    let registry = PyPiRegistry::new().unwrap();
+    let registry = PyPiRegistry::default();
     match registry.get_version_info("flask").await {
         Ok(info) => {
             println!(

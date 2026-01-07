@@ -2,12 +2,12 @@
 
 use std::collections::HashMap;
 use std::sync::Arc;
-use std::time::Duration;
 
 use chrono::{DateTime, Utc};
 use reqwest::Client;
 use serde::Deserialize;
 
+use super::http_client::create_shared_client;
 use super::{Registry, VersionInfo};
 
 /// Client for the NuGet registry
@@ -17,23 +17,17 @@ pub struct NuGetRegistry {
 }
 
 impl NuGetRegistry {
-    pub fn new() -> anyhow::Result<Self> {
-        let client = Client::builder()
-            .user_agent("dependi-lsp (https://github.com/mathieu/zed-dependi)")
-            .timeout(Duration::from_secs(10))
-            .build()?;
-
-        Ok(Self {
-            client: Arc::new(client),
-            // NuGet V3 API
+    pub fn with_client(client: Arc<Client>) -> Self {
+        Self {
+            client,
             base_url: "https://api.nuget.org/v3".to_string(),
-        })
+        }
     }
 }
 
 impl Default for NuGetRegistry {
     fn default() -> Self {
-        Self::new().expect("Failed to create NuGetRegistry")
+        Self::with_client(create_shared_client().expect("Failed to create HTTP client"))
     }
 }
 

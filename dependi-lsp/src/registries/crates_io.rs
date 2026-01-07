@@ -9,6 +9,7 @@ use reqwest::Client;
 use serde::Deserialize;
 use tokio::sync::Mutex;
 
+use super::http_client::create_shared_client;
 use super::{Registry, VersionInfo};
 
 /// Rate limiter to respect crates.io's 1 request/second limit
@@ -36,29 +37,24 @@ impl RateLimiter {
 
 /// Client for the crates.io registry
 pub struct CratesIoRegistry {
-    client: Client,
+    client: Arc<Client>,
     rate_limiter: Arc<Mutex<RateLimiter>>,
     base_url: String,
 }
 
 impl CratesIoRegistry {
-    pub fn new() -> anyhow::Result<Self> {
-        let client = Client::builder()
-            .user_agent("dependi-lsp (https://github.com/mathieu/zed-dependi)")
-            .timeout(Duration::from_secs(10))
-            .build()?;
-
-        Ok(Self {
+    pub fn with_client(client: Arc<Client>) -> Self {
+        Self {
             client,
             rate_limiter: Arc::new(Mutex::new(RateLimiter::new(1.0))),
             base_url: "https://crates.io/api/v1".to_string(),
-        })
+        }
     }
 }
 
 impl Default for CratesIoRegistry {
     fn default() -> Self {
-        Self::new().expect("Failed to create CratesIoRegistry")
+        Self::with_client(create_shared_client().expect("Failed to create HTTP client"))
     }
 }
 

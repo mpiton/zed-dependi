@@ -23,6 +23,7 @@ use crate::providers::diagnostics::create_diagnostics;
 use crate::providers::inlay_hints::create_inlay_hint;
 use crate::registries::crates_io::CratesIoRegistry;
 use crate::registries::go_proxy::GoProxyRegistry;
+use crate::registries::http_client::create_shared_client;
 use crate::registries::npm::NpmRegistry;
 use crate::registries::nuget::NuGetRegistry;
 use crate::registries::packagist::PackagistRegistry;
@@ -104,6 +105,8 @@ pub struct DependiBackend {
 
 impl DependiBackend {
     pub fn new(client: Client) -> Self {
+        let http_client = create_shared_client().expect("Failed to create shared HTTP client");
+
         Self {
             client,
             config: RwLock::new(Config::default()),
@@ -117,14 +120,14 @@ impl DependiBackend {
             dart_parser: DartParser::new(),
             csharp_parser: CsharpParser::new(),
             ruby_parser: RubyParser::new(),
-            crates_io: Arc::new(CratesIoRegistry::default()),
-            npm_registry: Arc::new(NpmRegistry::default()),
-            pypi: Arc::new(PyPiRegistry::default()),
-            go_proxy: Arc::new(GoProxyRegistry::default()),
-            packagist: Arc::new(PackagistRegistry::default()),
-            pub_dev: Arc::new(PubDevRegistry::default()),
-            nuget: Arc::new(NuGetRegistry::default()),
-            rubygems: Arc::new(RubyGemsRegistry::default()),
+            crates_io: Arc::new(CratesIoRegistry::with_client(Arc::clone(&http_client))),
+            npm_registry: Arc::new(NpmRegistry::with_client(Arc::clone(&http_client))),
+            pypi: Arc::new(PyPiRegistry::with_client(Arc::clone(&http_client))),
+            go_proxy: Arc::new(GoProxyRegistry::with_client(Arc::clone(&http_client))),
+            packagist: Arc::new(PackagistRegistry::with_client(Arc::clone(&http_client))),
+            pub_dev: Arc::new(PubDevRegistry::with_client(Arc::clone(&http_client))),
+            nuget: Arc::new(NuGetRegistry::with_client(Arc::clone(&http_client))),
+            rubygems: Arc::new(RubyGemsRegistry::with_client(http_client)),
             osv_client: Arc::new(OsvClient::default()),
             vuln_cache: Arc::new(VulnerabilityCache::new()),
         }
