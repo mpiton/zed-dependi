@@ -3,6 +3,7 @@
 use std::collections::HashMap;
 use std::time::Duration;
 
+use chrono::{DateTime, Utc};
 use reqwest::Client;
 use serde::Deserialize;
 
@@ -49,6 +50,8 @@ struct VersionEntry {
     source: Option<SourceInfo>,
     /// Can be bool or string (replacement package name). We only care if it's truthy.
     abandoned: Option<serde_json::Value>,
+    /// Release time
+    time: Option<DateTime<Utc>>,
 }
 
 #[derive(Debug, Clone, Deserialize)]
@@ -122,6 +125,12 @@ impl Registry for PackagistRegistry {
             .and_then(|e| e.abandoned.as_ref())
             .is_some_and(|v| !matches!(v, serde_json::Value::Bool(false)));
 
+        // Collect release dates
+        let release_dates: HashMap<String, DateTime<Utc>> = entries
+            .iter()
+            .filter_map(|e| e.time.map(|t| (e.version.clone(), t)))
+            .collect();
+
         Ok(VersionInfo {
             latest: latest_stable,
             latest_prerelease,
@@ -134,6 +143,7 @@ impl Registry for PackagistRegistry {
             deprecated,
             yanked: false,
             yanked_versions: vec![], // Not applicable to Packagist
+            release_dates,
         })
     }
 }

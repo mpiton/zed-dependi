@@ -1,8 +1,10 @@
 //! Client for NuGet registry (.NET packages)
 
+use std::collections::HashMap;
 use std::sync::Arc;
 use std::time::Duration;
 
+use chrono::{DateTime, Utc};
 use reqwest::Client;
 use serde::Deserialize;
 
@@ -68,6 +70,7 @@ struct NuGetCatalogEntry {
     listed: Option<bool>,
     #[serde(default)]
     deprecation: Option<NuGetDeprecation>,
+    published: Option<DateTime<Utc>>,
 }
 
 #[derive(Debug, Deserialize, Clone)]
@@ -153,6 +156,12 @@ impl Registry for NuGetRegistry {
         // Check deprecation
         let deprecated = latest_entry.and_then(|e| e.deprecation.as_ref()).is_some();
 
+        // Collect release dates
+        let release_dates: HashMap<String, DateTime<Utc>> = all_versions
+            .iter()
+            .filter_map(|e| e.published.map(|p| (e.version.clone(), p)))
+            .collect();
+
         Ok(VersionInfo {
             latest: latest_stable,
             latest_prerelease,
@@ -166,6 +175,7 @@ impl Registry for NuGetRegistry {
             deprecated,
             yanked: false,
             yanked_versions: vec![], // Not applicable to NuGet
+            release_dates,
         })
     }
 }

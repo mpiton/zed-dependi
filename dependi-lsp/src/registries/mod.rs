@@ -1,5 +1,8 @@
 //! Registry clients for fetching package version information
 
+use std::collections::HashMap;
+
+use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 
 /// Information about a package version from a registry
@@ -27,6 +30,9 @@ pub struct VersionInfo {
     pub yanked: bool,
     /// List of yanked version numbers (Rust specific)
     pub yanked_versions: Vec<String>,
+    /// Release dates for each version (version string -> DateTime)
+    #[serde(default)]
+    pub release_dates: HashMap<String, DateTime<Utc>>,
 }
 
 impl VersionInfo {
@@ -36,6 +42,11 @@ impl VersionInfo {
         self.yanked_versions
             .iter()
             .any(|v| normalize_version_for_yanked_check(v) == normalized)
+    }
+
+    /// Get the release date for a specific version
+    pub fn get_release_date(&self, version: &str) -> Option<DateTime<Utc>> {
+        self.release_dates.get(version).copied()
     }
 }
 

@@ -1,7 +1,9 @@
 //! Client for Go module proxy (proxy.golang.org)
 
+use std::collections::HashMap;
 use std::time::Duration;
 
+use chrono::{DateTime, Utc};
 use reqwest::Client;
 use serde::Deserialize;
 
@@ -33,11 +35,13 @@ impl Default for GoProxyRegistry {
     }
 }
 
-// Go proxy API response for @latest
+// Go proxy API response for version info
 #[derive(Debug, Deserialize)]
-struct LatestInfo {
+struct VersionInfoResponse {
     #[serde(rename = "Version")]
     version: String,
+    #[serde(rename = "Time")]
+    time: Option<DateTime<Utc>>,
 }
 
 impl Registry for GoProxyRegistry {
@@ -73,6 +77,11 @@ impl Registry for GoProxyRegistry {
                 None
             };
 
+        // Fetch release dates for versions (fetch info for each version in parallel)
+        let release_dates = self
+            .fetch_version_times(&encoded_path, &sorted_versions)
+            .await;
+
         Ok(VersionInfo {
             latest: latest_stable,
             latest_prerelease,
@@ -85,6 +94,7 @@ impl Registry for GoProxyRegistry {
             deprecated: false,
             yanked: false,
             yanked_versions: vec![], // Not applicable to Go
+            release_dates,
         })
     }
 }
@@ -111,7 +121,7 @@ impl GoProxyRegistry {
     }
 
     /// Fetch latest version info
-    async fn fetch_latest(&self, encoded_path: &str) -> anyhow::Result<LatestInfo> {
+    async fn fetch_latest(&self, encoded_path: &str) -> anyhow::Result<VersionInfoResponse> {
         let url = format!("{}/{}/@latest", self.base_url, encoded_path);
 
         let response = self.client.get(&url).send().await?;
@@ -124,8 +134,47 @@ impl GoProxyRegistry {
             );
         }
 
-        let info: LatestInfo = response.json().await?;
+        let info: VersionInfoResponse = response.json().await?;
         Ok(info)
+    }
+
+    /// Fetch version info for a specific version
+    async fn fetch_version_info(
+        &self,
+        encoded_path: &str,
+        version: &str,
+    ) -> Option<VersionInfoResponse> {
+        let url = format!("{}/{}/@v/{}.info", self.base_url, encoded_path, version);
+
+        let response = self.client.get(&url).send().await.ok()?;
+
+        if !response.status().is_success() {
+            return None;
+        }
+
+        response.json().await.ok()
+    }
+
+    /// Fetch release times for a list of versions (limited to first 10 for performance)
+    async fn fetch_version_times(
+        &self,
+        encoded_path: &str,
+        versions: &[String],
+    ) -> HashMap<String, DateTime<Utc>> {
+        use futures::future::join_all;
+
+        let futures: Vec<_> = versions
+            .iter()
+            .take(10)
+            .map(|v| async move {
+                self.fetch_version_info(encoded_path, v)
+                    .await
+                    .and_then(|info| info.time.map(|t| (v.clone(), t)))
+            })
+            .collect();
+
+        let results = join_all(futures).await;
+        results.into_iter().flatten().collect()
     }
 }
 

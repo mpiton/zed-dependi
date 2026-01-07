@@ -1,8 +1,10 @@
 //! Client for pub.dev registry (Dart/Flutter packages)
 
+use std::collections::HashMap;
 use std::sync::Arc;
 use std::time::Duration;
 
+use chrono::{DateTime, Utc};
 use reqwest::Client;
 use serde::Deserialize;
 
@@ -49,6 +51,7 @@ struct PubVersionInfo {
     pubspec: PubPubspec,
     #[serde(default)]
     retracted: bool,
+    published: Option<DateTime<Utc>>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -94,6 +97,13 @@ impl Registry for PubDevRegistry {
         // Find latest prerelease
         let latest_prerelease = versions.iter().find(|v| is_prerelease(v)).cloned();
 
+        // Collect release dates
+        let release_dates: HashMap<String, DateTime<Utc>> = pkg
+            .versions
+            .iter()
+            .filter_map(|v| v.published.map(|p| (v.version.clone(), p)))
+            .collect();
+
         Ok(VersionInfo {
             latest: latest_stable,
             latest_prerelease,
@@ -106,6 +116,7 @@ impl Registry for PubDevRegistry {
             deprecated: pkg.latest.pubspec.discontinued,
             yanked: pkg.latest.retracted,
             yanked_versions: vec![], // Not applicable to pub.dev
+            release_dates,
         })
     }
 }

@@ -3,6 +3,7 @@
 use std::collections::HashMap;
 use std::time::Duration;
 
+use chrono::{DateTime, Utc};
 use reqwest::Client;
 use serde::Deserialize;
 
@@ -44,6 +45,7 @@ struct PackageResponse {
     #[serde(rename = "dist-tags")]
     dist_tags: Option<DistTags>,
     versions: Option<HashMap<String, VersionMetadata>>,
+    time: Option<HashMap<String, String>>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -165,6 +167,23 @@ impl Registry for NpmRegistry {
         // Get repository URL
         let repository = pkg.repository.as_ref().and_then(|r| r.url());
 
+        // Parse release dates from the time field (excluding "created" and "modified" keys)
+        let release_dates: HashMap<String, DateTime<Utc>> = pkg
+            .time
+            .as_ref()
+            .map(|time_map| {
+                time_map
+                    .iter()
+                    .filter(|(k, _)| *k != "created" && *k != "modified")
+                    .filter_map(|(version, date_str)| {
+                        DateTime::parse_from_rfc3339(date_str)
+                            .ok()
+                            .map(|dt| (version.clone(), dt.with_timezone(&Utc)))
+                    })
+                    .collect()
+            })
+            .unwrap_or_default();
+
         Ok(VersionInfo {
             latest,
             latest_prerelease,
@@ -177,6 +196,7 @@ impl Registry for NpmRegistry {
             deprecated,
             yanked: false,
             yanked_versions: vec![], // Not applicable to npm
+            release_dates,
         })
     }
 }

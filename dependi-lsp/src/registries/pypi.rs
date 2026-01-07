@@ -3,6 +3,7 @@
 use std::collections::HashMap;
 use std::time::Duration;
 
+use chrono::{DateTime, NaiveDateTime, Utc};
 use reqwest::Client;
 use serde::Deserialize;
 
@@ -61,6 +62,8 @@ struct PackageInfo {
 struct ReleaseFile {
     /// Whether this file has been yanked
     yanked: Option<bool>,
+    /// Upload time for this file (ISO 8601 format without timezone)
+    upload_time: Option<String>,
 }
 
 impl Registry for PyPiRegistry {
@@ -135,6 +138,19 @@ impl Registry for PyPiRegistry {
                     .any(|c| c.contains("Development Status :: 7 - Inactive"))
             });
 
+        // Extract release dates from releases (use the first file's upload_time for each version)
+        let release_dates: HashMap<String, DateTime<Utc>> = pypi_response
+            .releases
+            .iter()
+            .filter_map(|(version, files)| {
+                files
+                    .first()
+                    .and_then(|f| f.upload_time.as_ref())
+                    .and_then(|time_str| parse_pypi_datetime(time_str))
+                    .map(|dt| (version.clone(), dt))
+            })
+            .collect();
+
         Ok(VersionInfo {
             latest: latest_stable,
             latest_prerelease,
@@ -147,8 +163,17 @@ impl Registry for PyPiRegistry {
             deprecated,
             yanked: false,
             yanked_versions: vec![], // Not applicable to PyPI
+            release_dates,
         })
     }
+}
+
+/// Parse PyPI datetime format (ISO 8601 without timezone, assumed UTC)
+fn parse_pypi_datetime(s: &str) -> Option<DateTime<Utc>> {
+    NaiveDateTime::parse_from_str(s, "%Y-%m-%dT%H:%M:%S")
+        .or_else(|_| NaiveDateTime::parse_from_str(s, "%Y-%m-%d %H:%M:%S"))
+        .ok()
+        .map(|naive| naive.and_utc())
 }
 
 /// Normalize Python package name according to PEP 503
