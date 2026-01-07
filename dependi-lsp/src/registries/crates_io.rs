@@ -1,8 +1,10 @@
 //! Client for crates.io registry
 
+use std::collections::HashMap;
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 
+use chrono::{DateTime, Utc};
 use reqwest::Client;
 use serde::Deserialize;
 use tokio::sync::Mutex;
@@ -81,6 +83,7 @@ struct VersionEntry {
     num: String,
     yanked: bool,
     license: Option<String>,
+    created_at: Option<String>,
 }
 
 impl Registry for CratesIoRegistry {
@@ -147,6 +150,19 @@ impl Registry for CratesIoRegistry {
             .map(|v| v.num.clone())
             .collect();
 
+        // Collect release dates for all versions
+        let release_dates: HashMap<String, DateTime<Utc>> = crate_response
+            .versions
+            .iter()
+            .filter_map(|v| {
+                v.created_at.as_ref().and_then(|date_str| {
+                    DateTime::parse_from_rfc3339(date_str)
+                        .ok()
+                        .map(|dt| (v.num.clone(), dt.with_timezone(&Utc)))
+                })
+            })
+            .collect();
+
         // Check if latest version is yanked (kept for backwards compatibility)
         let yanked = crate_response.versions.first().is_some_and(|v| v.yanked);
 
@@ -162,6 +178,7 @@ impl Registry for CratesIoRegistry {
             deprecated: false,       // Filled by OSV
             yanked,
             yanked_versions,
+            release_dates,
         })
     }
 }

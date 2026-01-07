@@ -145,6 +145,7 @@ fn test_cache_integration() {
         deprecated: false,
         yanked: false,
         yanked_versions: vec![],
+        release_dates: Default::default(),
     };
 
     cache.insert("crates:serde".to_string(), serde_info.clone());

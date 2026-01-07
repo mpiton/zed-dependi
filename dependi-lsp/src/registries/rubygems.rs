@@ -3,9 +3,11 @@
 //! Provides package metadata and version information for Ruby gems.
 //! API documentation: https://guides.rubygems.org/rubygems-org-api/
 
+use std::collections::HashMap;
 use std::sync::Arc;
 use std::time::Duration;
 
+use chrono::{DateTime, Utc};
 use reqwest::Client;
 use serde::Deserialize;
 
@@ -48,6 +50,14 @@ struct GemResponse {
     homepage_uri: Option<String>,
     source_code_uri: Option<String>,
     project_uri: Option<String>,
+    version_created_at: Option<String>,
+}
+
+/// RubyGems API response for version list
+#[derive(Debug, Deserialize)]
+struct VersionResponse {
+    number: String,
+    created_at: Option<String>,
 }
 
 impl Registry for RubyGemsRegistry {
@@ -66,7 +76,37 @@ impl Registry for RubyGemsRegistry {
 
         let gem: GemResponse = gem_response.json().await?;
 
-        // Use the latest version from gem info (skip fetching all versions for speed)
+        // Fetch all versions with dates
+        let versions_url = format!("{}/versions/{}.json", self.base_url, package_name);
+        let (versions, release_dates) = match self.client.get(&versions_url).send().await {
+            Ok(response) if response.status().is_success() => {
+                let version_list: Vec<VersionResponse> = response.json().await.unwrap_or_default();
+                let versions: Vec<String> = version_list.iter().map(|v| v.number.clone()).collect();
+                let dates: HashMap<String, DateTime<Utc>> = version_list
+                    .into_iter()
+                    .filter_map(|v| {
+                        v.created_at.as_ref().and_then(|time_str| {
+                            DateTime::parse_from_rfc3339(time_str)
+                                .ok()
+                                .map(|dt| (v.number.clone(), dt.with_timezone(&Utc)))
+                        })
+                    })
+                    .collect();
+                (versions, dates)
+            }
+            _ => {
+                // Fallback to just latest version with its date
+                let mut dates = HashMap::new();
+                if let Some(time_str) = &gem.version_created_at
+                    && let Ok(dt) = DateTime::parse_from_rfc3339(time_str)
+                {
+                    dates.insert(gem.version.clone(), dt.with_timezone(&Utc));
+                }
+                (vec![gem.version.clone()], dates)
+            }
+        };
+
+        // Use the latest version from gem info
         let latest_stable = Some(gem.version.clone());
 
         // Get license (first one if multiple)
@@ -78,7 +118,7 @@ impl Registry for RubyGemsRegistry {
         Ok(VersionInfo {
             latest: latest_stable,
             latest_prerelease: None,
-            versions: vec![gem.version], // Only include latest for now
+            versions,
             description: gem.info,
             homepage: gem.homepage_uri.or(gem.project_uri),
             repository,
@@ -87,6 +127,7 @@ impl Registry for RubyGemsRegistry {
             deprecated: false,       // RubyGems doesn't have a deprecation flag in API
             yanked: false,
             yanked_versions: vec![], // Not applicable to RubyGems
+            release_dates,
         })
     }
 }

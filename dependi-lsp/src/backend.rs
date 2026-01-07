@@ -18,7 +18,7 @@ use crate::parsers::python::PythonParser;
 use crate::parsers::ruby::RubyParser;
 use crate::parsers::{Dependency, Parser};
 use crate::providers::code_actions::create_code_actions;
-use crate::providers::completion::get_completions;
+use crate::providers::completion::{format_release_age, get_completions};
 use crate::providers::diagnostics::create_diagnostics;
 use crate::providers::inlay_hints::create_inlay_hint;
 use crate::registries::crates_io::CratesIoRegistry;
@@ -816,9 +816,19 @@ impl LanguageServer for DependiBackend {
                     parts.push(format!("{}\n", desc));
                 }
 
-                parts.push(format!("**Current:** {}", dep.version));
+                // Current version with release date
+                let current_date_str = info
+                    .get_release_date(&dep.version)
+                    .map(|dt| format!(" ({})", format_release_age(dt)))
+                    .unwrap_or_default();
+                parts.push(format!("**Current:** {}{}", dep.version, current_date_str));
+
                 if let Some(latest) = &info.latest {
-                    parts.push(format!("**Latest:** {}", latest));
+                    let latest_date_str = info
+                        .get_release_date(latest)
+                        .map(|dt| format!(" ({})", format_release_age(dt)))
+                        .unwrap_or_default();
+                    parts.push(format!("**Latest:** {}{}", latest, latest_date_str));
                 }
 
                 if let Some(license) = &info.license {
