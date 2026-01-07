@@ -86,6 +86,7 @@ impl Registry for RubyGemsRegistry {
             vulnerabilities: vec![], // Will be filled by OSV
             deprecated: false,       // RubyGems doesn't have a deprecation flag in API
             yanked: false,
+            yanked_versions: vec![], // Not applicable to RubyGems
         })
     }
 }

@@ -146,6 +146,7 @@ impl Registry for PyPiRegistry {
             vulnerabilities: vec![], // TODO: Integrate Safety/OSV
             deprecated,
             yanked: false,
+            yanked_versions: vec![], // Not applicable to PyPI
         })
     }
 }

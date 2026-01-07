@@ -144,6 +144,7 @@ fn test_cache_integration() {
         vulnerabilities: vec![],
         deprecated: false,
         yanked: false,
+        yanked_versions: vec![],
     };
 
     cache.insert("crates:serde".to_string(), serde_info.clone());

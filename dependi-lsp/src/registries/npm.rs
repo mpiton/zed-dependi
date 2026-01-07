@@ -176,6 +176,7 @@ impl Registry for NpmRegistry {
             vulnerabilities: vec![], // TODO: Integrate npm audit
             deprecated,
             yanked: false,
+            yanked_versions: vec![], // Not applicable to npm
         })
     }
 }

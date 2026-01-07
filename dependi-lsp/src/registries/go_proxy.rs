@@ -84,6 +84,7 @@ impl Registry for GoProxyRegistry {
             vulnerabilities: vec![], // TODO: Integrate vuln.go.dev
             deprecated: false,
             yanked: false,
+            yanked_versions: vec![], // Not applicable to Go
         })
     }
 }

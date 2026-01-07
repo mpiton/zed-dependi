@@ -154,6 +154,7 @@ mod tests {
             vulnerabilities: vec![],
             deprecated: false,
             yanked: false,
+            yanked_versions: vec![],
         }
     }
 

@@ -165,6 +165,7 @@ impl Registry for NuGetRegistry {
             vulnerabilities: vec![], // Will be filled by OSV
             deprecated,
             yanked: false,
+            yanked_versions: vec![], // Not applicable to NuGet
         })
     }
 }

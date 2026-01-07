@@ -23,8 +23,40 @@ pub struct VersionInfo {
     pub vulnerabilities: Vec<Vulnerability>,
     /// Whether the package is deprecated
     pub deprecated: bool,
-    /// Whether the version is yanked (Rust specific)
+    /// Whether the version is yanked (Rust specific) - deprecated, use yanked_versions instead
     pub yanked: bool,
+    /// List of yanked version numbers (Rust specific)
+    pub yanked_versions: Vec<String>,
+}
+
+impl VersionInfo {
+    /// Check if a specific version is yanked
+    pub fn is_version_yanked(&self, version: &str) -> bool {
+        let normalized = normalize_version_for_yanked_check(version);
+        self.yanked_versions
+            .iter()
+            .any(|v| normalize_version_for_yanked_check(v) == normalized)
+    }
+}
+
+/// Normalize version for yanked check comparison
+/// Removes common prefixes like ^, ~, >=, etc.
+fn normalize_version_for_yanked_check(version: &str) -> String {
+    let version = version.trim();
+    version
+        .strip_prefix('^')
+        .or_else(|| version.strip_prefix('~'))
+        .or_else(|| version.strip_prefix(">="))
+        .or_else(|| version.strip_prefix("<="))
+        .or_else(|| version.strip_prefix('>'))
+        .or_else(|| version.strip_prefix('<'))
+        .or_else(|| version.strip_prefix('='))
+        .unwrap_or(version)
+        .split(',')
+        .next()
+        .unwrap_or(version)
+        .trim()
+        .to_string()
 }
 
 /// Vulnerability information
@@ -179,5 +211,38 @@ mod tests {
         assert_eq!(VulnerabilitySeverity::Medium.as_str(), "medium");
         assert_eq!(VulnerabilitySeverity::High.as_str(), "high");
         assert_eq!(VulnerabilitySeverity::Critical.as_str(), "critical");
+    }
+
+    #[test]
+    fn test_is_version_yanked() {
+        let info = VersionInfo {
+            yanked_versions: vec!["1.0.0".to_string(), "1.0.1".to_string()],
+            ..Default::default()
+        };
+
+        assert!(info.is_version_yanked("1.0.0"));
+        assert!(info.is_version_yanked("1.0.1"));
+        assert!(!info.is_version_yanked("1.0.2"));
+        assert!(!info.is_version_yanked("2.0.0"));
+    }
+
+    #[test]
+    fn test_is_version_yanked_with_prefixes() {
+        let info = VersionInfo {
+            yanked_versions: vec!["1.0.0".to_string()],
+            ..Default::default()
+        };
+
+        assert!(info.is_version_yanked("^1.0.0"));
+        assert!(info.is_version_yanked("~1.0.0"));
+        assert!(info.is_version_yanked(">=1.0.0"));
+        assert!(info.is_version_yanked("=1.0.0"));
+    }
+
+    #[test]
+    fn test_is_version_yanked_empty() {
+        let info = VersionInfo::default();
+
+        assert!(!info.is_version_yanked("1.0.0"));
     }
 }

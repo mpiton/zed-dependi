@@ -133,6 +133,7 @@ impl Registry for PackagistRegistry {
             vulnerabilities: vec![], // TODO: Check PHP Security Advisories
             deprecated,
             yanked: false,
+            yanked_versions: vec![], // Not applicable to Packagist
         })
     }
 }

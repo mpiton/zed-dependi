@@ -139,7 +139,15 @@ impl Registry for CratesIoRegistry {
             .first()
             .and_then(|v| v.license.clone());
 
-        // Check if any version is yanked
+        // Collect all yanked versions
+        let yanked_versions: Vec<String> = crate_response
+            .versions
+            .iter()
+            .filter(|v| v.yanked)
+            .map(|v| v.num.clone())
+            .collect();
+
+        // Check if latest version is yanked (kept for backwards compatibility)
         let yanked = crate_response.versions.first().is_some_and(|v| v.yanked);
 
         Ok(VersionInfo {
@@ -153,6 +161,7 @@ impl Registry for CratesIoRegistry {
             vulnerabilities: vec![], // Filled by OSV
             deprecated: false,       // Filled by OSV
             yanked,
+            yanked_versions,
         })
     }
 }
