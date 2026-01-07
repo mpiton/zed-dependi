@@ -9,6 +9,88 @@ use crate::cache::Cache;
 use crate::parsers::Dependency;
 use crate::providers::inlay_hints::{VersionStatus, compare_versions};
 
+/// Type of semantic version update
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum VersionUpdateType {
+    Major,
+    Minor,
+    Patch,
+    PreRelease,
+}
+
+impl VersionUpdateType {
+    pub fn label(&self) -> &'static str {
+        match self {
+            VersionUpdateType::Major => "MAJOR",
+            VersionUpdateType::Minor => "minor",
+            VersionUpdateType::Patch => "patch",
+            VersionUpdateType::PreRelease => "prerelease",
+        }
+    }
+
+    pub fn emoji(&self) -> &'static str {
+        match self {
+            VersionUpdateType::Major => "🔴",
+            VersionUpdateType::Minor => "🟡",
+            VersionUpdateType::Patch => "🟢",
+            VersionUpdateType::PreRelease => "⚡",
+        }
+    }
+
+    pub fn is_preferred(&self) -> bool {
+        !matches!(self, VersionUpdateType::Major)
+    }
+}
+
+/// Determine the type of version update between current and new version
+pub fn compare_update_type(current: &str, new: &str) -> VersionUpdateType {
+    let current_normalized = normalize_version(current);
+    let new_normalized = normalize_version(new);
+
+    match (
+        semver::Version::parse(&current_normalized),
+        semver::Version::parse(&new_normalized),
+    ) {
+        (Ok(current_ver), Ok(new_ver)) => {
+            if !new_ver.pre.is_empty() && current_ver.pre.is_empty() {
+                VersionUpdateType::PreRelease
+            } else if current_ver.major != new_ver.major {
+                VersionUpdateType::Major
+            } else if current_ver.minor != new_ver.minor {
+                VersionUpdateType::Minor
+            } else if current_ver.patch != new_ver.patch {
+                VersionUpdateType::Patch
+            } else {
+                VersionUpdateType::PreRelease
+            }
+        }
+        _ => VersionUpdateType::Patch,
+    }
+}
+
+fn normalize_version(version: &str) -> String {
+    let version = version.trim();
+    let version = version
+        .strip_prefix('^')
+        .or_else(|| version.strip_prefix('~'))
+        .or_else(|| version.strip_prefix(">="))
+        .or_else(|| version.strip_prefix("<="))
+        .or_else(|| version.strip_prefix('>'))
+        .or_else(|| version.strip_prefix('<'))
+        .or_else(|| version.strip_prefix('='))
+        .or_else(|| version.strip_prefix('v'))
+        .unwrap_or(version);
+
+    let version = version.split(',').next().unwrap_or(version).trim();
+
+    let parts: Vec<&str> = version.split('.').collect();
+    match parts.len() {
+        1 => format!("{}.0.0", parts[0]),
+        2 => format!("{}.{}.0", parts[0], parts[1]),
+        _ => version.to_string(),
+    }
+}
+
 /// Create code actions for dependencies in the given range
 pub fn create_code_actions(
     dependencies: &[Dependency],
@@ -46,6 +128,7 @@ fn create_update_action(
 
     match compare_versions(&dep.version, &version_info) {
         VersionStatus::UpdateAvailable(new_version) => {
+            let update_type = compare_update_type(&dep.version, &new_version);
             let new_text = format_version(&new_version, file_type);
 
             let edit = TextEdit {
@@ -65,8 +148,16 @@ fn create_update_action(
             let mut changes = HashMap::new();
             changes.insert(uri.clone(), vec![edit]);
 
+            let title = format!(
+                "{} Update {} to {} ({})",
+                update_type.emoji(),
+                dep.name,
+                new_version,
+                update_type.label()
+            );
+
             Some(CodeActionOrCommand::CodeAction(CodeAction {
-                title: format!("Update {} to {}", dep.name, new_version),
+                title,
                 kind: Some(CodeActionKind::QUICKFIX),
                 diagnostics: None,
                 edit: Some(WorkspaceEdit {
@@ -75,7 +166,7 @@ fn create_update_action(
                     change_annotations: None,
                 }),
                 command: None,
-                is_preferred: Some(true),
+                is_preferred: Some(update_type.is_preferred()),
                 disabled: None,
                 data: None,
             }))
@@ -439,5 +530,183 @@ mod tests {
         });
 
         assert_eq!(actions.len(), 0);
+    }
+
+    #[test]
+    fn test_version_update_type_major() {
+        let update_type = compare_update_type("1.0.0", "2.0.0");
+        assert_eq!(update_type, VersionUpdateType::Major);
+        assert_eq!(update_type.label(), "MAJOR");
+        assert_eq!(update_type.emoji(), "🔴");
+        assert!(!update_type.is_preferred());
+    }
+
+    #[test]
+    fn test_version_update_type_minor() {
+        let update_type = compare_update_type("1.5.0", "1.6.0");
+        assert_eq!(update_type, VersionUpdateType::Minor);
+        assert_eq!(update_type.label(), "minor");
+        assert_eq!(update_type.emoji(), "🟡");
+        assert!(update_type.is_preferred());
+    }
+
+    #[test]
+    fn test_version_update_type_patch() {
+        let update_type = compare_update_type("1.5.0", "1.5.1");
+        assert_eq!(update_type, VersionUpdateType::Patch);
+        assert_eq!(update_type.label(), "patch");
+        assert_eq!(update_type.emoji(), "🟢");
+        assert!(update_type.is_preferred());
+    }
+
+    #[test]
+    fn test_version_update_type_prerelease() {
+        let update_type = compare_update_type("1.5.0", "1.5.1-alpha.1");
+        assert_eq!(update_type, VersionUpdateType::PreRelease);
+        assert_eq!(update_type.label(), "prerelease");
+        assert_eq!(update_type.emoji(), "⚡");
+        assert!(update_type.is_preferred());
+    }
+
+    #[test]
+    fn test_version_update_type_with_prefixes() {
+        assert_eq!(
+            compare_update_type("^1.0.0", "2.0.0"),
+            VersionUpdateType::Major
+        );
+        assert_eq!(
+            compare_update_type("~1.5.0", "1.6.0"),
+            VersionUpdateType::Minor
+        );
+        assert_eq!(
+            compare_update_type(">=1.5.0", "1.5.1"),
+            VersionUpdateType::Patch
+        );
+    }
+
+    #[test]
+    fn test_version_update_type_invalid_semver() {
+        let update_type = compare_update_type("invalid", "also-invalid");
+        assert_eq!(update_type, VersionUpdateType::Patch);
+    }
+
+    #[test]
+    fn test_code_action_title_with_major_update() {
+        let cache = MemoryCache::new();
+        cache.insert(
+            "test:serde".to_string(),
+            VersionInfo {
+                latest: Some("2.0.0".to_string()),
+                ..Default::default()
+            },
+        );
+
+        let deps = vec![create_test_dependency("serde", "1.0.0", 5)];
+        let uri = Url::parse("file:///test/Cargo.toml").unwrap();
+        let range = Range {
+            start: Position {
+                line: 0,
+                character: 0,
+            },
+            end: Position {
+                line: 10,
+                character: 0,
+            },
+        };
+
+        let actions = create_code_actions(&deps, &cache, &uri, range, FileType::Cargo, |name| {
+            format!("test:{}", name)
+        });
+
+        assert_eq!(actions.len(), 1);
+        match &actions[0] {
+            CodeActionOrCommand::CodeAction(action) => {
+                assert!(action.title.contains("🔴"));
+                assert!(action.title.contains("MAJOR"));
+                assert!(action.title.contains("Update serde to 2.0.0"));
+                assert_eq!(action.is_preferred, Some(false));
+            }
+            _ => panic!("Expected CodeAction"),
+        }
+    }
+
+    #[test]
+    fn test_code_action_title_with_minor_update() {
+        let cache = MemoryCache::new();
+        cache.insert(
+            "test:tokio".to_string(),
+            VersionInfo {
+                latest: Some("1.36.0".to_string()),
+                ..Default::default()
+            },
+        );
+
+        let deps = vec![create_test_dependency("tokio", "1.35.0", 5)];
+        let uri = Url::parse("file:///test/Cargo.toml").unwrap();
+        let range = Range {
+            start: Position {
+                line: 0,
+                character: 0,
+            },
+            end: Position {
+                line: 10,
+                character: 0,
+            },
+        };
+
+        let actions = create_code_actions(&deps, &cache, &uri, range, FileType::Cargo, |name| {
+            format!("test:{}", name)
+        });
+
+        assert_eq!(actions.len(), 1);
+        match &actions[0] {
+            CodeActionOrCommand::CodeAction(action) => {
+                assert!(action.title.contains("🟡"));
+                assert!(action.title.contains("minor"));
+                assert!(action.title.contains("Update tokio to 1.36.0"));
+                assert_eq!(action.is_preferred, Some(true));
+            }
+            _ => panic!("Expected CodeAction"),
+        }
+    }
+
+    #[test]
+    fn test_code_action_title_with_patch_update() {
+        let cache = MemoryCache::new();
+        cache.insert(
+            "test:reqwest".to_string(),
+            VersionInfo {
+                latest: Some("0.12.1".to_string()),
+                ..Default::default()
+            },
+        );
+
+        let deps = vec![create_test_dependency("reqwest", "0.12.0", 5)];
+        let uri = Url::parse("file:///test/Cargo.toml").unwrap();
+        let range = Range {
+            start: Position {
+                line: 0,
+                character: 0,
+            },
+            end: Position {
+                line: 10,
+                character: 0,
+            },
+        };
+
+        let actions = create_code_actions(&deps, &cache, &uri, range, FileType::Cargo, |name| {
+            format!("test:{}", name)
+        });
+
+        assert_eq!(actions.len(), 1);
+        match &actions[0] {
+            CodeActionOrCommand::CodeAction(action) => {
+                assert!(action.title.contains("🟢"));
+                assert!(action.title.contains("patch"));
+                assert!(action.title.contains("Update reqwest to 0.12.1"));
+                assert_eq!(action.is_preferred, Some(true));
+            }
+            _ => panic!("Expected CodeAction"),
+        }
     }
 }
