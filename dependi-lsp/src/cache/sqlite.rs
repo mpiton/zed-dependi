@@ -46,7 +46,6 @@ impl Default for SqliteCacheConfig {
 pub struct SqliteCache {
     pool: Arc<Pool<SqliteConnectionManager>>,
     ttl_secs: i64,
-    config: SqliteCacheConfig,
 }
 
 impl SqliteCache {
@@ -65,7 +64,19 @@ impl SqliteCache {
 
     /// Create a new SQLite cache at a custom path with custom configuration
     pub fn with_path_and_config(path: PathBuf, config: SqliteCacheConfig) -> anyhow::Result<Self> {
-        let manager = SqliteConnectionManager::file(&path);
+        let busy_timeout_ms = config.busy_timeout_ms;
+        let cache_size_kb = config.cache_size_kb;
+
+        let manager = SqliteConnectionManager::file(&path).with_init(move |conn| {
+            let pragmas = format!(
+                "PRAGMA busy_timeout={};
+                 PRAGMA synchronous=NORMAL;
+                 PRAGMA cache_size=-{};",
+                busy_timeout_ms, cache_size_kb
+            );
+            conn.execute_batch(&pragmas)?;
+            Ok(())
+        });
 
         let pool = Pool::builder()
             .max_size(config.max_pool_size)
@@ -78,7 +89,6 @@ impl SqliteCache {
         let cache = Self {
             pool: Arc::new(pool),
             ttl_secs: config.ttl_secs,
-            config,
         };
 
         cache.init_schema()?;
@@ -119,7 +129,6 @@ impl SqliteCache {
         let cache = Self {
             pool: Arc::new(pool),
             ttl_secs: config.ttl_secs,
-            config,
         };
 
         cache.init_schema_memory()?;
@@ -158,18 +167,15 @@ impl SqliteCache {
         self.pool.get().ok()
     }
 
-    /// Initialize the database schema with WAL mode and optimized PRAGMAs
+    /// Initialize the database schema with WAL mode
+    ///
+    /// Note: Per-connection PRAGMAs (busy_timeout, synchronous, cache_size)
+    /// are applied via with_init() on every new connection from the pool.
+    /// Only WAL mode (database-level) is set here.
     fn init_schema(&self) -> anyhow::Result<()> {
         let conn = self.pool.get()?;
 
-        let pragmas = format!(
-            "PRAGMA journal_mode=WAL;
-             PRAGMA busy_timeout={};
-             PRAGMA synchronous=NORMAL;
-             PRAGMA cache_size=-{};",
-            self.config.busy_timeout_ms, self.config.cache_size_kb
-        );
-        conn.execute_batch(&pragmas)?;
+        conn.execute_batch("PRAGMA journal_mode=WAL;")?;
 
         conn.execute(
             "CREATE TABLE IF NOT EXISTS packages (
