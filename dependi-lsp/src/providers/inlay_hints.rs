@@ -104,7 +104,7 @@ fn create_hint_label_and_tooltip(
     if let Some(info) = version_info
         && info.deprecated
     {
-        let dep_label = "[!] Deprecated".to_string();
+        let dep_label = "⚠ Deprecated".to_string();
         let dep_tooltip = format_deprecation_tooltip(dep, info);
 
         // Combine with update info if available
@@ -123,7 +123,7 @@ fn create_hint_label_and_tooltip(
 
     // Handle vulnerabilities
     if vuln_count > 0 {
-        let vuln_label = format!("[!] {}", vuln_count);
+        let vuln_label = format!("⚠ {}", vuln_count);
         let vuln_tooltip = format_vulnerability_tooltip(version_info.unwrap());
 
         // Combine with update info if available
@@ -210,7 +210,7 @@ fn format_vulnerability_tooltip(info: &VersionInfo) -> String {
 fn format_deprecation_tooltip(dep: &Dependency, info: &VersionInfo) -> String {
     let mut lines = vec![
         format!(
-            "**[!] PACKAGE DEPRECATED**\n\nThe package \"{}\" is deprecated.",
+            "**⚠ PACKAGE DEPRECATED**\n\nThe package \"{}\" is deprecated.",
             dep.name
         ),
         "".to_string(),
@@ -493,7 +493,7 @@ mod tests {
         match hint.label {
             InlayHintLabel::String(s) => {
                 assert!(s.contains("Deprecated"));
-                assert!(s.contains("[!]"));
+                assert!(s.contains("⚠"));
             }
             _ => panic!("Expected string label"),
         }
@@ -532,7 +532,7 @@ mod tests {
         match hint.label {
             InlayHintLabel::String(s) => {
                 assert!(!s.contains("Deprecated"));
-                assert!(!s.contains("[!]"));
+                assert!(!s.contains("⚠"));
                 assert!(s.contains("[OK]"));
             }
             _ => panic!("Expected string label"),
@@ -660,7 +660,7 @@ mod tests {
         match hint.label {
             InlayHintLabel::String(s) => {
                 assert!(s.contains("[YANKED]"));
-                assert!(!s.contains("[!]"));
+                assert!(!s.contains("⚠"));
             }
             _ => panic!("Expected string label"),
         }

@@ -574,10 +574,10 @@ fn generate_markdown_report(
         "## Summary".to_string(),
         "| Severity | Count |".to_string(),
         "|----------|-------|".to_string(),
-        format!("| [!!] Critical | {} |", summary.critical),
-        format!("| [!] High | {} |", summary.high),
-        format!("| [~] Medium | {} |", summary.medium),
-        format!("| [-] Low | {} |", summary.low),
+        format!("| ⚠ Critical | {} |", summary.critical),
+        format!("| ▲ High | {} |", summary.high),
+        format!("| ● Medium | {} |", summary.medium),
+        format!("| ○ Low | {} |", summary.low),
         format!("| **Total** | **{}** |", summary.total),
         String::new(),
     ];
@@ -846,7 +846,7 @@ impl LanguageServer for DependiBackend {
                 // Add vulnerability information if present
                 if !info.vulnerabilities.is_empty() {
                     parts.push(format!(
-                        "\n### [!] {} Security {}",
+                        "\n### ⚠ {} Security {}",
                         info.vulnerabilities.len(),
                         if info.vulnerabilities.len() == 1 {
                             "Vulnerability"
