@@ -1,37 +1,60 @@
 //! Client for PyPI (Python Package Index) registry
 
 use std::collections::HashMap;
-use std::time::Duration;
+use std::sync::Arc;
 
 use chrono::{DateTime, NaiveDateTime, Utc};
 use reqwest::Client;
 use serde::Deserialize;
 
+use super::http_client::create_shared_client;
 use super::{Registry, VersionInfo};
 
 /// Client for the PyPI registry
 pub struct PyPiRegistry {
-    client: Client,
+    client: Arc<Client>,
     base_url: String,
 }
 
 impl PyPiRegistry {
-    pub fn new() -> anyhow::Result<Self> {
-        let client = Client::builder()
-            .user_agent("dependi-lsp (https://github.com/mathieu/zed-dependi)")
-            .timeout(Duration::from_secs(10))
-            .build()?;
-
-        Ok(Self {
+    /// Constructs a PyPiRegistry using the provided shared HTTP client.
+    ///
+    /// The returned registry is configured with the default PyPI API base URL (`https://pypi.org/pypi`).
+    ///
+    /// # Parameters
+    ///
+    /// - `client` — shared HTTP client used for performing requests to the PyPI API.
+    ///
+    /// # Examples
+    ///
+    /// ```ignore
+    /// use std::sync::Arc;
+    /// use dependi_lsp::registries::pypi::PyPiRegistry;
+    /// use dependi_lsp::registries::http_client::create_shared_client;
+    ///
+    /// let client = create_shared_client().expect("failed to create client");
+    /// let registry = PyPiRegistry::with_client(client);
+    /// ```
+    pub fn with_client(client: Arc<Client>) -> Self {
+        Self {
             client,
             base_url: "https://pypi.org/pypi".to_string(),
-        })
+        }
     }
 }
 
 impl Default for PyPiRegistry {
+    /// Creates a PyPiRegistry configured with a shared HTTP client and the default PyPI base URL.
+    ///
+    /// # Examples
+    ///
+    /// ```ignore
+    /// use dependi_lsp::registries::pypi::PyPiRegistry;
+    ///
+    /// let _registry = PyPiRegistry::default();
+    /// ```
     fn default() -> Self {
-        Self::new().expect("Failed to create PyPiRegistry")
+        Self::with_client(create_shared_client().expect("Failed to create HTTP client"))
     }
 }
 
@@ -67,6 +90,10 @@ struct ReleaseFile {
 }
 
 impl Registry for PyPiRegistry {
+    fn http_client(&self) -> Arc<Client> {
+        Arc::clone(&self.client)
+    }
+
     async fn get_version_info(&self, package_name: &str) -> anyhow::Result<VersionInfo> {
         // Normalize package name (PyPI is case-insensitive, uses lowercase)
         let normalized_name = normalize_package_name(package_name);

@@ -9,6 +9,7 @@ use reqwest::Client;
 use serde::Deserialize;
 use tokio::sync::Mutex;
 
+use super::http_client::create_shared_client;
 use super::{Registry, VersionInfo};
 
 /// Rate limiter to respect crates.io's 1 request/second limit
@@ -36,29 +37,56 @@ impl RateLimiter {
 
 /// Client for the crates.io registry
 pub struct CratesIoRegistry {
-    client: Client,
+    client: Arc<Client>,
     rate_limiter: Arc<Mutex<RateLimiter>>,
     base_url: String,
 }
 
 impl CratesIoRegistry {
-    pub fn new() -> anyhow::Result<Self> {
-        let client = Client::builder()
-            .user_agent("dependi-lsp (https://github.com/mathieu/zed-dependi)")
-            .timeout(Duration::from_secs(10))
-            .build()?;
-
-        Ok(Self {
+    /// Creates a CratesIoRegistry that uses the provided shared HTTP client.
+    ///
+    /// The registry will use the given `client` for all HTTP requests, enforce a
+    /// default rate limit of 1 request per second, and target the crates.io API
+    /// base URL.
+    ///
+    /// # Examples
+    ///
+    /// ```ignore
+    /// use std::sync::Arc;
+    /// use dependi_lsp::registries::crates_io::CratesIoRegistry;
+    /// use dependi_lsp::registries::http_client::create_shared_client;
+    ///
+    /// let client = create_shared_client().expect("failed to create client");
+    /// let registry = CratesIoRegistry::with_client(client);
+    /// ```
+    pub fn with_client(client: Arc<Client>) -> Self {
+        Self {
             client,
             rate_limiter: Arc::new(Mutex::new(RateLimiter::new(1.0))),
             base_url: "https://crates.io/api/v1".to_string(),
-        })
+        }
     }
 }
 
 impl Default for CratesIoRegistry {
+    /// Creates a `CratesIoRegistry` configured with a shared HTTP client and default rate limiting.
+    ///
+    /// The registry is initialized with a shared `reqwest::Client`, a 1 request/second rate limiter,
+    /// and the default crates.io API base URL.
+    ///
+    /// # Panics
+    ///
+    /// This function will panic if creating the shared HTTP client fails.
+    ///
+    /// # Examples
+    ///
+    /// ```ignore
+    /// use dependi_lsp::registries::crates_io::CratesIoRegistry;
+    ///
+    /// let _registry = CratesIoRegistry::default();
+    /// ```
     fn default() -> Self {
-        Self::new().expect("Failed to create CratesIoRegistry")
+        Self::with_client(create_shared_client().expect("Failed to create HTTP client"))
     }
 }
 
@@ -87,6 +115,10 @@ struct VersionEntry {
 }
 
 impl Registry for CratesIoRegistry {
+    fn http_client(&self) -> Arc<Client> {
+        Arc::clone(&self.client)
+    }
+
     async fn get_version_info(&self, package_name: &str) -> anyhow::Result<VersionInfo> {
         // Rate limiting
         {

@@ -3,10 +3,23 @@ use dependi_lsp::registries::{
     Registry, crates_io::CratesIoRegistry, npm::NpmRegistry, pypi::PyPiRegistry,
 };
 
+/// Quick async test program that fetches and prints version information from multiple package registries.
+///
+/// The program queries crates.io for "serde", npm for "express", and PyPI for "flask".
+/// For each registry it prints a sample of the first three version strings, the total
+/// count of release dates, and a sample of the first three release dates. Errors are
+/// printed to standard output.
+///
+/// # Examples
+///
+/// ```no_run
+/// // Run the compiled binary to see registry outputs:
+/// // cargo run --bin registry_test
+/// ```
 #[tokio::main]
 async fn main() {
     println!("=== Testing crates.io (serde) ===");
-    let registry = CratesIoRegistry::new().unwrap();
+    let registry = CratesIoRegistry::default();
     match registry.get_version_info("serde").await {
         Ok(info) => {
             println!(
@@ -23,7 +36,7 @@ async fn main() {
     }
 
     println!("\n=== Testing npm (express) ===");
-    let registry = NpmRegistry::new().unwrap();
+    let registry = NpmRegistry::default();
     match registry.get_version_info("express").await {
         Ok(info) => {
             println!(
@@ -40,7 +53,7 @@ async fn main() {
     }
 
     println!("\n=== Testing PyPI (flask) ===");
-    let registry = PyPiRegistry::new().unwrap();
+    let registry = PyPiRegistry::default();
     match registry.get_version_info("flask").await {
         Ok(info) => {
             println!(

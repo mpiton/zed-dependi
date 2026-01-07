@@ -1,37 +1,55 @@
 //! Client for Packagist (PHP package registry)
 
 use std::collections::HashMap;
-use std::time::Duration;
+use std::sync::Arc;
 
 use chrono::{DateTime, Utc};
 use reqwest::Client;
 use serde::Deserialize;
 
+use super::http_client::create_shared_client;
 use super::{Registry, VersionInfo};
 
 /// Client for the Packagist registry
 pub struct PackagistRegistry {
-    client: Client,
+    client: Arc<Client>,
     base_url: String,
 }
 
 impl PackagistRegistry {
-    pub fn new() -> anyhow::Result<Self> {
-        let client = Client::builder()
-            .user_agent("dependi-lsp (https://github.com/mathieu/zed-dependi)")
-            .timeout(Duration::from_secs(10))
-            .build()?;
-
-        Ok(Self {
+    /// Creates a PackagistRegistry configured with the given shared HTTP client and the default Packagist API base URL.
+    ///
+    /// The registry's base URL is set to "https://repo.packagist.org".
+    ///
+    /// # Examples
+    ///
+    /// ```ignore
+    /// use std::sync::Arc;
+    /// use dependi_lsp::registries::packagist::PackagistRegistry;
+    ///
+    /// let client = Arc::new(reqwest::Client::new());
+    /// let registry = PackagistRegistry::with_client(client);
+    /// ```
+    pub fn with_client(client: Arc<Client>) -> Self {
+        Self {
             client,
             base_url: "https://repo.packagist.org".to_string(),
-        })
+        }
     }
 }
 
 impl Default for PackagistRegistry {
+    /// Create a PackagistRegistry configured with a shared HTTP client and the default Packagist API base URL.
+    ///
+    /// # Examples
+    ///
+    /// ```ignore
+    /// use dependi_lsp::registries::packagist::PackagistRegistry;
+    ///
+    /// let _registry = PackagistRegistry::default();
+    /// ```
     fn default() -> Self {
-        Self::new().expect("Failed to create PackagistRegistry")
+        Self::with_client(create_shared_client().expect("Failed to create HTTP client"))
     }
 }
 
@@ -60,6 +78,10 @@ struct SourceInfo {
 }
 
 impl Registry for PackagistRegistry {
+    fn http_client(&self) -> Arc<Client> {
+        Arc::clone(&self.client)
+    }
+
     async fn get_version_info(&self, package_name: &str) -> anyhow::Result<VersionInfo> {
         // Package name format: vendor/package
         if !package_name.contains('/') {

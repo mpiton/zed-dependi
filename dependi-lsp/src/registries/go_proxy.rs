@@ -1,37 +1,58 @@
 //! Client for Go module proxy (proxy.golang.org)
 
 use std::collections::HashMap;
-use std::time::Duration;
+use std::sync::Arc;
 
 use chrono::{DateTime, Utc};
 use reqwest::Client;
 use serde::Deserialize;
 
+use super::http_client::create_shared_client;
 use super::{Registry, VersionInfo};
 
 /// Client for the Go module proxy
 pub struct GoProxyRegistry {
-    client: Client,
+    client: Arc<Client>,
     base_url: String,
 }
 
 impl GoProxyRegistry {
-    pub fn new() -> anyhow::Result<Self> {
-        let client = Client::builder()
-            .user_agent("dependi-lsp (https://github.com/mathieu/zed-dependi)")
-            .timeout(Duration::from_secs(10))
-            .build()?;
-
-        Ok(Self {
+    /// Creates a GoProxyRegistry that uses the provided shared HTTP client and the default Go proxy base URL.
+    ///
+    /// `client` is the shared `reqwest::Client` used for all outgoing HTTP requests to the Go proxy.
+    /// The returned registry is configured with `base_url` set to "https://proxy.golang.org".
+    ///
+    /// # Examples
+    ///
+    /// ```ignore
+    /// use std::sync::Arc;
+    /// use dependi_lsp::registries::go_proxy::GoProxyRegistry;
+    ///
+    /// let client = Arc::new(reqwest::Client::new());
+    /// let _registry = GoProxyRegistry::with_client(client);
+    /// ```
+    pub fn with_client(client: Arc<Client>) -> Self {
+        Self {
             client,
             base_url: "https://proxy.golang.org".to_string(),
-        })
+        }
     }
 }
 
 impl Default for GoProxyRegistry {
+    /// Creates a GoProxyRegistry configured with a shared HTTP client.
+    ///
+    /// The registry's HTTP client is produced by `create_shared_client`.
+    ///
+    /// # Examples
+    ///
+    /// ```ignore
+    /// use dependi_lsp::registries::go_proxy::GoProxyRegistry;
+    ///
+    /// let registry = GoProxyRegistry::default();
+    /// ```
     fn default() -> Self {
-        Self::new().expect("Failed to create GoProxyRegistry")
+        Self::with_client(create_shared_client().expect("Failed to create HTTP client"))
     }
 }
 
@@ -45,6 +66,10 @@ struct VersionInfoResponse {
 }
 
 impl Registry for GoProxyRegistry {
+    fn http_client(&self) -> Arc<Client> {
+        Arc::clone(&self.client)
+    }
+
     async fn get_version_info(&self, module_path: &str) -> anyhow::Result<VersionInfo> {
         // Encode module path for URL
         // Go proxy requires case-encoding: uppercase letters become ! followed by lowercase

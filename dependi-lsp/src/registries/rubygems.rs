@@ -5,12 +5,12 @@
 
 use std::collections::HashMap;
 use std::sync::Arc;
-use std::time::Duration;
 
 use chrono::{DateTime, Utc};
 use reqwest::Client;
 use serde::Deserialize;
 
+use super::http_client::create_shared_client;
 use super::{Registry, VersionInfo};
 
 /// Client for the RubyGems.org registry
@@ -20,22 +20,41 @@ pub struct RubyGemsRegistry {
 }
 
 impl RubyGemsRegistry {
-    pub fn new() -> anyhow::Result<Self> {
-        let client = Client::builder()
-            .user_agent("dependi-lsp (https://github.com/mpiton/zed-dependi)")
-            .timeout(Duration::from_secs(10))
-            .build()?;
-
-        Ok(Self {
-            client: Arc::new(client),
+    /// Creates a RubyGemsRegistry that uses the provided shared HTTP client.
+    ///
+    /// The provided `client` will be used for all HTTP requests to the RubyGems API. The registry's
+    /// base API URL is set to "https://rubygems.org/api/v1".
+    ///
+    /// # Examples
+    ///
+    /// ```ignore
+    /// use std::sync::Arc;
+    /// use dependi_lsp::registries::rubygems::RubyGemsRegistry;
+    ///
+    /// let client = Arc::new(reqwest::Client::new());
+    /// let _registry = RubyGemsRegistry::with_client(client);
+    /// ```
+    pub fn with_client(client: Arc<Client>) -> Self {
+        Self {
+            client,
             base_url: "https://rubygems.org/api/v1".to_string(),
-        })
+        }
     }
 }
 
 impl Default for RubyGemsRegistry {
+    /// Creates a `RubyGemsRegistry` configured with the shared HTTP client used by the module.
+    ///
+    /// # Examples
+    ///
+    /// ```ignore
+    /// use dependi_lsp::registries::rubygems::RubyGemsRegistry;
+    ///
+    /// let registry = RubyGemsRegistry::default();
+    /// // `registry` is ready to query the RubyGems API.
+    /// ```
     fn default() -> Self {
-        Self::new().expect("Failed to create RubyGemsRegistry")
+        Self::with_client(create_shared_client().expect("Failed to create HTTP client"))
     }
 }
 
@@ -61,6 +80,10 @@ struct VersionResponse {
 }
 
 impl Registry for RubyGemsRegistry {
+    fn http_client(&self) -> Arc<Client> {
+        Arc::clone(&self.client)
+    }
+
     async fn get_version_info(&self, package_name: &str) -> anyhow::Result<VersionInfo> {
         // Fetch gem info (contains latest version)
         let gem_url = format!("{}/gems/{}.json", self.base_url, package_name);

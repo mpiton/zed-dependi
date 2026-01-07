@@ -2,12 +2,12 @@
 
 use std::collections::HashMap;
 use std::sync::Arc;
-use std::time::Duration;
 
 use chrono::{DateTime, Utc};
 use reqwest::Client;
 use serde::Deserialize;
 
+use super::http_client::create_shared_client;
 use super::{Registry, VersionInfo};
 
 /// Client for the pub.dev registry
@@ -17,22 +17,37 @@ pub struct PubDevRegistry {
 }
 
 impl PubDevRegistry {
-    pub fn new() -> anyhow::Result<Self> {
-        let client = Client::builder()
-            .user_agent("dependi-lsp (https://github.com/mathieu/zed-dependi)")
-            .timeout(Duration::from_secs(10))
-            .build()?;
-
-        Ok(Self {
-            client: Arc::new(client),
+    /// Creates a `PubDevRegistry` configured to use the given shared HTTP client.
+    ///
+    /// # Examples
+    ///
+    /// ```ignore
+    /// use std::sync::Arc;
+    /// use dependi_lsp::registries::pub_dev::PubDevRegistry;
+    ///
+    /// let client = Arc::new(reqwest::Client::new());
+    /// let _registry = PubDevRegistry::with_client(client);
+    /// ```
+    pub fn with_client(client: Arc<Client>) -> Self {
+        Self {
+            client,
             base_url: "https://pub.dev/api".to_string(),
-        })
+        }
     }
 }
 
 impl Default for PubDevRegistry {
+    /// Constructs a PubDevRegistry using a shared HTTP client created by `create_shared_client`.
+    ///
+    /// # Examples
+    ///
+    /// ```ignore
+    /// use dependi_lsp::registries::pub_dev::PubDevRegistry;
+    ///
+    /// let registry = PubDevRegistry::default();
+    /// ```
     fn default() -> Self {
-        Self::new().expect("Failed to create PubDevRegistry")
+        Self::with_client(create_shared_client().expect("Failed to create HTTP client"))
     }
 }
 
@@ -64,6 +79,10 @@ struct PubPubspec {
 }
 
 impl Registry for PubDevRegistry {
+    fn http_client(&self) -> Arc<Client> {
+        Arc::clone(&self.client)
+    }
+
     async fn get_version_info(&self, package_name: &str) -> anyhow::Result<VersionInfo> {
         let url = format!("{}/packages/{}", self.base_url, package_name);
 

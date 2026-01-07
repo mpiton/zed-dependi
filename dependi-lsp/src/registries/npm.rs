@@ -1,37 +1,56 @@
 //! Client for npm registry
 
 use std::collections::HashMap;
-use std::time::Duration;
+use std::sync::Arc;
 
 use chrono::{DateTime, Utc};
 use reqwest::Client;
 use serde::Deserialize;
 
+use super::http_client::create_shared_client;
 use super::{Registry, VersionInfo};
 
 /// Client for the npm registry
 pub struct NpmRegistry {
-    client: Client,
+    client: Arc<Client>,
     base_url: String,
 }
 
 impl NpmRegistry {
-    pub fn new() -> anyhow::Result<Self> {
-        let client = Client::builder()
-            .user_agent("dependi-lsp (https://github.com/mathieu/zed-dependi)")
-            .timeout(Duration::from_secs(10))
-            .build()?;
-
-        Ok(Self {
+    /// Constructs an NpmRegistry that uses the provided shared HTTP client and the default npm registry base URL.
+    ///
+    /// The supplied `client` is used for all HTTP requests performed by the registry; the base URL is set to
+    /// "https://registry.npmjs.org".
+    ///
+    /// # Examples
+    ///
+    /// ```ignore
+    /// use std::sync::Arc;
+    /// use dependi_lsp::registries::npm::NpmRegistry;
+    ///
+    /// let client = Arc::new(reqwest::Client::new());
+    /// let registry = NpmRegistry::with_client(client);
+    /// ```
+    pub fn with_client(client: Arc<Client>) -> Self {
+        Self {
             client,
             base_url: "https://registry.npmjs.org".to_string(),
-        })
+        }
     }
 }
 
 impl Default for NpmRegistry {
+    /// Creates a default NpmRegistry configured with a shared HTTP client and the standard npm registry base URL.
+    ///
+    /// # Examples
+    ///
+    /// ```ignore
+    /// use dependi_lsp::registries::npm::NpmRegistry;
+    ///
+    /// let registry = NpmRegistry::default();
+    /// ```
     fn default() -> Self {
-        Self::new().expect("Failed to create NpmRegistry")
+        Self::with_client(create_shared_client().expect("Failed to create HTTP client"))
     }
 }
 
@@ -108,6 +127,10 @@ fn normalize_repo_url(url: &str) -> String {
 }
 
 impl Registry for NpmRegistry {
+    fn http_client(&self) -> Arc<Client> {
+        Arc::clone(&self.client)
+    }
+
     async fn get_version_info(&self, package_name: &str) -> anyhow::Result<VersionInfo> {
         // Handle scoped packages (@scope/name -> @scope%2fname)
         let encoded_name = if package_name.starts_with('@') {

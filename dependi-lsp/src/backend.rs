@@ -1,6 +1,7 @@
 use std::sync::{Arc, RwLock};
 
 use dashmap::DashMap;
+use reqwest::Client as HttpClient;
 use serde::{Deserialize, Serialize};
 use tower_lsp::jsonrpc::Result;
 use tower_lsp::lsp_types::*;
@@ -23,6 +24,7 @@ use crate::providers::diagnostics::create_diagnostics;
 use crate::providers::inlay_hints::create_inlay_hint;
 use crate::registries::crates_io::CratesIoRegistry;
 use crate::registries::go_proxy::GoProxyRegistry;
+use crate::registries::http_client::create_shared_client;
 use crate::registries::npm::NpmRegistry;
 use crate::registries::nuget::NuGetRegistry;
 use crate::registries::packagist::PackagistRegistry;
@@ -103,7 +105,28 @@ pub struct DependiBackend {
 }
 
 impl DependiBackend {
+    /// Create a new DependiBackend with default configuration, parsers, registry clients,
+    /// caches, and an OSV client.
+    ///
+    /// The provided `client` is used for LSP communication. A shared HTTP client is created
+    /// internally and used to construct registry clients bound to that HTTP client.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// // Obtain an LSP `Client` from the runtime environment and pass it in:
+    /// // let client = /* LSP client */ ;
+    /// // let backend = DependiBackend::new(client);
+    /// ```
     pub fn new(client: Client) -> Self {
+        Self::with_http_client(client, None)
+    }
+
+    pub fn with_http_client(client: Client, http_client: Option<Arc<HttpClient>>) -> Self {
+        let http_client = http_client.unwrap_or_else(|| {
+            create_shared_client().expect("Failed to create shared HTTP client")
+        });
+
         Self {
             client,
             config: RwLock::new(Config::default()),
@@ -117,14 +140,14 @@ impl DependiBackend {
             dart_parser: DartParser::new(),
             csharp_parser: CsharpParser::new(),
             ruby_parser: RubyParser::new(),
-            crates_io: Arc::new(CratesIoRegistry::default()),
-            npm_registry: Arc::new(NpmRegistry::default()),
-            pypi: Arc::new(PyPiRegistry::default()),
-            go_proxy: Arc::new(GoProxyRegistry::default()),
-            packagist: Arc::new(PackagistRegistry::default()),
-            pub_dev: Arc::new(PubDevRegistry::default()),
-            nuget: Arc::new(NuGetRegistry::default()),
-            rubygems: Arc::new(RubyGemsRegistry::default()),
+            crates_io: Arc::new(CratesIoRegistry::with_client(Arc::clone(&http_client))),
+            npm_registry: Arc::new(NpmRegistry::with_client(Arc::clone(&http_client))),
+            pypi: Arc::new(PyPiRegistry::with_client(Arc::clone(&http_client))),
+            go_proxy: Arc::new(GoProxyRegistry::with_client(Arc::clone(&http_client))),
+            packagist: Arc::new(PackagistRegistry::with_client(Arc::clone(&http_client))),
+            pub_dev: Arc::new(PubDevRegistry::with_client(Arc::clone(&http_client))),
+            nuget: Arc::new(NuGetRegistry::with_client(Arc::clone(&http_client))),
+            rubygems: Arc::new(RubyGemsRegistry::with_client(http_client)),
             osv_client: Arc::new(OsvClient::default()),
             vuln_cache: Arc::new(VulnerabilityCache::new()),
         }
@@ -671,6 +694,17 @@ impl LanguageServer for DependiBackend {
         self.client
             .log_message(MessageType::INFO, "Dependi LSP initialized")
             .await;
+
+        // Verify all registries share the same HTTP client
+        let base_client = self.crates_io.http_client();
+        debug_assert!(Arc::ptr_eq(&base_client, &self.npm_registry.http_client()));
+        debug_assert!(Arc::ptr_eq(&base_client, &self.pypi.http_client()));
+        debug_assert!(Arc::ptr_eq(&base_client, &self.go_proxy.http_client()));
+        debug_assert!(Arc::ptr_eq(&base_client, &self.packagist.http_client()));
+        debug_assert!(Arc::ptr_eq(&base_client, &self.pub_dev.http_client()));
+        debug_assert!(Arc::ptr_eq(&base_client, &self.nuget.http_client()));
+        debug_assert!(Arc::ptr_eq(&base_client, &self.rubygems.http_client()));
+
         tracing::info!("Dependi LSP initialized");
     }
 
