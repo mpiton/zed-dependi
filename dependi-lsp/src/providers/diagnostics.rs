@@ -4,7 +4,7 @@ use tower_lsp::lsp_types::*;
 
 use crate::cache::Cache;
 use crate::parsers::Dependency;
-use crate::providers::inlay_hints::{VersionStatus, compare_versions};
+use crate::providers::inlay_hints::{is_local_dependency, VersionStatus, compare_versions};
 use crate::registries::{VersionInfo, Vulnerability, VulnerabilitySeverity};
 
 /// Create diagnostics for a list of dependencies
@@ -20,6 +20,11 @@ pub fn create_diagnostics(
     let mut diagnostics = Vec::new();
 
     for dep in dependencies {
+        // Skip local/path dependencies - they don't have registry versions
+        if is_local_dependency(&dep.version) {
+            continue;
+        }
+
         // Add outdated version diagnostic
         if let Some(diag) = create_outdated_diagnostic(dep, cache, &cache_key_fn) {
             diagnostics.push(diag);
