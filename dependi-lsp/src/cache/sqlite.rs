@@ -18,36 +18,67 @@ const DEFAULT_TTL_SECS: i64 = 3600;
 #[cfg(test)]
 static TEST_DB_COUNTER: AtomicU64 = AtomicU64::new(0);
 
+/// Configuration for SQLite cache pool
+#[derive(Debug, Clone)]
+pub struct SqliteCacheConfig {
+    pub max_pool_size: u32,
+    pub min_idle_connections: u32,
+    pub connection_timeout_secs: u64,
+    pub busy_timeout_ms: u32,
+    pub cache_size_kb: i64,
+    pub ttl_secs: i64,
+}
+
+impl Default for SqliteCacheConfig {
+    fn default() -> Self {
+        Self {
+            max_pool_size: 10,
+            min_idle_connections: 2,
+            connection_timeout_secs: 5,
+            busy_timeout_ms: 5000,
+            cache_size_kb: 64000,
+            ttl_secs: DEFAULT_TTL_SECS,
+        }
+    }
+}
+
 /// SQLite-based persistent cache with connection pooling
 pub struct SqliteCache {
     pool: Arc<Pool<SqliteConnectionManager>>,
     ttl_secs: i64,
+    config: SqliteCacheConfig,
 }
 
 impl SqliteCache {
     /// Create a new SQLite cache at the default location (~/.cache/dependi/cache.db)
     pub fn new() -> anyhow::Result<Self> {
+        Self::with_config(SqliteCacheConfig::default())
+    }
+
+    /// Create a new SQLite cache with custom configuration
+    pub fn with_config(config: SqliteCacheConfig) -> anyhow::Result<Self> {
         let cache_dir = Self::cache_dir()?;
         std::fs::create_dir_all(&cache_dir)?;
         let db_path = cache_dir.join("cache.db");
-        Self::with_path(db_path)
+        Self::with_path_and_config(db_path, config)
     }
 
-    /// Create a new SQLite cache at a custom path
-    pub fn with_path(path: PathBuf) -> anyhow::Result<Self> {
+    /// Create a new SQLite cache at a custom path with custom configuration
+    pub fn with_path_and_config(path: PathBuf, config: SqliteCacheConfig) -> anyhow::Result<Self> {
         let manager = SqliteConnectionManager::file(&path);
 
         let pool = Pool::builder()
-            .max_size(10)
-            .min_idle(Some(2))
-            .connection_timeout(Duration::from_secs(5))
+            .max_size(config.max_pool_size)
+            .min_idle(Some(config.min_idle_connections))
+            .connection_timeout(Duration::from_secs(config.connection_timeout_secs))
             .idle_timeout(Some(Duration::from_secs(600)))
             .max_lifetime(Some(Duration::from_secs(1800)))
             .build(manager)?;
 
         let cache = Self {
             pool: Arc::new(pool),
-            ttl_secs: DEFAULT_TTL_SECS,
+            ttl_secs: config.ttl_secs,
+            config,
         };
 
         cache.init_schema()?;
@@ -72,6 +103,7 @@ impl SqliteCache {
     pub fn in_memory() -> anyhow::Result<Self> {
         let db_id = TEST_DB_COUNTER.fetch_add(1, Ordering::SeqCst);
         let uri = format!("file:memdb{}?mode=memory&cache=shared", db_id);
+        let config = SqliteCacheConfig::default();
 
         let manager = SqliteConnectionManager::file(&uri).with_init(|conn| {
             conn.execute_batch(
@@ -86,7 +118,8 @@ impl SqliteCache {
 
         let cache = Self {
             pool: Arc::new(pool),
-            ttl_secs: DEFAULT_TTL_SECS,
+            ttl_secs: config.ttl_secs,
+            config,
         };
 
         cache.init_schema_memory()?;
@@ -129,12 +162,14 @@ impl SqliteCache {
     fn init_schema(&self) -> anyhow::Result<()> {
         let conn = self.pool.get()?;
 
-        conn.execute_batch(
+        let pragmas = format!(
             "PRAGMA journal_mode=WAL;
-             PRAGMA busy_timeout=5000;
+             PRAGMA busy_timeout={};
              PRAGMA synchronous=NORMAL;
-             PRAGMA cache_size=-64000;",
-        )?;
+             PRAGMA cache_size=-{};",
+            self.config.busy_timeout_ms, self.config.cache_size_kb
+        );
+        conn.execute_batch(&pragmas)?;
 
         conn.execute(
             "CREATE TABLE IF NOT EXISTS packages (
@@ -193,6 +228,51 @@ impl SqliteCache {
         );
     }
 
+    /// Insert multiple values in a single transaction
+    #[cfg(test)]
+    pub fn insert_batch(&self, entries: Vec<(String, VersionInfo)>) -> anyhow::Result<usize> {
+        if entries.is_empty() {
+            return Ok(0);
+        }
+
+        let mut conn = self.pool.get()?;
+        let tx = conn.transaction()?;
+        let now = current_timestamp();
+        let mut count = 0;
+
+        for (key, value) in entries {
+            let data = serde_json::to_string(&value)?;
+            tx.execute(
+                "INSERT OR REPLACE INTO packages (key, data, inserted_at, ttl_secs) VALUES (?, ?, ?, ?)",
+                params![key, data, now, self.ttl_secs],
+            )?;
+            count += 1;
+        }
+
+        tx.commit()?;
+        Ok(count)
+    }
+
+    /// Remove a value from the cache
+    #[cfg(test)]
+    pub fn remove(&self, key: &str) -> bool {
+        let Some(conn) = self.get_conn() else {
+            return false;
+        };
+        conn.execute("DELETE FROM packages WHERE key = ?", [key])
+            .map(|rows| rows > 0)
+            .unwrap_or(false)
+    }
+
+    /// Clear all entries from the cache
+    #[cfg(test)]
+    pub fn clear(&self) -> anyhow::Result<usize> {
+        let conn = self.pool.get()?;
+        let rows = conn.execute("DELETE FROM packages", [])?;
+        Ok(rows)
+    }
+
+    /// Remove expired entries from the cache
     pub fn cleanup_expired(&self) -> anyhow::Result<usize> {
         let conn = self.pool.get()?;
         let now = current_timestamp();
@@ -295,5 +375,189 @@ mod tests {
         let cache = SqliteCache::in_memory().unwrap();
         let state = cache.pool_state();
         assert!(state.connections > 0);
+    }
+
+    #[test]
+    fn test_remove() {
+        let cache = SqliteCache::in_memory().unwrap();
+        let info = create_test_version_info();
+
+        cache.insert("test:package".to_string(), info);
+        assert!(cache.get("test:package").is_some());
+
+        let removed = cache.remove("test:package");
+        assert!(removed);
+        assert!(cache.get("test:package").is_none());
+
+        let removed_again = cache.remove("test:package");
+        assert!(!removed_again);
+    }
+
+    #[test]
+    fn test_clear() {
+        let cache = SqliteCache::in_memory().unwrap();
+        let info = create_test_version_info();
+
+        cache.insert("pkg1".to_string(), info.clone());
+        cache.insert("pkg2".to_string(), info.clone());
+        cache.insert("pkg3".to_string(), info);
+
+        let cleared = cache.clear().unwrap();
+        assert_eq!(cleared, 3);
+
+        assert!(cache.get("pkg1").is_none());
+        assert!(cache.get("pkg2").is_none());
+        assert!(cache.get("pkg3").is_none());
+    }
+
+    #[test]
+    fn test_insert_batch() {
+        let cache = SqliteCache::in_memory().unwrap();
+
+        let entries: Vec<(String, VersionInfo)> = (0..10)
+            .map(|i| {
+                let mut info = create_test_version_info();
+                info.latest = Some(format!("{}.0.0", i));
+                (format!("pkg{}", i), info)
+            })
+            .collect();
+
+        let count = cache.insert_batch(entries).unwrap();
+        assert_eq!(count, 10);
+
+        for i in 0..10 {
+            let retrieved = cache.get(&format!("pkg{}", i)).unwrap();
+            assert_eq!(retrieved.latest, Some(format!("{}.0.0", i)));
+        }
+    }
+
+    #[test]
+    fn test_insert_batch_empty() {
+        let cache = SqliteCache::in_memory().unwrap();
+        let count = cache.insert_batch(vec![]).unwrap();
+        assert_eq!(count, 0);
+    }
+
+    #[test]
+    fn test_concurrent_reads() {
+        use std::sync::Arc;
+        use std::thread;
+
+        let cache = Arc::new(SqliteCache::in_memory().unwrap());
+
+        for i in 0..20 {
+            let mut info = create_test_version_info();
+            info.latest = Some(format!("{}.0.0", i));
+            cache.insert(format!("pkg{}", i), info);
+        }
+
+        let handles: Vec<_> = (0..10)
+            .map(|thread_id| {
+                let cache = Arc::clone(&cache);
+                thread::spawn(move || {
+                    for i in 0..20 {
+                        let key = format!("pkg{}", i);
+                        let result = cache.get(&key);
+                        assert!(
+                            result.is_some(),
+                            "Thread {} failed to read {}",
+                            thread_id,
+                            key
+                        );
+                    }
+                })
+            })
+            .collect();
+
+        for handle in handles {
+            handle.join().expect("Thread panicked");
+        }
+    }
+
+    #[test]
+    fn test_concurrent_writes() {
+        use std::sync::Arc;
+        use std::thread;
+
+        let cache = Arc::new(SqliteCache::in_memory().unwrap());
+
+        let handles: Vec<_> = (0..5)
+            .map(|thread_id| {
+                let cache = Arc::clone(&cache);
+                thread::spawn(move || {
+                    for i in 0..10 {
+                        let key = format!("thread{}:pkg{}", thread_id, i);
+                        let mut info = create_test_version_info();
+                        info.latest = Some(format!("{}.{}.0", thread_id, i));
+                        cache.insert(key, info);
+                    }
+                })
+            })
+            .collect();
+
+        for handle in handles {
+            handle.join().expect("Thread panicked");
+        }
+
+        for thread_id in 0..5 {
+            for i in 0..10 {
+                let key = format!("thread{}:pkg{}", thread_id, i);
+                let result = cache.get(&key);
+                assert!(result.is_some(), "Missing key: {}", key);
+            }
+        }
+    }
+
+    #[test]
+    fn test_concurrent_mixed_operations() {
+        use std::sync::Arc;
+        use std::thread;
+
+        let cache = Arc::new(SqliteCache::in_memory().unwrap());
+
+        for i in 0..50 {
+            let mut info = create_test_version_info();
+            info.latest = Some(format!("{}.0.0", i));
+            cache.insert(format!("pkg{}", i), info);
+        }
+
+        let handles: Vec<_> = (0..10)
+            .map(|thread_id| {
+                let cache = Arc::clone(&cache);
+                thread::spawn(move || {
+                    for i in 0..50 {
+                        match thread_id % 3 {
+                            0 => {
+                                let _ = cache.get(&format!("pkg{}", i));
+                            }
+                            1 => {
+                                let mut info = create_test_version_info();
+                                info.latest = Some(format!("updated-{}-{}", thread_id, i));
+                                cache.insert(format!("pkg{}", i), info);
+                            }
+                            _ => {
+                                let mut info = create_test_version_info();
+                                info.latest = Some(format!("new-{}-{}", thread_id, i));
+                                cache.insert(format!("new-pkg-{}-{}", thread_id, i), info);
+                            }
+                        }
+                    }
+                })
+            })
+            .collect();
+
+        for handle in handles {
+            handle.join().expect("Thread panicked");
+        }
+    }
+
+    #[test]
+    fn test_config_default() {
+        let config = SqliteCacheConfig::default();
+        assert_eq!(config.max_pool_size, 10);
+        assert_eq!(config.min_idle_connections, 2);
+        assert_eq!(config.busy_timeout_ms, 5000);
+        assert_eq!(config.cache_size_kb, 64000);
+        assert_eq!(config.ttl_secs, DEFAULT_TTL_SECS);
     }
 }
