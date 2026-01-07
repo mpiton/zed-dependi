@@ -51,7 +51,7 @@ struct VersionEntry {
     /// Can be bool or string (replacement package name). We only care if it's truthy.
     abandoned: Option<serde_json::Value>,
     /// Release time
-    time: Option<DateTime<Utc>>,
+    time: Option<String>,
 }
 
 #[derive(Debug, Clone, Deserialize)]
@@ -128,7 +128,13 @@ impl Registry for PackagistRegistry {
         // Collect release dates
         let release_dates: HashMap<String, DateTime<Utc>> = entries
             .iter()
-            .filter_map(|e| e.time.map(|t| (e.version.clone(), t)))
+            .filter_map(|e| {
+                e.time.as_ref().and_then(|time_str| {
+                    DateTime::parse_from_rfc3339(time_str)
+                        .ok()
+                        .map(|dt| (e.version.clone(), dt.with_timezone(&Utc)))
+                })
+            })
             .collect();
 
         Ok(VersionInfo {

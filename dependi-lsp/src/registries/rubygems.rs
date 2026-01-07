@@ -50,14 +50,14 @@ struct GemResponse {
     homepage_uri: Option<String>,
     source_code_uri: Option<String>,
     project_uri: Option<String>,
-    version_created_at: Option<DateTime<Utc>>,
+    version_created_at: Option<String>,
 }
 
 /// RubyGems API response for version list
 #[derive(Debug, Deserialize)]
 struct VersionResponse {
     number: String,
-    created_at: Option<DateTime<Utc>>,
+    created_at: Option<String>,
 }
 
 impl Registry for RubyGemsRegistry {
@@ -84,15 +84,23 @@ impl Registry for RubyGemsRegistry {
                 let versions: Vec<String> = version_list.iter().map(|v| v.number.clone()).collect();
                 let dates: HashMap<String, DateTime<Utc>> = version_list
                     .into_iter()
-                    .filter_map(|v| v.created_at.map(|dt| (v.number, dt)))
+                    .filter_map(|v| {
+                        v.created_at.as_ref().and_then(|time_str| {
+                            DateTime::parse_from_rfc3339(time_str)
+                                .ok()
+                                .map(|dt| (v.number.clone(), dt.with_timezone(&Utc)))
+                        })
+                    })
                     .collect();
                 (versions, dates)
             }
             _ => {
                 // Fallback to just latest version with its date
                 let mut dates = HashMap::new();
-                if let Some(dt) = gem.version_created_at {
-                    dates.insert(gem.version.clone(), dt);
+                if let Some(time_str) = &gem.version_created_at
+                    && let Ok(dt) = DateTime::parse_from_rfc3339(time_str)
+                {
+                    dates.insert(gem.version.clone(), dt.with_timezone(&Utc));
                 }
                 (vec![gem.version.clone()], dates)
             }

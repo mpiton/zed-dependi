@@ -41,7 +41,7 @@ struct VersionInfoResponse {
     #[serde(rename = "Version")]
     version: String,
     #[serde(rename = "Time")]
-    time: Option<DateTime<Utc>>,
+    time: Option<String>,
 }
 
 impl Registry for GoProxyRegistry {
@@ -169,7 +169,13 @@ impl GoProxyRegistry {
             .map(|v| async move {
                 self.fetch_version_info(encoded_path, v)
                     .await
-                    .and_then(|info| info.time.map(|t| (v.clone(), t)))
+                    .and_then(|info| {
+                        info.time.as_ref().and_then(|time_str| {
+                            DateTime::parse_from_rfc3339(time_str)
+                                .ok()
+                                .map(|dt| (v.clone(), dt.with_timezone(&Utc)))
+                        })
+                    })
             })
             .collect();
 

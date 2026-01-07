@@ -51,7 +51,7 @@ struct PubVersionInfo {
     pubspec: PubPubspec,
     #[serde(default)]
     retracted: bool,
-    published: Option<DateTime<Utc>>,
+    published: Option<String>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -101,7 +101,13 @@ impl Registry for PubDevRegistry {
         let release_dates: HashMap<String, DateTime<Utc>> = pkg
             .versions
             .iter()
-            .filter_map(|v| v.published.map(|p| (v.version.clone(), p)))
+            .filter_map(|v| {
+                v.published.as_ref().and_then(|time_str| {
+                    DateTime::parse_from_rfc3339(time_str)
+                        .ok()
+                        .map(|dt| (v.version.clone(), dt.with_timezone(&Utc)))
+                })
+            })
             .collect();
 
         Ok(VersionInfo {

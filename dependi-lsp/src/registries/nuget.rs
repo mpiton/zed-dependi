@@ -70,7 +70,7 @@ struct NuGetCatalogEntry {
     listed: Option<bool>,
     #[serde(default)]
     deprecation: Option<NuGetDeprecation>,
-    published: Option<DateTime<Utc>>,
+    published: Option<String>,
 }
 
 #[derive(Debug, Deserialize, Clone)]
@@ -159,7 +159,13 @@ impl Registry for NuGetRegistry {
         // Collect release dates
         let release_dates: HashMap<String, DateTime<Utc>> = all_versions
             .iter()
-            .filter_map(|e| e.published.map(|p| (e.version.clone(), p)))
+            .filter_map(|e| {
+                e.published.as_ref().and_then(|time_str| {
+                    DateTime::parse_from_rfc3339(time_str)
+                        .ok()
+                        .map(|dt| (e.version.clone(), dt.with_timezone(&Utc)))
+                })
+            })
             .collect();
 
         Ok(VersionInfo {

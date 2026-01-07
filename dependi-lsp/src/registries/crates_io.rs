@@ -83,7 +83,7 @@ struct VersionEntry {
     num: String,
     yanked: bool,
     license: Option<String>,
-    created_at: Option<DateTime<Utc>>,
+    created_at: Option<String>,
 }
 
 impl Registry for CratesIoRegistry {
@@ -154,7 +154,13 @@ impl Registry for CratesIoRegistry {
         let release_dates: HashMap<String, DateTime<Utc>> = crate_response
             .versions
             .iter()
-            .filter_map(|v| v.created_at.map(|dt| (v.num.clone(), dt)))
+            .filter_map(|v| {
+                v.created_at.as_ref().and_then(|date_str| {
+                    DateTime::parse_from_rfc3339(date_str)
+                        .ok()
+                        .map(|dt| (v.num.clone(), dt.with_timezone(&Utc)))
+                })
+            })
             .collect();
 
         // Check if latest version is yanked (kept for backwards compatibility)
