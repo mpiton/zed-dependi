@@ -84,7 +84,7 @@ fn create_hint_label_and_tooltip(
     if let Some(info) = version_info
         && info.is_version_yanked(&dep.version)
     {
-        let yanked_label = "[YANKED]".to_string();
+        let yanked_label = "⊘ Yanked".to_string();
         let yanked_tooltip = format_yanked_tooltip(dep, info);
 
         return match status {
@@ -142,7 +142,7 @@ fn create_hint_label_and_tooltip(
 
     // No vulnerabilities - show version status
     match status {
-        VersionStatus::UpToDate => ("[OK]".to_string(), Some("Up to date".to_string())),
+        VersionStatus::UpToDate => ("✓".to_string(), Some("Up to date".to_string())),
         VersionStatus::UpdateAvailable(latest) => {
             let label = format!("-> {}", latest);
             let tooltip = format!("Update available: {} -> {}", dep.version, latest);
@@ -251,7 +251,7 @@ fn format_deprecation_tooltip(dep: &Dependency, info: &VersionInfo) -> String {
 fn format_yanked_tooltip(dep: &Dependency, info: &VersionInfo) -> String {
     let mut lines = vec![
         format!(
-            "**[X] YANKED VERSION**\n\nThe version \"{}\" of \"{}\" has been yanked from crates.io.",
+            "**⊘ YANKED VERSION**\n\nThe version \"{}\" of \"{}\" has been yanked from crates.io.",
             dep.version, dep.name
         ),
         "".to_string(),
