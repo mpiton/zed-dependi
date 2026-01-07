@@ -17,6 +17,17 @@ pub struct PubDevRegistry {
 }
 
 impl PubDevRegistry {
+    /// Creates a `PubDevRegistry` configured to use the given shared HTTP client.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use std::sync::Arc;
+    /// use reqwest::Client;
+    ///
+    /// let client = Arc::new(Client::new());
+    /// let _registry = dependi_lsp::registries::pub_dev::PubDevRegistry::with_client(client);
+    /// ```
     pub fn with_client(client: Arc<Client>) -> Self {
         Self {
             client,
@@ -26,6 +37,13 @@ impl PubDevRegistry {
 }
 
 impl Default for PubDevRegistry {
+    /// Constructs a PubDevRegistry using a shared HTTP client created by `create_shared_client`.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// let registry = PubDevRegistry::default();
+    /// ```
     fn default() -> Self {
         Self::with_client(create_shared_client().expect("Failed to create HTTP client"))
     }

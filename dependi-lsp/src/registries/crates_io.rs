@@ -43,6 +43,20 @@ pub struct CratesIoRegistry {
 }
 
 impl CratesIoRegistry {
+    /// Creates a CratesIoRegistry that uses the provided shared HTTP client.
+    ///
+    /// The registry will use the given `client` for all HTTP requests, enforce a
+    /// default rate limit of 1 request per second, and target the crates.io API
+    /// base URL.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use std::sync::Arc;
+    /// // assume create_shared_client() -> Arc<reqwest::Client> is available
+    /// let client = create_shared_client();
+    /// let registry = CratesIoRegistry::with_client(client);
+    /// ```
     pub fn with_client(client: Arc<Client>) -> Self {
         Self {
             client,
@@ -53,6 +67,20 @@ impl CratesIoRegistry {
 }
 
 impl Default for CratesIoRegistry {
+    /// Creates a `CratesIoRegistry` configured with a shared HTTP client and default rate limiting.
+    ///
+    /// The registry is initialized with a shared `reqwest::Client`, a 1 request/second rate limiter,
+    /// and the default crates.io API base URL.
+    ///
+    /// # Panics
+    ///
+    /// This function will panic if creating the shared HTTP client fails.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// let _registry = CratesIoRegistry::default();
+    /// ```
     fn default() -> Self {
         Self::with_client(create_shared_client().expect("Failed to create HTTP client"))
     }

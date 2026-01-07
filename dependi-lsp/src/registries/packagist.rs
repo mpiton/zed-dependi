@@ -17,6 +17,19 @@ pub struct PackagistRegistry {
 }
 
 impl PackagistRegistry {
+    /// Creates a PackagistRegistry configured with the given shared HTTP client and the default Packagist API base URL.
+    ///
+    /// The registry's base URL is set to "https://repo.packagist.org".
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use std::sync::Arc;
+    /// use reqwest::Client;
+    ///
+    /// let client = Arc::new(Client::new());
+    /// let registry = PackagistRegistry::with_client(client);
+    /// ```
     pub fn with_client(client: Arc<Client>) -> Self {
         Self {
             client,
@@ -26,6 +39,13 @@ impl PackagistRegistry {
 }
 
 impl Default for PackagistRegistry {
+    /// Create a PackagistRegistry configured with a shared HTTP client and the default Packagist API base URL.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// let _registry = PackagistRegistry::default();
+    /// ```
     fn default() -> Self {
         Self::with_client(create_shared_client().expect("Failed to create HTTP client"))
     }

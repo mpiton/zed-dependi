@@ -17,6 +17,19 @@ pub struct NpmRegistry {
 }
 
 impl NpmRegistry {
+    /// Constructs an NpmRegistry that uses the provided shared HTTP client and the default npm registry base URL.
+    ///
+    /// The supplied `client` is used for all HTTP requests performed by the registry; the base URL is set to
+    /// "https://registry.npmjs.org".
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use std::sync::Arc;
+    /// // assume Client and NpmRegistry are in scope
+    /// let client = Arc::new(Client::new());
+    /// let registry = NpmRegistry::with_client(client.clone());
+    /// ```
     pub fn with_client(client: Arc<Client>) -> Self {
         Self {
             client,
@@ -26,6 +39,13 @@ impl NpmRegistry {
 }
 
 impl Default for NpmRegistry {
+    /// Creates a default NpmRegistry configured with a shared HTTP client and the standard npm registry base URL.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// let registry = NpmRegistry::default();
+    /// ```
     fn default() -> Self {
         Self::with_client(create_shared_client().expect("Failed to create HTTP client"))
     }

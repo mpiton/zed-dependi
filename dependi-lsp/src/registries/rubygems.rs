@@ -20,6 +20,21 @@ pub struct RubyGemsRegistry {
 }
 
 impl RubyGemsRegistry {
+    /// Creates a RubyGemsRegistry that uses the provided shared HTTP client.
+    ///
+    /// The provided `client` will be used for all HTTP requests to the RubyGems API. The registry's
+    /// base API URL is set to "https://rubygems.org/api/v1".
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use std::sync::Arc;
+    /// use reqwest::Client;
+    /// use dependi_lsp::registries::rubygems::RubyGemsRegistry;
+    ///
+    /// let client = Arc::new(Client::new());
+    /// let _registry = RubyGemsRegistry::with_client(client);
+    /// ```
     pub fn with_client(client: Arc<Client>) -> Self {
         Self {
             client,
@@ -29,6 +44,15 @@ impl RubyGemsRegistry {
 }
 
 impl Default for RubyGemsRegistry {
+    /// Creates a `RubyGemsRegistry` configured with the shared HTTP client used by the module.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// let registry = RubyGemsRegistry::default();
+    /// // `registry` is ready to query the RubyGems API.
+    /// let _ = registry;
+    /// ```
     fn default() -> Self {
         Self::with_client(create_shared_client().expect("Failed to create HTTP client"))
     }

@@ -17,6 +17,18 @@ pub struct GoProxyRegistry {
 }
 
 impl GoProxyRegistry {
+    /// Creates a GoProxyRegistry that uses the provided shared HTTP client and the default Go proxy base URL.
+    ///
+    /// `client` is the shared `reqwest::Client` used for all outgoing HTTP requests to the Go proxy.
+    /// The returned registry is configured with `base_url` set to "https://proxy.golang.org".
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use std::sync::Arc;
+    /// let client = Arc::new(reqwest::Client::new());
+    /// let _registry = GoProxyRegistry::with_client(client);
+    /// ```
     pub fn with_client(client: Arc<Client>) -> Self {
         Self {
             client,
@@ -26,6 +38,15 @@ impl GoProxyRegistry {
 }
 
 impl Default for GoProxyRegistry {
+    /// Creates a GoProxyRegistry configured with a shared HTTP client.
+    ///
+    /// The registry's HTTP client is produced by `create_shared_client`.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// let registry = GoProxyRegistry::default();
+    /// ```
     fn default() -> Self {
         Self::with_client(create_shared_client().expect("Failed to create HTTP client"))
     }
