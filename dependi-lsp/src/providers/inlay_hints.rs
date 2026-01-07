@@ -69,7 +69,7 @@ fn create_hint_label_and_tooltip(
             VersionStatus::UpdateAvailable(latest) => {
                 let label = format!("{} -> {}", yanked_label, latest);
                 let tooltip = format!(
-                    "{}\n\n---\n**Update available:** {} → {}",
+                    "{}\n\n---\n**Update available:** {} -> {}",
                     yanked_tooltip, dep.version, latest
                 );
                 (label, Some(tooltip))
@@ -90,7 +90,7 @@ fn create_hint_label_and_tooltip(
             VersionStatus::UpdateAvailable(latest) => {
                 let label = format!("{} -> {}", dep_label, latest);
                 let tooltip = format!(
-                    "{}\n\n---\n**Update available:** {} → {}",
+                    "{}\n\n---\n**Update available:** {} -> {}",
                     dep_tooltip, dep.version, latest
                 );
                 (label, Some(tooltip))
@@ -109,7 +109,7 @@ fn create_hint_label_and_tooltip(
             VersionStatus::UpdateAvailable(latest) => {
                 let label = format!("{} ⬆ {}", vuln_label, latest);
                 let tooltip = format!(
-                    "{}\n\n---\n**Update available:** {} → {}",
+                    "{}\n\n---\n**Update available:** {} -> {}",
                     vuln_tooltip, dep.version, latest
                 );
                 (label, Some(tooltip))
@@ -123,7 +123,7 @@ fn create_hint_label_and_tooltip(
         VersionStatus::UpToDate => ("✓".to_string(), Some("Up to date".to_string())),
         VersionStatus::UpdateAvailable(latest) => {
             let label = format!("⬆ {}", latest);
-            let tooltip = format!("Update available: {} → {}", dep.version, latest);
+            let tooltip = format!("Update available: {} -> {}", dep.version, latest);
             (label, Some(tooltip))
         }
         VersionStatus::Unknown => (

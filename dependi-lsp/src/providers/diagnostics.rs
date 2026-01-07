@@ -90,7 +90,7 @@ fn create_outdated_diagnostic(
             severity: Some(DiagnosticSeverity::HINT),
             code: Some(NumberOrString::String("outdated".to_string())),
             source: Some("dependi".to_string()),
-            message: format!("Update available: {} → {}", dep.version, new_version),
+            message: format!("Update available: {} -> {}", dep.version, new_version),
             related_information: None,
             tags: None,
             code_description: None,
