@@ -7,7 +7,7 @@ use crate::cache::Cache;
 use crate::parsers::Dependency;
 
 /// Format a release date as a human-readable age string
-fn format_release_age(released_at: DateTime<Utc>) -> String {
+pub fn format_release_age(released_at: DateTime<Utc>) -> String {
     let now = Utc::now();
     let duration = now.signed_duration_since(released_at);
 
