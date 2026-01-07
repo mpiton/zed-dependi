@@ -10,15 +10,23 @@ Dependency management extension for the [Zed](https://zed.dev) editor.
 
 - **Inlay Hints**: See latest versions inline next to your dependencies
   - `✓` - Version is up to date
-  - `⬆ X.Y.Z` - Update available
+  - `-> X.Y.Z` - Update available
   - `⚠ N` - Vulnerabilities detected
-  - `?` - Could not fetch version info
+  - `⚠ Deprecated` - Package is deprecated
+  - `⊘ Yanked` - Version has been yanked
+  - `→ Local` - Local/path dependency
+  - `? Unknown` - Could not fetch version info
 - **Vulnerability Scanning**: Real-time security scanning via OSV.dev
   - CVE details in hover tooltips
-  - Severity-based diagnostics (Critical/High -> ERROR, Medium -> WARNING, Low -> HINT)
+  - Severity indicators: `⚠ CRITICAL`, `▲ HIGH`, `● MEDIUM`, `○ LOW`
+  - Severity-based diagnostics (Critical/High → ERROR, Medium → WARNING, Low → HINT)
   - Generate JSON/Markdown vulnerability reports
 - **Diagnostics**: Outdated dependencies are highlighted with hints
-- **Code Actions**: Quick fix to update dependencies to latest version
+- **Code Actions**: Quick fix to update dependencies with semver-aware labels
+  - `⚠ MAJOR`: Breaking changes (not auto-preferred)
+  - `+ minor`: New features
+  - `· patch`: Bug fixes
+  - `* prerelease`: Experimental versions
 - **Hover Info**: Package descriptions, licenses, and links
 - **Autocompletion**: Version suggestions when editing dependencies
 - **Persistent Cache**: SQLite cache for faster startup across sessions

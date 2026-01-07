@@ -71,7 +71,7 @@ fn create_hint_label_and_tooltip(
             • github:owner/repo",
             dep.name
         );
-        return ("📦 Local".to_string(), Some(tooltip));
+        return ("→ Local".to_string(), Some(tooltip));
     }
 
     tracing::debug!(
@@ -84,7 +84,7 @@ fn create_hint_label_and_tooltip(
     if let Some(info) = version_info
         && info.is_version_yanked(&dep.version)
     {
-        let yanked_label = "🚫 Yanked".to_string();
+        let yanked_label = "⊘ Yanked".to_string();
         let yanked_tooltip = format_yanked_tooltip(dep, info);
 
         return match status {
@@ -129,7 +129,7 @@ fn create_hint_label_and_tooltip(
         // Combine with update info if available
         return match status {
             VersionStatus::UpdateAvailable(latest) => {
-                let label = format!("{} ⬆ {}", vuln_label, latest);
+                let label = format!("{} -> {}", vuln_label, latest);
                 let tooltip = format!(
                     "{}\n\n---\n**Update available:** {} -> {}",
                     vuln_tooltip, dep.version, latest
@@ -144,7 +144,7 @@ fn create_hint_label_and_tooltip(
     match status {
         VersionStatus::UpToDate => ("✓".to_string(), Some("Up to date".to_string())),
         VersionStatus::UpdateAvailable(latest) => {
-            let label = format!("⬆ {}", latest);
+            let label = format!("-> {}", latest);
             let tooltip = format!("Update available: {} -> {}", dep.version, latest);
             (label, Some(tooltip))
         }
@@ -163,7 +163,7 @@ fn create_hint_label_and_tooltip(
                 4. If recently published, wait a few minutes for indexing",
                 dep.name
             );
-            ("⚡".to_string(), Some(tooltip))
+            ("? Unknown".to_string(), Some(tooltip))
         }
     }
 }
@@ -177,10 +177,10 @@ fn format_vulnerability_tooltip(info: &VersionInfo) -> String {
 
     for (i, vuln) in info.vulnerabilities.iter().take(5).enumerate() {
         let severity_icon = match vuln.severity {
-            VulnerabilitySeverity::Critical => "🔴 CRITICAL",
-            VulnerabilitySeverity::High => "🟠 HIGH",
-            VulnerabilitySeverity::Medium => "🟡 MEDIUM",
-            VulnerabilitySeverity::Low => "🟢 LOW",
+            VulnerabilitySeverity::Critical => "⚠ CRITICAL",
+            VulnerabilitySeverity::High => "▲ HIGH",
+            VulnerabilitySeverity::Medium => "● MEDIUM",
+            VulnerabilitySeverity::Low => "○ LOW",
         };
 
         lines.push(format!(
@@ -210,7 +210,7 @@ fn format_vulnerability_tooltip(info: &VersionInfo) -> String {
 fn format_deprecation_tooltip(dep: &Dependency, info: &VersionInfo) -> String {
     let mut lines = vec![
         format!(
-            "**⚠️ PACKAGE DEPRECATED**\n\nThe package \"{}\" is deprecated.",
+            "**⚠ PACKAGE DEPRECATED**\n\nThe package \"{}\" is deprecated.",
             dep.name
         ),
         "".to_string(),
@@ -251,7 +251,7 @@ fn format_deprecation_tooltip(dep: &Dependency, info: &VersionInfo) -> String {
 fn format_yanked_tooltip(dep: &Dependency, info: &VersionInfo) -> String {
     let mut lines = vec![
         format!(
-            "**🚫 YANKED VERSION**\n\nThe version \"{}\" of \"{}\" has been yanked from crates.io.",
+            "**⊘ YANKED VERSION**\n\nThe version \"{}\" of \"{}\" has been yanked from crates.io.",
             dep.version, dep.name
         ),
         "".to_string(),
@@ -471,7 +471,7 @@ mod tests {
 
         match hint.label {
             InlayHintLabel::String(s) => {
-                assert!(s.contains("⬆"));
+                assert!(s.contains("->"));
                 assert!(s.contains("2.0.0"));
             }
             _ => panic!("Expected string label"),
@@ -576,7 +576,6 @@ mod tests {
 
         match hint.label {
             InlayHintLabel::String(s) => {
-                assert!(s.contains("🚫"));
                 assert!(s.contains("Yanked"));
             }
             _ => panic!("Expected string label"),
@@ -595,7 +594,6 @@ mod tests {
 
         match hint.label {
             InlayHintLabel::String(s) => {
-                assert!(s.contains("🚫"));
                 assert!(s.contains("Yanked"));
                 assert!(s.contains("2.0.0"));
                 assert!(s.contains("->"));
@@ -616,7 +614,6 @@ mod tests {
 
         match hint.label {
             InlayHintLabel::String(s) => {
-                assert!(!s.contains("🚫"));
                 assert!(!s.contains("Yanked"));
                 assert!(s.contains("✓"));
             }
@@ -637,7 +634,6 @@ mod tests {
 
         match hint.label {
             InlayHintLabel::String(s) => {
-                assert!(s.contains("🚫"));
                 assert!(s.contains("Yanked"));
                 assert!(!s.contains("Deprecated"));
             }
@@ -663,7 +659,6 @@ mod tests {
 
         match hint.label {
             InlayHintLabel::String(s) => {
-                assert!(s.contains("🚫"));
                 assert!(s.contains("Yanked"));
                 assert!(!s.contains("⚠"));
             }
@@ -780,8 +775,8 @@ mod tests {
         match hint.label {
             InlayHintLabel::String(s) => {
                 assert!(
-                    s.contains("📦") || s.contains("Local"),
-                    "Expected 📦 Local in label, got: {}",
+                    s.contains("→") || s.contains("Local"),
+                    "Expected → Local in label, got: {}",
                     s
                 );
             }
@@ -803,7 +798,7 @@ mod tests {
 
         match hint.label {
             InlayHintLabel::String(s) => {
-                assert!(s.contains("⚡"), "Expected ⚡ in label, got: {}", s);
+                assert!(s.contains("?"), "Expected ? in label, got: {}", s);
                 assert!(!s.contains("Local"));
             }
             _ => panic!("Expected string label"),
@@ -826,8 +821,8 @@ mod tests {
         match hint.label {
             InlayHintLabel::String(s) => {
                 assert!(
-                    s.contains("📦") || s.contains("Local"),
-                    "Expected 📦 Local in label, got: {}",
+                    s.contains("→") || s.contains("Local"),
+                    "Expected → Local in label, got: {}",
                     s
                 );
             }
