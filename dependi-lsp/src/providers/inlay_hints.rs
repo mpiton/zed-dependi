@@ -58,6 +58,22 @@ fn create_hint_label_and_tooltip(
     dep: &Dependency,
     version_info: Option<&VersionInfo>,
 ) -> (String, Option<String>) {
+    // Handle local dependencies first (highest priority - no registry lookup needed)
+    if is_local_dependency(&dep.version) {
+        let tooltip = format!(
+            "**Local Dependency**\n\n\
+            \"{}\" is a local/path dependency.\n\n\
+            Version info is not available for local packages.\n\n\
+            This is expected for dependencies using:\n\
+            • path = \"./...\"\n\
+            • git = \"https://...\"\n\
+            • git = \"git@...\"\n\
+            • github:owner/repo",
+            dep.name
+        );
+        return ("📦 Local".to_string(), Some(tooltip));
+    }
+
     // Handle yanked versions (highest priority - critical issue)
     if let Some(info) = version_info
         && info.is_version_yanked(&dep.version)
@@ -127,36 +143,21 @@ fn create_hint_label_and_tooltip(
             (label, Some(tooltip))
         }
         VersionStatus::Unknown => {
-            if is_local_dependency(&dep.version) {
-                let tooltip = format!(
-                    "**Local Dependency**\n\n\
-                    \"{}\" is a local/path dependency.\n\n\
-                    Version info is not available for local packages.\n\n\
-                    This is expected for dependencies using:\n\
-                    • path = \"./...\"\n\
-                    • git = \"https://...\"\n\
-                    • git = \"git@...\"\n\
-                    • github:owner/repo",
-                    dep.name
-                );
-                ("📦 Local".to_string(), Some(tooltip))
-            } else {
-                let tooltip = format!(
-                    "**Could not fetch version info**\n\n\
-                    Possible causes:\n\
-                    • Network error - check internet connection\n\
-                    • Package not found - verify spelling\n\
-                    • Rate limiting - wait and retry\n\
-                    • Registry down - try again later\n\n\
-                    **Troubleshooting:**\n\
-                    1. Check your network connection\n\
-                    2. Verify the package name \"{}\" is spelled correctly\n\
-                    3. Search for the package on the registry\n\
-                    4. If recently published, wait a few minutes for indexing",
-                    dep.name
-                );
-                ("⚡".to_string(), Some(tooltip))
-            }
+            let tooltip = format!(
+                "**Could not fetch version info**\n\n\
+                Possible causes:\n\
+                • Network error - check internet connection\n\
+                • Package not found - verify spelling\n\
+                • Rate limiting - wait and retry\n\
+                • Registry down - try again later\n\n\
+                **Troubleshooting:**\n\
+                1. Check your network connection\n\
+                2. Verify the package name \"{}\" is spelled correctly\n\
+                3. Search for the package on the registry\n\
+                4. If recently published, wait a few minutes for indexing",
+                dep.name
+            );
+            ("⚡".to_string(), Some(tooltip))
         }
     }
 }
