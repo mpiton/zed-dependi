@@ -221,7 +221,10 @@ fn test_inlay_hint_generation() {
     let hint = create_inlay_hint(&dep_outdated, None);
     match hint.label {
         tower_lsp::lsp_types::InlayHintLabel::String(s) => {
-            assert!(s.contains("⚡"), "Expected lightning bolt for unknown/error status");
+            assert!(
+                s.contains("⚡"),
+                "Expected lightning bolt for unknown/error status"
+            );
         }
         _ => panic!("Expected string label"),
     }
