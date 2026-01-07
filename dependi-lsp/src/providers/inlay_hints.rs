@@ -458,7 +458,7 @@ mod tests {
 
         assert_eq!(hint.position.line, 5);
         match hint.label {
-            InlayHintLabel::String(s) => assert!(s.contains("[OK]")),
+            InlayHintLabel::String(s) => assert!(s.contains("✓")),
             _ => panic!("Expected string label"),
         }
     }
@@ -533,7 +533,7 @@ mod tests {
             InlayHintLabel::String(s) => {
                 assert!(!s.contains("Deprecated"));
                 assert!(!s.contains("⚠"));
-                assert!(s.contains("[OK]"));
+                assert!(s.contains("✓"));
             }
             _ => panic!("Expected string label"),
         }
@@ -576,7 +576,7 @@ mod tests {
 
         match hint.label {
             InlayHintLabel::String(s) => {
-                assert!(s.contains("[YANKED]"));
+                assert!(s.contains("Yanked"));
             }
             _ => panic!("Expected string label"),
         }
@@ -594,7 +594,7 @@ mod tests {
 
         match hint.label {
             InlayHintLabel::String(s) => {
-                assert!(s.contains("[YANKED]"));
+                assert!(s.contains("Yanked"));
                 assert!(s.contains("2.0.0"));
                 assert!(s.contains("->"));
             }
@@ -614,8 +614,8 @@ mod tests {
 
         match hint.label {
             InlayHintLabel::String(s) => {
-                assert!(!s.contains("[YANKED]"));
-                assert!(s.contains("[OK]"));
+                assert!(!s.contains("Yanked"));
+                assert!(s.contains("✓"));
             }
             _ => panic!("Expected string label"),
         }
@@ -634,7 +634,7 @@ mod tests {
 
         match hint.label {
             InlayHintLabel::String(s) => {
-                assert!(s.contains("[YANKED]"));
+                assert!(s.contains("Yanked"));
                 assert!(!s.contains("Deprecated"));
             }
             _ => panic!("Expected string label"),
@@ -659,7 +659,7 @@ mod tests {
 
         match hint.label {
             InlayHintLabel::String(s) => {
-                assert!(s.contains("[YANKED]"));
+                assert!(s.contains("Yanked"));
                 assert!(!s.contains("⚠"));
             }
             _ => panic!("Expected string label"),
