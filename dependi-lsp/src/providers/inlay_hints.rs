@@ -277,20 +277,29 @@ fn format_yanked_tooltip(dep: &Dependency, info: &VersionInfo) -> String {
 
 /// Check if a dependency version string indicates a local/path dependency
 fn is_local_dependency(version: &str) -> bool {
+    // Path-based dependencies
     version.starts_with("./")
         || version.starts_with("../")
         || version.starts_with('/')
-        || version.starts_with("file://")
+        // File protocol (npm uses "file:" not "file://")
+        || version.starts_with("file:")
+        // Git dependencies
         || version.starts_with("git+")
         || version.starts_with("git@")
+        || version.starts_with("git:")
+        // URL-based (git repos)
         || version.starts_with("https://")
         || version.starts_with("http://")
-        || version.contains("github:")
-        || version.contains("gitlab:")
-        || version.contains("bitbucket:")
+        // Platform shortcuts (npm/yarn)
+        || version.starts_with("github:")
+        || version.starts_with("gitlab:")
+        || version.starts_with("bitbucket:")
+        // Yarn/pnpm workspace protocols
         || version.starts_with("workspace:")
         || version.starts_with("link:")
         || version.starts_with("portal:")
+        // npm aliases
+        || version.starts_with("npm:")
 }
 
 /// Truncate a string to max length with ellipsis
@@ -658,25 +667,43 @@ mod tests {
 
     #[test]
     fn test_is_local_dependency() {
+        // Path-based
         assert!(is_local_dependency("./my-lib"));
         assert!(is_local_dependency("../other-lib"));
         assert!(is_local_dependency("/absolute/path"));
-        assert!(is_local_dependency("file:///some/path"));
+
+        // File protocol (npm style)
+        assert!(is_local_dependency("file:./my-local-lib"));
+        assert!(is_local_dependency("file:../shared"));
+        assert!(is_local_dependency("file:///absolute/path"));
+
+        // Git dependencies
         assert!(is_local_dependency("git+https://github.com/user/repo"));
         assert!(is_local_dependency("git@github.com:user/repo.git"));
+        assert!(is_local_dependency("git://github.com/user/repo.git"));
+
+        // URL-based
         assert!(is_local_dependency("https://github.com/user/repo"));
+        assert!(is_local_dependency("http://example.com/repo.tgz"));
+
+        // Platform shortcuts
         assert!(is_local_dependency("github:user/repo"));
         assert!(is_local_dependency("gitlab:user/repo"));
         assert!(is_local_dependency("bitbucket:user/repo"));
+
+        // Workspace protocols
         assert!(is_local_dependency("workspace:*"));
         assert!(is_local_dependency("link:./my-lib"));
         assert!(is_local_dependency("portal:./my-lib"));
+        assert!(is_local_dependency("npm:lodash@^4.0.0"));
 
+        // Not local - regular versions
         assert!(!is_local_dependency("1.0.0"));
         assert!(!is_local_dependency("^1.0"));
         assert!(!is_local_dependency("~1.0.0"));
         assert!(!is_local_dependency(">=1.0, <2.0"));
         assert!(!is_local_dependency("*"));
+        assert!(!is_local_dependency("latest"));
     }
 
     #[test]
