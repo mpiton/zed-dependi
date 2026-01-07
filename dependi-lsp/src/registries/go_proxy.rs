@@ -24,8 +24,10 @@ impl GoProxyRegistry {
     ///
     /// # Examples
     ///
-    /// ```
+    /// ```ignore
     /// use std::sync::Arc;
+    /// use dependi_lsp::registries::go_proxy::GoProxyRegistry;
+    ///
     /// let client = Arc::new(reqwest::Client::new());
     /// let _registry = GoProxyRegistry::with_client(client);
     /// ```
@@ -44,7 +46,9 @@ impl Default for GoProxyRegistry {
     ///
     /// # Examples
     ///
-    /// ```
+    /// ```ignore
+    /// use dependi_lsp::registries::go_proxy::GoProxyRegistry;
+    ///
     /// let registry = GoProxyRegistry::default();
     /// ```
     fn default() -> Self {

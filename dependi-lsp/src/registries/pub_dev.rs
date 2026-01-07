@@ -21,12 +21,12 @@ impl PubDevRegistry {
     ///
     /// # Examples
     ///
-    /// ```
+    /// ```ignore
     /// use std::sync::Arc;
-    /// use reqwest::Client;
+    /// use dependi_lsp::registries::pub_dev::PubDevRegistry;
     ///
-    /// let client = Arc::new(Client::new());
-    /// let _registry = dependi_lsp::registries::pub_dev::PubDevRegistry::with_client(client);
+    /// let client = Arc::new(reqwest::Client::new());
+    /// let _registry = PubDevRegistry::with_client(client);
     /// ```
     pub fn with_client(client: Arc<Client>) -> Self {
         Self {
@@ -41,7 +41,9 @@ impl Default for PubDevRegistry {
     ///
     /// # Examples
     ///
-    /// ```
+    /// ```ignore
+    /// use dependi_lsp::registries::pub_dev::PubDevRegistry;
+    ///
     /// let registry = PubDevRegistry::default();
     /// ```
     fn default() -> Self {

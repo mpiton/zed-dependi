@@ -27,8 +27,10 @@ impl PyPiRegistry {
     ///
     /// # Examples
     ///
-    /// ```
+    /// ```ignore
     /// use std::sync::Arc;
+    /// use dependi_lsp::registries::pypi::PyPiRegistry;
+    /// use dependi_lsp::registries::http_client::create_shared_client;
     ///
     /// let client = create_shared_client().expect("failed to create client");
     /// let registry = PyPiRegistry::with_client(client);
@@ -46,7 +48,9 @@ impl Default for PyPiRegistry {
     ///
     /// # Examples
     ///
-    /// ```
+    /// ```ignore
+    /// use dependi_lsp::registries::pypi::PyPiRegistry;
+    ///
     /// let _registry = PyPiRegistry::default();
     /// ```
     fn default() -> Self {

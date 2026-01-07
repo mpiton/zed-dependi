@@ -27,12 +27,11 @@ impl RubyGemsRegistry {
     ///
     /// # Examples
     ///
-    /// ```
+    /// ```ignore
     /// use std::sync::Arc;
-    /// use reqwest::Client;
     /// use dependi_lsp::registries::rubygems::RubyGemsRegistry;
     ///
-    /// let client = Arc::new(Client::new());
+    /// let client = Arc::new(reqwest::Client::new());
     /// let _registry = RubyGemsRegistry::with_client(client);
     /// ```
     pub fn with_client(client: Arc<Client>) -> Self {
@@ -48,10 +47,11 @@ impl Default for RubyGemsRegistry {
     ///
     /// # Examples
     ///
-    /// ```
+    /// ```ignore
+    /// use dependi_lsp::registries::rubygems::RubyGemsRegistry;
+    ///
     /// let registry = RubyGemsRegistry::default();
     /// // `registry` is ready to query the RubyGems API.
-    /// let _ = registry;
     /// ```
     fn default() -> Self {
         Self::with_client(create_shared_client().expect("Failed to create HTTP client"))

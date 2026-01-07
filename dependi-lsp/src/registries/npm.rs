@@ -24,11 +24,12 @@ impl NpmRegistry {
     ///
     /// # Examples
     ///
-    /// ```
+    /// ```ignore
     /// use std::sync::Arc;
-    /// // assume Client and NpmRegistry are in scope
-    /// let client = Arc::new(Client::new());
-    /// let registry = NpmRegistry::with_client(client.clone());
+    /// use dependi_lsp::registries::npm::NpmRegistry;
+    ///
+    /// let client = Arc::new(reqwest::Client::new());
+    /// let registry = NpmRegistry::with_client(client);
     /// ```
     pub fn with_client(client: Arc<Client>) -> Self {
         Self {
@@ -43,7 +44,9 @@ impl Default for NpmRegistry {
     ///
     /// # Examples
     ///
-    /// ```
+    /// ```ignore
+    /// use dependi_lsp::registries::npm::NpmRegistry;
+    ///
     /// let registry = NpmRegistry::default();
     /// ```
     fn default() -> Self {

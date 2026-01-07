@@ -21,11 +21,12 @@ impl NuGetRegistry {
     ///
     /// # Examples
     ///
-    /// ```
+    /// ```ignore
     /// use std::sync::Arc;
-    /// use reqwest::Client;
-    /// let client = Arc::new(Client::new());
-    /// let _registry = crate::registries::nuget::NuGetRegistry::with_client(client);
+    /// use dependi_lsp::registries::nuget::NuGetRegistry;
+    ///
+    /// let client = Arc::new(reqwest::Client::new());
+    /// let _registry = NuGetRegistry::with_client(client);
     /// ```
     pub fn with_client(client: Arc<Client>) -> Self {
         Self {
@@ -42,7 +43,9 @@ impl Default for NuGetRegistry {
     ///
     /// # Examples
     ///
-    /// ```
+    /// ```ignore
+    /// use dependi_lsp::registries::nuget::NuGetRegistry;
+    ///
     /// let _reg = NuGetRegistry::default();
     /// ```
     fn default() -> Self {

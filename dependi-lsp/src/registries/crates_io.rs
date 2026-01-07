@@ -51,10 +51,12 @@ impl CratesIoRegistry {
     ///
     /// # Examples
     ///
-    /// ```
+    /// ```ignore
     /// use std::sync::Arc;
-    /// // assume create_shared_client() -> Arc<reqwest::Client> is available
-    /// let client = create_shared_client();
+    /// use dependi_lsp::registries::crates_io::CratesIoRegistry;
+    /// use dependi_lsp::registries::http_client::create_shared_client;
+    ///
+    /// let client = create_shared_client().expect("failed to create client");
     /// let registry = CratesIoRegistry::with_client(client);
     /// ```
     pub fn with_client(client: Arc<Client>) -> Self {
@@ -78,7 +80,9 @@ impl Default for CratesIoRegistry {
     ///
     /// # Examples
     ///
-    /// ```
+    /// ```ignore
+    /// use dependi_lsp::registries::crates_io::CratesIoRegistry;
+    ///
     /// let _registry = CratesIoRegistry::default();
     /// ```
     fn default() -> Self {

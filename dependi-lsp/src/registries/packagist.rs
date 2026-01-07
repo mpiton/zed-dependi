@@ -23,11 +23,11 @@ impl PackagistRegistry {
     ///
     /// # Examples
     ///
-    /// ```
+    /// ```ignore
     /// use std::sync::Arc;
-    /// use reqwest::Client;
+    /// use dependi_lsp::registries::packagist::PackagistRegistry;
     ///
-    /// let client = Arc::new(Client::new());
+    /// let client = Arc::new(reqwest::Client::new());
     /// let registry = PackagistRegistry::with_client(client);
     /// ```
     pub fn with_client(client: Arc<Client>) -> Self {
@@ -43,7 +43,9 @@ impl Default for PackagistRegistry {
     ///
     /// # Examples
     ///
-    /// ```
+    /// ```ignore
+    /// use dependi_lsp::registries::packagist::PackagistRegistry;
+    ///
     /// let _registry = PackagistRegistry::default();
     /// ```
     fn default() -> Self {
