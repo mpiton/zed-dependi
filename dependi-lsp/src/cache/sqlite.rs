@@ -118,15 +118,14 @@ impl SqliteCache {
         );
     }
 
-    /// Remove expired entries
-    fn cleanup_expired(&self) -> anyhow::Result<()> {
+    pub fn cleanup_expired(&self) -> anyhow::Result<usize> {
         let conn = self.conn.lock().unwrap();
         let now = current_timestamp();
-        conn.execute(
+        let rows = conn.execute(
             "DELETE FROM packages WHERE inserted_at + ttl_secs < ?",
             [now],
         )?;
-        Ok(())
+        Ok(rows)
     }
 }
 
