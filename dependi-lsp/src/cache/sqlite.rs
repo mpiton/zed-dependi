@@ -2,6 +2,8 @@
 
 use std::path::PathBuf;
 use std::sync::Arc;
+#[cfg(test)]
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 use r2d2::{Pool, PooledConnection};
@@ -12,6 +14,9 @@ use crate::registries::VersionInfo;
 
 /// Default TTL for cache entries (1 hour)
 const DEFAULT_TTL_SECS: i64 = 3600;
+
+#[cfg(test)]
+static TEST_DB_COUNTER: AtomicU64 = AtomicU64::new(0);
 
 /// SQLite-based persistent cache with connection pooling
 pub struct SqliteCache {
@@ -59,13 +64,20 @@ impl SqliteCache {
     }
 
     /// Create an in-memory cache (for testing)
+    ///
+    /// Uses a shared in-memory database URI so all pooled connections access
+    /// the same database. Each call generates a unique database name to avoid
+    /// conflicts between tests.
     #[cfg(test)]
     pub fn in_memory() -> anyhow::Result<Self> {
-        let manager = SqliteConnectionManager::memory().with_init(|conn| {
+        let db_id = TEST_DB_COUNTER.fetch_add(1, Ordering::SeqCst);
+        let uri = format!("file:memdb{}?mode=memory&cache=shared", db_id);
+
+        let manager = SqliteConnectionManager::file(&uri).with_init(|conn| {
             conn.execute_batch(
                 "PRAGMA busy_timeout=5000;
-                     PRAGMA synchronous=NORMAL;
-                     PRAGMA cache_size=-64000;",
+                 PRAGMA synchronous=NORMAL;
+                 PRAGMA cache_size=-64000;",
             )?;
             Ok(())
         });
@@ -77,8 +89,29 @@ impl SqliteCache {
             ttl_secs: DEFAULT_TTL_SECS,
         };
 
-        cache.init_schema()?;
+        cache.init_schema_memory()?;
         Ok(cache)
+    }
+
+    /// Initialize schema for in-memory database (no WAL mode)
+    #[cfg(test)]
+    fn init_schema_memory(&self) -> anyhow::Result<()> {
+        let conn = self.pool.get()?;
+
+        conn.execute(
+            "CREATE TABLE IF NOT EXISTS packages (
+                key TEXT PRIMARY KEY,
+                data TEXT NOT NULL,
+                inserted_at INTEGER NOT NULL,
+                ttl_secs INTEGER NOT NULL
+            )",
+            [],
+        )?;
+        conn.execute(
+            "CREATE INDEX IF NOT EXISTS idx_expiry ON packages(inserted_at, ttl_secs)",
+            [],
+        )?;
+        Ok(())
     }
 
     /// Get the cache directory
