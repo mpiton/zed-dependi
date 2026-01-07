@@ -122,7 +122,7 @@ fn create_local_dependency_diagnostic(dep: &Dependency) -> Diagnostic {
         severity: Some(DiagnosticSeverity::HINT),
         code: Some(NumberOrString::String("local".to_string())),
         source: Some("dependi".to_string()),
-        message: "[Local]".to_string(),
+        message: "→ Local".to_string(),
         related_information: None,
         tags: None,
         code_description: None,
