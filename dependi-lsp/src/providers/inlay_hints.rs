@@ -123,7 +123,11 @@ fn create_hint_label_and_tooltip(
 
     // Handle vulnerabilities
     if vuln_count > 0 {
-        let vuln_label = format!("⚠ {}", vuln_count);
+        let vuln_label = format!(
+            "⚠ {} {}",
+            vuln_count,
+            if vuln_count == 1 { "vuln" } else { "vulns" }
+        );
         let vuln_tooltip = format_vulnerability_tooltip(version_info.unwrap());
 
         // Combine with update info if available
@@ -170,9 +174,15 @@ fn create_hint_label_and_tooltip(
 
 /// Format vulnerability details for tooltip
 fn format_vulnerability_tooltip(info: &VersionInfo) -> String {
+    let count = info.vulnerabilities.len();
     let mut lines = vec![format!(
-        "**⚠ {} Security Vulnerabilities Found**\n",
-        info.vulnerabilities.len()
+        "**⚠ {} {} Found**\n",
+        count,
+        if count == 1 {
+            "Vulnerability"
+        } else {
+            "Vulnerabilities"
+        }
     )];
 
     for (i, vuln) in info.vulnerabilities.iter().take(5).enumerate() {
@@ -540,6 +550,113 @@ mod tests {
     }
 
     #[test]
+    fn test_vulnerability_label_singular() {
+        let dep = make_test_dep("serde", "1.0.0");
+        let info = VersionInfo {
+            latest: Some("1.0.0".to_string()),
+            vulnerabilities: vec![Vulnerability {
+                id: "CVE-2024-1234".to_string(),
+                severity: VulnerabilitySeverity::High,
+                description: "Test vulnerability".to_string(),
+                url: None,
+            }],
+            ..Default::default()
+        };
+        let hint = create_inlay_hint(&dep, Some(&info));
+
+        match hint.label {
+            InlayHintLabel::String(s) => {
+                assert!(
+                    s.contains("⚠ 1 vuln"),
+                    "Expected '⚠ 1 vuln' in label, got: {}",
+                    s
+                );
+                assert!(
+                    !s.contains("vulns"),
+                    "Should use singular 'vuln', got: {}",
+                    s
+                );
+            }
+            _ => panic!("Expected string label"),
+        }
+    }
+
+    #[test]
+    fn test_vulnerability_label_plural() {
+        let dep = make_test_dep("serde", "1.0.0");
+        let info = VersionInfo {
+            latest: Some("1.0.0".to_string()),
+            vulnerabilities: vec![
+                Vulnerability {
+                    id: "CVE-2024-1234".to_string(),
+                    severity: VulnerabilitySeverity::High,
+                    description: "Test vulnerability 1".to_string(),
+                    url: None,
+                },
+                Vulnerability {
+                    id: "CVE-2024-5678".to_string(),
+                    severity: VulnerabilitySeverity::Medium,
+                    description: "Test vulnerability 2".to_string(),
+                    url: None,
+                },
+            ],
+            ..Default::default()
+        };
+        let hint = create_inlay_hint(&dep, Some(&info));
+
+        match hint.label {
+            InlayHintLabel::String(s) => {
+                assert!(
+                    s.contains("⚠ 2 vulns"),
+                    "Expected '⚠ 2 vulns' in label, got: {}",
+                    s
+                );
+            }
+            _ => panic!("Expected string label"),
+        }
+    }
+
+    #[test]
+    fn test_vulnerability_with_update_label() {
+        let dep = make_test_dep("serde", "1.0.0");
+        let info = VersionInfo {
+            latest: Some("2.0.0".to_string()),
+            vulnerabilities: vec![
+                Vulnerability {
+                    id: "CVE-2024-1234".to_string(),
+                    severity: VulnerabilitySeverity::High,
+                    description: "Test vulnerability 1".to_string(),
+                    url: None,
+                },
+                Vulnerability {
+                    id: "CVE-2024-5678".to_string(),
+                    severity: VulnerabilitySeverity::Medium,
+                    description: "Test vulnerability 2".to_string(),
+                    url: None,
+                },
+            ],
+            ..Default::default()
+        };
+        let hint = create_inlay_hint(&dep, Some(&info));
+
+        match hint.label {
+            InlayHintLabel::String(s) => {
+                assert!(
+                    s.contains("⚠ 2 vulns"),
+                    "Expected '⚠ 2 vulns' in label, got: {}",
+                    s
+                );
+                assert!(
+                    s.contains("-> 2.0.0"),
+                    "Expected '-> 2.0.0' in label, got: {}",
+                    s
+                );
+            }
+            _ => panic!("Expected string label"),
+        }
+    }
+
+    #[test]
     fn test_deprecated_priority_over_vulnerabilities() {
         let dep = make_test_dep("dep", "1.0.0");
         let info = VersionInfo {
@@ -558,7 +675,7 @@ mod tests {
         match hint.label {
             InlayHintLabel::String(s) => {
                 assert!(s.contains("Deprecated"));
-                assert!(!s.contains("1"));
+                assert!(!s.contains("vuln"));
             }
             _ => panic!("Expected string label"),
         }
