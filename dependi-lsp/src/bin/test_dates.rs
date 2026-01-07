@@ -1,6 +1,6 @@
 // Quick test to verify registry date fetching
 use dependi_lsp::registries::{
-    crates_io::CratesIoRegistry, npm::NpmRegistry, pypi::PyPiRegistry, Registry,
+    Registry, crates_io::CratesIoRegistry, npm::NpmRegistry, pypi::PyPiRegistry,
 };
 
 #[tokio::main]
