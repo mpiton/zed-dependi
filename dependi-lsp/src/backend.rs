@@ -574,10 +574,10 @@ fn generate_markdown_report(
         "## Summary".to_string(),
         "| Severity | Count |".to_string(),
         "|----------|-------|".to_string(),
-        format!("| 🔴 Critical | {} |", summary.critical),
-        format!("| 🟠 High | {} |", summary.high),
-        format!("| 🟡 Medium | {} |", summary.medium),
-        format!("| 🟢 Low | {} |", summary.low),
+        format!("| [!!] Critical | {} |", summary.critical),
+        format!("| [!] High | {} |", summary.high),
+        format!("| [~] Medium | {} |", summary.medium),
+        format!("| [-] Low | {} |", summary.low),
         format!("| **Total** | **{}** |", summary.total),
         String::new(),
     ];
@@ -596,10 +596,10 @@ fn generate_markdown_report(
             }
 
             let severity_icon = match vuln.severity.as_str() {
-                "critical" => "🔴",
-                "high" => "🟠",
-                "medium" => "🟡",
-                _ => "🟢",
+                "critical" => "⚠",
+                "high" => "▲",
+                "medium" => "●",
+                _ => "○",
             };
 
             if let Some(url) = &vuln.url {
@@ -769,7 +769,7 @@ impl LanguageServer for DependiBackend {
                             parts.iter().map(|p| p.value.as_str()).collect()
                         }
                     };
-                    if label_text.contains('✓') {
+                    if label_text.contains("[OK]") {
                         return None;
                     }
                 }
@@ -846,7 +846,7 @@ impl LanguageServer for DependiBackend {
                 // Add vulnerability information if present
                 if !info.vulnerabilities.is_empty() {
                     parts.push(format!(
-                        "\n### ⚠️ {} Security {}",
+                        "\n### [!] {} Security {}",
                         info.vulnerabilities.len(),
                         if info.vulnerabilities.len() == 1 {
                             "Vulnerability"
@@ -857,10 +857,10 @@ impl LanguageServer for DependiBackend {
 
                     for vuln in &info.vulnerabilities {
                         let severity_icon = match vuln.severity {
-                            VulnerabilitySeverity::Critical => "🔴",
-                            VulnerabilitySeverity::High => "🟠",
-                            VulnerabilitySeverity::Medium => "🟡",
-                            VulnerabilitySeverity::Low => "🟢",
+                            VulnerabilitySeverity::Critical => "⚠",
+                            VulnerabilitySeverity::High => "▲",
+                            VulnerabilitySeverity::Medium => "●",
+                            VulnerabilitySeverity::Low => "○",
                         };
                         let severity_str = match vuln.severity {
                             VulnerabilitySeverity::Critical => "CRITICAL",

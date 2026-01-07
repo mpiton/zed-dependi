@@ -217,20 +217,20 @@ async fn run_scan(
             println!("## Summary\n");
             println!("| Severity | Count |");
             println!("|----------|-------|");
-            println!("| 🔴 Critical | {} |", critical_count);
-            println!("| 🟠 High | {} |", high_count);
-            println!("| 🟡 Medium | {} |", medium_count);
-            println!("| 🟢 Low | {} |", low_count);
+            println!("| [!!] Critical | {} |", critical_count);
+            println!("| [!] High | {} |", high_count);
+            println!("| [~] Medium | {} |", medium_count);
+            println!("| [-] Low | {} |", low_count);
             println!("| **Total** | **{}** |\n", total_vulns);
 
             if !vuln_details.is_empty() {
                 println!("## Vulnerabilities\n");
                 for vuln in &vuln_details {
                     let severity_icon = match vuln["severity"].as_str().unwrap_or("low") {
-                        "critical" => "🔴",
-                        "high" => "🟠",
-                        "medium" => "🟡",
-                        _ => "🟢",
+                        "critical" => "⚠",
+                        "high" => "▲",
+                        "medium" => "●",
+                        _ => "○",
                     };
                     println!(
                         "### {}@{}\n",
@@ -262,17 +262,17 @@ async fn run_scan(
         _ => {
             // Summary format
             println!("Vulnerability Scan Results for {}\n", file.display());
-            println!("  🔴 Critical: {}", critical_count);
-            println!("  🟠 High:     {}", high_count);
-            println!("  🟡 Medium:   {}", medium_count);
-            println!("  🟢 Low:      {}", low_count);
+            println!("  [!!] Critical: {}", critical_count);
+            println!("  [!] High:     {}", high_count);
+            println!("  [~] Medium:   {}", medium_count);
+            println!("  [-] Low:      {}", low_count);
             println!("  ─────────────");
             println!("  Total:      {}\n", total_vulns);
 
             if total_vulns == 0 {
-                println!("✅ No vulnerabilities found!");
+                println!("[OK] No vulnerabilities found!");
             } else {
-                println!("⚠️  {} vulnerabilities found!", total_vulns);
+                println!("[!] {} vulnerabilities found!", total_vulns);
             }
         }
     }

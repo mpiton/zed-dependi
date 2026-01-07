@@ -19,21 +19,12 @@ pub enum VersionUpdateType {
 }
 
 impl VersionUpdateType {
-    pub fn label(&self) -> &'static str {
+    pub fn prefix(&self) -> &'static str {
         match self {
-            VersionUpdateType::Major => "MAJOR",
-            VersionUpdateType::Minor => "minor",
-            VersionUpdateType::Patch => "patch",
-            VersionUpdateType::PreRelease => "prerelease",
-        }
-    }
-
-    pub fn emoji(&self) -> &'static str {
-        match self {
-            VersionUpdateType::Major => "🔴",
-            VersionUpdateType::Minor => "🟡",
-            VersionUpdateType::Patch => "🟢",
-            VersionUpdateType::PreRelease => "⚡",
+            VersionUpdateType::Major => "⚠ MAJOR",
+            VersionUpdateType::Minor => "+ minor",
+            VersionUpdateType::Patch => "· patch",
+            VersionUpdateType::PreRelease => "* prerelease",
         }
     }
 
@@ -151,11 +142,10 @@ fn create_update_action(
             changes.insert(uri.clone(), vec![edit]);
 
             let title = format!(
-                "{} Update {} to {} ({})",
-                update_type.emoji(),
+                "{}: Update {} to {}",
+                update_type.prefix(),
                 dep.name,
-                new_version,
-                update_type.label()
+                new_version
             );
 
             Some(CodeActionOrCommand::CodeAction(CodeAction {
@@ -538,8 +528,7 @@ mod tests {
     fn test_version_update_type_major() {
         let update_type = compare_update_type("1.0.0", "2.0.0");
         assert_eq!(update_type, VersionUpdateType::Major);
-        assert_eq!(update_type.label(), "MAJOR");
-        assert_eq!(update_type.emoji(), "🔴");
+        assert_eq!(update_type.prefix(), "⚠ MAJOR");
         assert!(!update_type.is_preferred());
     }
 
@@ -547,8 +536,7 @@ mod tests {
     fn test_version_update_type_minor() {
         let update_type = compare_update_type("1.5.0", "1.6.0");
         assert_eq!(update_type, VersionUpdateType::Minor);
-        assert_eq!(update_type.label(), "minor");
-        assert_eq!(update_type.emoji(), "🟡");
+        assert_eq!(update_type.prefix(), "+ minor");
         assert!(update_type.is_preferred());
     }
 
@@ -556,8 +544,7 @@ mod tests {
     fn test_version_update_type_patch() {
         let update_type = compare_update_type("1.5.0", "1.5.1");
         assert_eq!(update_type, VersionUpdateType::Patch);
-        assert_eq!(update_type.label(), "patch");
-        assert_eq!(update_type.emoji(), "🟢");
+        assert_eq!(update_type.prefix(), "· patch");
         assert!(update_type.is_preferred());
     }
 
@@ -565,8 +552,7 @@ mod tests {
     fn test_version_update_type_prerelease() {
         let update_type = compare_update_type("1.5.0", "1.5.1-alpha.1");
         assert_eq!(update_type, VersionUpdateType::PreRelease);
-        assert_eq!(update_type.label(), "prerelease");
-        assert_eq!(update_type.emoji(), "⚡");
+        assert_eq!(update_type.prefix(), "* prerelease");
         assert!(update_type.is_preferred());
     }
 
@@ -632,8 +618,7 @@ mod tests {
         assert_eq!(actions.len(), 1);
         match &actions[0] {
             CodeActionOrCommand::CodeAction(action) => {
-                assert!(action.title.contains("🔴"));
-                assert!(action.title.contains("MAJOR"));
+                assert!(action.title.contains("⚠ MAJOR"));
                 assert!(action.title.contains("Update serde to 2.0.0"));
                 assert_eq!(action.is_preferred, Some(false));
             }
@@ -672,8 +657,7 @@ mod tests {
         assert_eq!(actions.len(), 1);
         match &actions[0] {
             CodeActionOrCommand::CodeAction(action) => {
-                assert!(action.title.contains("🟡"));
-                assert!(action.title.contains("minor"));
+                assert!(action.title.contains("+ minor"));
                 assert!(action.title.contains("Update tokio to 1.36.0"));
                 assert_eq!(action.is_preferred, Some(true));
             }
@@ -712,8 +696,7 @@ mod tests {
         assert_eq!(actions.len(), 1);
         match &actions[0] {
             CodeActionOrCommand::CodeAction(action) => {
-                assert!(action.title.contains("🟢"));
-                assert!(action.title.contains("patch"));
+                assert!(action.title.contains("· patch"));
                 assert!(action.title.contains("Update reqwest to 0.12.1"));
                 assert_eq!(action.is_preferred, Some(true));
             }
