@@ -111,6 +111,10 @@ struct VersionEntry {
 }
 
 impl Registry for CratesIoRegistry {
+    fn http_client(&self) -> Arc<Client> {
+        Arc::clone(&self.client)
+    }
+
     async fn get_version_info(&self, package_name: &str) -> anyhow::Result<VersionInfo> {
         // Rate limiting
         {

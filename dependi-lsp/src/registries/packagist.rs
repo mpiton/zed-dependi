@@ -76,6 +76,10 @@ struct SourceInfo {
 }
 
 impl Registry for PackagistRegistry {
+    fn http_client(&self) -> Arc<Client> {
+        Arc::clone(&self.client)
+    }
+
     async fn get_version_info(&self, package_name: &str) -> anyhow::Result<VersionInfo> {
         // Package name format: vendor/package
         if !package_name.contains('/') {

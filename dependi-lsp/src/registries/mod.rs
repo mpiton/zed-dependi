@@ -1,8 +1,10 @@
 //! Registry clients for fetching package version information
 
 use std::collections::HashMap;
+use std::sync::Arc;
 
 use chrono::{DateTime, Utc};
+use reqwest::Client;
 use serde::{Deserialize, Serialize};
 
 /// Information about a package version from a registry
@@ -135,6 +137,9 @@ impl VulnerabilitySeverity {
 pub trait Registry: Send + Sync {
     /// Get version information for a package
     async fn get_version_info(&self, package_name: &str) -> anyhow::Result<VersionInfo>;
+
+    /// Get a reference to the HTTP client used by this registry
+    fn http_client(&self) -> Arc<Client>;
 }
 
 pub mod crates_io;

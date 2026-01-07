@@ -25,24 +25,6 @@ const DEFAULT_TIMEOUT: Duration = Duration::from_secs(10);
 const POOL_IDLE_TIMEOUT: Duration = Duration::from_secs(90);
 const CONNECT_TIMEOUT: Duration = Duration::from_secs(5);
 
-/// Creates a shared, Arc-wrapped reqwest Client configured for connection pooling, timeouts, and TCP keepalive.
-///
-/// On success returns an `Arc<Client>` configured with a custom User-Agent, a default request timeout,
-/// a connect timeout, a pool idle timeout, a max of 10 idle connections per host, and a 60s TCP keepalive.
-///
-/// # Errors
-///
-/// Returns an error if building the underlying `reqwest::Client` fails.
-///
-/// # Examples
-///
-/// ```
-/// use std::sync::Arc;
-/// let client: Arc<reqwest::Client> = crate::create_shared_client().expect("failed to create client");
-/// // `client` can now be cloned and shared between callers:
-/// let cloned = Arc::clone(&client);
-/// drop(cloned);
-/// ```
 pub fn create_shared_client() -> anyhow::Result<Arc<Client>> {
     let client = Client::builder()
         .user_agent(USER_AGENT)
@@ -59,6 +41,15 @@ pub fn create_shared_client() -> anyhow::Result<Arc<Client>> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::registries::crates_io::CratesIoRegistry;
+    use crate::registries::go_proxy::GoProxyRegistry;
+    use crate::registries::npm::NpmRegistry;
+    use crate::registries::nuget::NuGetRegistry;
+    use crate::registries::packagist::PackagistRegistry;
+    use crate::registries::pub_dev::PubDevRegistry;
+    use crate::registries::pypi::PyPiRegistry;
+    use crate::registries::rubygems::RubyGemsRegistry;
+    use crate::registries::Registry;
 
     #[test]
     fn test_create_shared_client() {
@@ -73,5 +64,42 @@ mod tests {
         assert!(Arc::strong_count(&client) == 2);
         drop(client2);
         assert!(Arc::strong_count(&client) == 1);
+    }
+
+    #[test]
+    fn test_registries_share_client_instance() {
+        let shared_client = create_shared_client().expect("Failed to create client");
+        let client_ptr = Arc::as_ptr(&shared_client);
+
+        let crates_io = CratesIoRegistry::with_client(Arc::clone(&shared_client));
+        let npm = NpmRegistry::with_client(Arc::clone(&shared_client));
+        let pypi = PyPiRegistry::with_client(Arc::clone(&shared_client));
+        let go_proxy = GoProxyRegistry::with_client(Arc::clone(&shared_client));
+        let packagist = PackagistRegistry::with_client(Arc::clone(&shared_client));
+        let pub_dev = PubDevRegistry::with_client(Arc::clone(&shared_client));
+        let nuget = NuGetRegistry::with_client(Arc::clone(&shared_client));
+        let rubygems = RubyGemsRegistry::with_client(Arc::clone(&shared_client));
+
+        assert_eq!(Arc::as_ptr(&crates_io.http_client()), client_ptr);
+        assert_eq!(Arc::as_ptr(&npm.http_client()), client_ptr);
+        assert_eq!(Arc::as_ptr(&pypi.http_client()), client_ptr);
+        assert_eq!(Arc::as_ptr(&go_proxy.http_client()), client_ptr);
+        assert_eq!(Arc::as_ptr(&packagist.http_client()), client_ptr);
+        assert_eq!(Arc::as_ptr(&pub_dev.http_client()), client_ptr);
+        assert_eq!(Arc::as_ptr(&nuget.http_client()), client_ptr);
+        assert_eq!(Arc::as_ptr(&rubygems.http_client()), client_ptr);
+
+        assert_eq!(Arc::strong_count(&shared_client), 9);
+    }
+
+    #[test]
+    fn test_default_registries_create_separate_clients() {
+        let crates_io = CratesIoRegistry::default();
+        let npm = NpmRegistry::default();
+
+        assert_ne!(
+            Arc::as_ptr(&crates_io.http_client()),
+            Arc::as_ptr(&npm.http_client())
+        );
     }
 }

@@ -95,6 +95,10 @@ struct NuGetDeprecation {
 }
 
 impl Registry for NuGetRegistry {
+    fn http_client(&self) -> Arc<Client> {
+        Arc::clone(&self.client)
+    }
+
     async fn get_version_info(&self, package_name: &str) -> anyhow::Result<VersionInfo> {
         // NuGet uses lowercase package IDs in URLs
         let package_id = package_name.to_lowercase();

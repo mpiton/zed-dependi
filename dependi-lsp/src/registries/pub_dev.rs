@@ -77,6 +77,10 @@ struct PubPubspec {
 }
 
 impl Registry for PubDevRegistry {
+    fn http_client(&self) -> Arc<Client> {
+        Arc::clone(&self.client)
+    }
+
     async fn get_version_info(&self, package_name: &str) -> anyhow::Result<VersionInfo> {
         let url = format!("{}/packages/{}", self.base_url, package_name);
 

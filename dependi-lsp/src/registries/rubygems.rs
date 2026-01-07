@@ -80,6 +80,10 @@ struct VersionResponse {
 }
 
 impl Registry for RubyGemsRegistry {
+    fn http_client(&self) -> Arc<Client> {
+        Arc::clone(&self.client)
+    }
+
     async fn get_version_info(&self, package_name: &str) -> anyhow::Result<VersionInfo> {
         // Fetch gem info (contains latest version)
         let gem_url = format!("{}/gems/{}.json", self.base_url, package_name);

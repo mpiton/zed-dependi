@@ -62,6 +62,10 @@ struct VersionInfoResponse {
 }
 
 impl Registry for GoProxyRegistry {
+    fn http_client(&self) -> Arc<Client> {
+        Arc::clone(&self.client)
+    }
+
     async fn get_version_info(&self, module_path: &str) -> anyhow::Result<VersionInfo> {
         // Encode module path for URL
         // Go proxy requires case-encoding: uppercase letters become ! followed by lowercase

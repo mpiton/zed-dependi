@@ -86,6 +86,10 @@ struct ReleaseFile {
 }
 
 impl Registry for PyPiRegistry {
+    fn http_client(&self) -> Arc<Client> {
+        Arc::clone(&self.client)
+    }
+
     async fn get_version_info(&self, package_name: &str) -> anyhow::Result<VersionInfo> {
         // Normalize package name (PyPI is case-insensitive, uses lowercase)
         let normalized_name = normalize_package_name(package_name);

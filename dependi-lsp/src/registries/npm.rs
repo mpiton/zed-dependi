@@ -124,6 +124,10 @@ fn normalize_repo_url(url: &str) -> String {
 }
 
 impl Registry for NpmRegistry {
+    fn http_client(&self) -> Arc<Client> {
+        Arc::clone(&self.client)
+    }
+
     async fn get_version_info(&self, package_name: &str) -> anyhow::Result<VersionInfo> {
         // Handle scoped packages (@scope/name -> @scope%2fname)
         let encoded_name = if package_name.starts_with('@') {

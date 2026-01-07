@@ -1,6 +1,7 @@
 use std::sync::{Arc, RwLock};
 
 use dashmap::DashMap;
+use reqwest::Client as HttpClient;
 use serde::{Deserialize, Serialize};
 use tower_lsp::jsonrpc::Result;
 use tower_lsp::lsp_types::*;
@@ -118,7 +119,13 @@ impl DependiBackend {
     /// // let backend = DependiBackend::new(client);
     /// ```
     pub fn new(client: Client) -> Self {
-        let http_client = create_shared_client().expect("Failed to create shared HTTP client");
+        Self::with_http_client(client, None)
+    }
+
+    pub fn with_http_client(client: Client, http_client: Option<Arc<HttpClient>>) -> Self {
+        let http_client = http_client.unwrap_or_else(|| {
+            create_shared_client().expect("Failed to create shared HTTP client")
+        });
 
         Self {
             client,
@@ -687,6 +694,17 @@ impl LanguageServer for DependiBackend {
         self.client
             .log_message(MessageType::INFO, "Dependi LSP initialized")
             .await;
+
+        // Verify all registries share the same HTTP client
+        let base_client = self.crates_io.http_client();
+        debug_assert!(Arc::ptr_eq(&base_client, &self.npm_registry.http_client()));
+        debug_assert!(Arc::ptr_eq(&base_client, &self.pypi.http_client()));
+        debug_assert!(Arc::ptr_eq(&base_client, &self.go_proxy.http_client()));
+        debug_assert!(Arc::ptr_eq(&base_client, &self.packagist.http_client()));
+        debug_assert!(Arc::ptr_eq(&base_client, &self.pub_dev.http_client()));
+        debug_assert!(Arc::ptr_eq(&base_client, &self.nuget.http_client()));
+        debug_assert!(Arc::ptr_eq(&base_client, &self.rubygems.http_client()));
+
         tracing::info!("Dependi LSP initialized");
     }
 
