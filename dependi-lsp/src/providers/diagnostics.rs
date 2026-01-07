@@ -20,8 +20,9 @@ pub fn create_diagnostics(
     let mut diagnostics = Vec::new();
 
     for dep in dependencies {
-        // Skip local/path dependencies - they don't have registry versions
+        // Show informational diagnostic for local/path dependencies
         if is_local_dependency(&dep.version) {
+            diagnostics.push(create_local_dependency_diagnostic(dep));
             continue;
         }
 
@@ -102,6 +103,30 @@ fn create_outdated_diagnostic(
             data: None,
         }),
         VersionStatus::UpToDate | VersionStatus::Unknown => None,
+    }
+}
+
+/// Create a diagnostic for a local/path dependency
+fn create_local_dependency_diagnostic(dep: &Dependency) -> Diagnostic {
+    Diagnostic {
+        range: Range {
+            start: Position {
+                line: dep.line,
+                character: dep.version_start,
+            },
+            end: Position {
+                line: dep.line,
+                character: dep.version_end,
+            },
+        },
+        severity: Some(DiagnosticSeverity::HINT),
+        code: Some(NumberOrString::String("local".to_string())),
+        source: Some("dependi".to_string()),
+        message: "📦 Local".to_string(),
+        related_information: None,
+        tags: None,
+        code_description: None,
+        data: None,
     }
 }
 
