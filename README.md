@@ -15,7 +15,7 @@ Dependency management extension for the [Zed](https://zed.dev) editor.
   - `?` - Could not fetch version info
 - **Vulnerability Scanning**: Real-time security scanning via OSV.dev
   - CVE details in hover tooltips
-  - Severity-based diagnostics (Critical/High → ERROR, Medium → WARNING, Low → HINT)
+  - Severity-based diagnostics (Critical/High -> ERROR, Medium -> WARNING, Low -> HINT)
   - Generate JSON/Markdown vulnerability reports
 - **Diagnostics**: Outdated dependencies are highlighted with hints
 - **Code Actions**: Quick fix to update dependencies to latest version
