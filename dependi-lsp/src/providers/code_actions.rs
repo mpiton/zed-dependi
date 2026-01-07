@@ -179,6 +179,10 @@ fn format_version(version: &str, file_type: FileType) -> String {
             // C# .csproj uses simple version strings
             version.to_string()
         }
+        FileType::Ruby => {
+            // Ruby Gemfile uses operators like ~> or >=
+            version.to_string()
+        }
     }
 }
 
