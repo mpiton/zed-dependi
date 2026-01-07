@@ -126,10 +126,38 @@ fn create_hint_label_and_tooltip(
             let tooltip = format!("Update available: {} -> {}", dep.version, latest);
             (label, Some(tooltip))
         }
-        VersionStatus::Unknown => (
-            "?".to_string(),
-            Some("Could not fetch version info".to_string()),
-        ),
+        VersionStatus::Unknown => {
+            if is_local_dependency(&dep.version) {
+                let tooltip = format!(
+                    "**Local Dependency**\n\n\
+                    \"{}\" is a local/path dependency.\n\n\
+                    Version info is not available for local packages.\n\n\
+                    This is expected for dependencies using:\n\
+                    • path = \"./...\"\n\
+                    • git = \"https://...\"\n\
+                    • git = \"git@...\"\n\
+                    • github:owner/repo",
+                    dep.name
+                );
+                ("📦 Local".to_string(), Some(tooltip))
+            } else {
+                let tooltip = format!(
+                    "**Could not fetch version info**\n\n\
+                    Possible causes:\n\
+                    • Network error - check internet connection\n\
+                    • Package not found - verify spelling\n\
+                    • Rate limiting - wait and retry\n\
+                    • Registry down - try again later\n\n\
+                    **Troubleshooting:**\n\
+                    1. Check your network connection\n\
+                    2. Verify the package name \"{}\" is spelled correctly\n\
+                    3. Search for the package on the registry\n\
+                    4. If recently published, wait a few minutes for indexing",
+                    dep.name
+                );
+                ("⚡".to_string(), Some(tooltip))
+            }
+        }
     }
 }
 
@@ -244,6 +272,24 @@ fn format_yanked_tooltip(dep: &Dependency, info: &VersionInfo) -> String {
     ));
 
     lines.join("\n")
+}
+
+/// Check if a dependency version string indicates a local/path dependency
+fn is_local_dependency(version: &str) -> bool {
+    version.starts_with("./")
+        || version.starts_with("../")
+        || version.starts_with('/')
+        || version.starts_with("file://")
+        || version.starts_with("git+")
+        || version.starts_with("git@")
+        || version.starts_with("https://")
+        || version.starts_with("http://")
+        || version.contains("github:")
+        || version.contains("gitlab:")
+        || version.contains("bitbucket:")
+        || version.starts_with("workspace:")
+        || version.starts_with("link:")
+        || version.starts_with("portal:")
 }
 
 /// Truncate a string to max length with ellipsis
@@ -604,6 +650,86 @@ mod tests {
                 assert!(s.contains("🚫"));
                 assert!(s.contains("Yanked"));
                 assert!(!s.contains("⚠"));
+            }
+            _ => panic!("Expected string label"),
+        }
+    }
+
+    #[test]
+    fn test_is_local_dependency() {
+        assert!(is_local_dependency("./my-lib"));
+        assert!(is_local_dependency("../other-lib"));
+        assert!(is_local_dependency("/absolute/path"));
+        assert!(is_local_dependency("file:///some/path"));
+        assert!(is_local_dependency("git+https://github.com/user/repo"));
+        assert!(is_local_dependency("git@github.com:user/repo.git"));
+        assert!(is_local_dependency("https://github.com/user/repo"));
+        assert!(is_local_dependency("github:user/repo"));
+        assert!(is_local_dependency("gitlab:user/repo"));
+        assert!(is_local_dependency("bitbucket:user/repo"));
+        assert!(is_local_dependency("workspace:*"));
+        assert!(is_local_dependency("link:./my-lib"));
+        assert!(is_local_dependency("portal:./my-lib"));
+
+        assert!(!is_local_dependency("1.0.0"));
+        assert!(!is_local_dependency("^1.0"));
+        assert!(!is_local_dependency("~1.0.0"));
+        assert!(!is_local_dependency(">=1.0, <2.0"));
+        assert!(!is_local_dependency("*"));
+    }
+
+    #[test]
+    fn test_unknown_status_local_dependency() {
+        let dep = make_test_dep("my-local-lib", "./my-local-lib");
+        let hint = create_inlay_hint(&dep, None);
+
+        match hint.label {
+            InlayHintLabel::String(s) => {
+                assert!(s.contains("📦"));
+                assert!(s.contains("Local"));
+            }
+            _ => panic!("Expected string label"),
+        }
+
+        if let Some(tower_lsp::lsp_types::InlayHintTooltip::String(tooltip)) = hint.tooltip {
+            assert!(tooltip.contains("Local Dependency"));
+            assert!(tooltip.contains("my-local-lib"));
+        } else {
+            panic!("Expected string tooltip");
+        }
+    }
+
+    #[test]
+    fn test_unknown_status_network_error() {
+        let dep = make_test_dep("unknown-package", "1.0.0");
+        let hint = create_inlay_hint(&dep, None);
+
+        match hint.label {
+            InlayHintLabel::String(s) => {
+                assert!(s.contains("⚡"));
+                assert!(!s.contains("Local"));
+            }
+            _ => panic!("Expected string label"),
+        }
+
+        if let Some(tower_lsp::lsp_types::InlayHintTooltip::String(tooltip)) = hint.tooltip {
+            assert!(tooltip.contains("Could not fetch version info"));
+            assert!(tooltip.contains("unknown-package"));
+            assert!(tooltip.contains("Troubleshooting"));
+        } else {
+            panic!("Expected string tooltip");
+        }
+    }
+
+    #[test]
+    fn test_unknown_status_git_dependency() {
+        let dep = make_test_dep("git-dep", "git@github.com:user/repo.git");
+        let hint = create_inlay_hint(&dep, None);
+
+        match hint.label {
+            InlayHintLabel::String(s) => {
+                assert!(s.contains("📦"));
+                assert!(s.contains("Local"));
             }
             _ => panic!("Expected string label"),
         }
