@@ -25,6 +25,24 @@ const DEFAULT_TIMEOUT: Duration = Duration::from_secs(10);
 const POOL_IDLE_TIMEOUT: Duration = Duration::from_secs(90);
 const CONNECT_TIMEOUT: Duration = Duration::from_secs(5);
 
+/// Creates a shared, Arc-wrapped reqwest Client configured for connection pooling, timeouts, and TCP keepalive.
+///
+/// On success returns an `Arc<Client>` configured with a custom User-Agent, a default request timeout,
+/// a connect timeout, a pool idle timeout, a max of 10 idle connections per host, and a 60s TCP keepalive.
+///
+/// # Errors
+///
+/// Returns an error if building the underlying `reqwest::Client` fails.
+///
+/// # Examples
+///
+/// ```
+/// use std::sync::Arc;
+/// let client: Arc<reqwest::Client> = crate::create_shared_client().expect("failed to create client");
+/// // `client` can now be cloned and shared between callers:
+/// let cloned = Arc::clone(&client);
+/// drop(cloned);
+/// ```
 pub fn create_shared_client() -> anyhow::Result<Arc<Client>> {
     let client = Client::builder()
         .user_agent(USER_AGENT)

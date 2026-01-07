@@ -17,6 +17,22 @@ pub struct PyPiRegistry {
 }
 
 impl PyPiRegistry {
+    /// Constructs a PyPiRegistry using the provided shared HTTP client.
+    ///
+    /// The returned registry is configured with the default PyPI API base URL (`https://pypi.org/pypi`).
+    ///
+    /// # Parameters
+    ///
+    /// - `client` — shared HTTP client used for performing requests to the PyPI API.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use std::sync::Arc;
+    ///
+    /// let client = create_shared_client().expect("failed to create client");
+    /// let registry = PyPiRegistry::with_client(client);
+    /// ```
     pub fn with_client(client: Arc<Client>) -> Self {
         Self {
             client,
@@ -26,6 +42,13 @@ impl PyPiRegistry {
 }
 
 impl Default for PyPiRegistry {
+    /// Creates a PyPiRegistry configured with a shared HTTP client and the default PyPI base URL.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// let _registry = PyPiRegistry::default();
+    /// ```
     fn default() -> Self {
         Self::with_client(create_shared_client().expect("Failed to create HTTP client"))
     }

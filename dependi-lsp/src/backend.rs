@@ -104,6 +104,19 @@ pub struct DependiBackend {
 }
 
 impl DependiBackend {
+    /// Create a new DependiBackend with default configuration, parsers, registry clients,
+    /// caches, and an OSV client.
+    ///
+    /// The provided `client` is used for LSP communication. A shared HTTP client is created
+    /// internally and used to construct registry clients bound to that HTTP client.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// // Obtain an LSP `Client` from the runtime environment and pass it in:
+    /// // let client = /* LSP client */ ;
+    /// // let backend = DependiBackend::new(client);
+    /// ```
     pub fn new(client: Client) -> Self {
         let http_client = create_shared_client().expect("Failed to create shared HTTP client");
 

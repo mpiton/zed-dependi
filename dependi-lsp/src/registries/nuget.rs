@@ -17,6 +17,16 @@ pub struct NuGetRegistry {
 }
 
 impl NuGetRegistry {
+    /// Constructs a NuGetRegistry configured to use the NuGet v3 API with the provided shared HTTP client.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use std::sync::Arc;
+    /// use reqwest::Client;
+    /// let client = Arc::new(Client::new());
+    /// let _registry = crate::registries::nuget::NuGetRegistry::with_client(client);
+    /// ```
     pub fn with_client(client: Arc<Client>) -> Self {
         Self {
             client,
@@ -26,6 +36,15 @@ impl NuGetRegistry {
 }
 
 impl Default for NuGetRegistry {
+    /// Creates a `NuGetRegistry` configured with a shared HTTP client targeting the NuGet v3 API.
+    ///
+    /// Panics if creating the shared HTTP client fails.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// let _reg = NuGetRegistry::default();
+    /// ```
     fn default() -> Self {
         Self::with_client(create_shared_client().expect("Failed to create HTTP client"))
     }
