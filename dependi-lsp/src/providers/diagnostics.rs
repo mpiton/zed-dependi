@@ -271,7 +271,7 @@ fn create_vulnerability_diagnostic(dep: &Dependency, vuln: &Vulnerability) -> Di
     };
 
     let message = format!(
-        "Security vulnerability {} ({}): {}",
+        "⚠ Vuln {} ({}): {}",
         vuln.id,
         severity_text,
         truncate_string(&vuln.description, 150)
