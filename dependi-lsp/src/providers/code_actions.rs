@@ -71,7 +71,8 @@ pub fn compare_update_type(current: &str, new: &str) -> VersionUpdateType {
 fn normalize_version(version: &str) -> String {
     let version = version.trim();
     let version = version
-        .strip_prefix('^')
+        .strip_prefix("~>")
+        .or_else(|| version.strip_prefix('^'))
         .or_else(|| version.strip_prefix('~'))
         .or_else(|| version.strip_prefix(">="))
         .or_else(|| version.strip_prefix("<="))
@@ -79,7 +80,8 @@ fn normalize_version(version: &str) -> String {
         .or_else(|| version.strip_prefix('<'))
         .or_else(|| version.strip_prefix('='))
         .or_else(|| version.strip_prefix('v'))
-        .unwrap_or(version);
+        .unwrap_or(version)
+        .trim();
 
     let version = version.split(',').next().unwrap_or(version).trim();
 
@@ -580,6 +582,15 @@ mod tests {
         );
         assert_eq!(
             compare_update_type(">=1.5.0", "1.5.1"),
+            VersionUpdateType::Patch
+        );
+        // Ruby pessimistic constraint
+        assert_eq!(
+            compare_update_type("~> 7.0", "8.1.1"),
+            VersionUpdateType::Major
+        );
+        assert_eq!(
+            compare_update_type("~> 4.9", "4.9.4"),
             VersionUpdateType::Patch
         );
     }
