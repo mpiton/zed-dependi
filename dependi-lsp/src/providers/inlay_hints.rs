@@ -58,7 +58,27 @@ fn create_hint_label_and_tooltip(
     dep: &Dependency,
     version_info: Option<&VersionInfo>,
 ) -> (String, Option<String>) {
-    // Handle deprecation (highest priority)
+    // Handle yanked versions (highest priority - critical issue)
+    if let Some(info) = version_info
+        && info.is_version_yanked(&dep.version)
+    {
+        let yanked_label = "🚫 Yanked".to_string();
+        let yanked_tooltip = format_yanked_tooltip(dep, info);
+
+        return match status {
+            VersionStatus::UpdateAvailable(latest) => {
+                let label = format!("{} -> {}", yanked_label, latest);
+                let tooltip = format!(
+                    "{}\n\n---\n**Update available:** {} → {}",
+                    yanked_tooltip, dep.version, latest
+                );
+                (label, Some(tooltip))
+            }
+            _ => (yanked_label, Some(yanked_tooltip)),
+        };
+    }
+
+    // Handle deprecation (second highest priority)
     if let Some(info) = version_info
         && info.deprecated
     {
@@ -188,6 +208,40 @@ fn format_deprecation_tooltip(dep: &Dependency, info: &VersionInfo) -> String {
             latest
         ));
     }
+
+    lines.join("\n")
+}
+
+/// Format yanked version warning for tooltip
+fn format_yanked_tooltip(dep: &Dependency, info: &VersionInfo) -> String {
+    let mut lines = vec![
+        format!(
+            "**🚫 YANKED VERSION**\n\nThe version \"{}\" of \"{}\" has been yanked from crates.io.",
+            dep.version, dep.name
+        ),
+        "".to_string(),
+        "**Why was it yanked?**".to_string(),
+        "A yanked version typically has:".to_string(),
+        "• Critical bugs that break functionality".to_string(),
+        "• Security vulnerabilities".to_string(),
+        "• Published by mistake".to_string(),
+        "• Corrupted or incomplete package".to_string(),
+        "".to_string(),
+        "**What should you do?**".to_string(),
+    ];
+
+    if let Some(latest) = &info.latest {
+        lines.push(format!("• Update to the latest version: {}", latest));
+    }
+
+    if let Some(repo) = &info.repository {
+        lines.push(format!("• Check the repository for more info: {}", repo));
+    }
+
+    lines.push(format!(
+        "• View on crates.io: https://crates.io/crates/{}",
+        dep.name
+    ));
 
     lines.join("\n")
 }
@@ -443,6 +497,113 @@ mod tests {
             InlayHintLabel::String(s) => {
                 assert!(s.contains("Deprecated"));
                 assert!(!s.contains("1"));
+            }
+            _ => panic!("Expected string label"),
+        }
+    }
+
+    #[test]
+    fn test_yanked_inlay_hint() {
+        let dep = make_test_dep("serde", "1.0.0");
+        let info = VersionInfo {
+            yanked_versions: vec!["1.0.0".to_string()],
+            latest: Some("2.0.0".to_string()),
+            ..Default::default()
+        };
+        let hint = create_inlay_hint(&dep, Some(&info));
+
+        match hint.label {
+            InlayHintLabel::String(s) => {
+                assert!(s.contains("🚫"));
+                assert!(s.contains("Yanked"));
+            }
+            _ => panic!("Expected string label"),
+        }
+    }
+
+    #[test]
+    fn test_yanked_with_update() {
+        let dep = make_test_dep("serde", "1.0.0");
+        let info = VersionInfo {
+            yanked_versions: vec!["1.0.0".to_string()],
+            latest: Some("2.0.0".to_string()),
+            ..Default::default()
+        };
+        let hint = create_inlay_hint(&dep, Some(&info));
+
+        match hint.label {
+            InlayHintLabel::String(s) => {
+                assert!(s.contains("🚫"));
+                assert!(s.contains("Yanked"));
+                assert!(s.contains("2.0.0"));
+                assert!(s.contains("->"));
+            }
+            _ => panic!("Expected string label"),
+        }
+    }
+
+    #[test]
+    fn test_no_yanked_warning() {
+        let dep = make_test_dep("serde", "1.0.0");
+        let info = VersionInfo {
+            yanked_versions: vec!["0.9.0".to_string()],
+            latest: Some("1.0.0".to_string()),
+            ..Default::default()
+        };
+        let hint = create_inlay_hint(&dep, Some(&info));
+
+        match hint.label {
+            InlayHintLabel::String(s) => {
+                assert!(!s.contains("🚫"));
+                assert!(!s.contains("Yanked"));
+                assert!(s.contains("✓"));
+            }
+            _ => panic!("Expected string label"),
+        }
+    }
+
+    #[test]
+    fn test_yanked_priority_over_deprecated() {
+        let dep = make_test_dep("dep", "1.0.0");
+        let info = VersionInfo {
+            yanked_versions: vec!["1.0.0".to_string()],
+            deprecated: true,
+            latest: Some("2.0.0".to_string()),
+            ..Default::default()
+        };
+        let hint = create_inlay_hint(&dep, Some(&info));
+
+        match hint.label {
+            InlayHintLabel::String(s) => {
+                assert!(s.contains("🚫"));
+                assert!(s.contains("Yanked"));
+                assert!(!s.contains("Deprecated"));
+            }
+            _ => panic!("Expected string label"),
+        }
+    }
+
+    #[test]
+    fn test_yanked_priority_over_vulnerabilities() {
+        let dep = make_test_dep("dep", "1.0.0");
+        let info = VersionInfo {
+            yanked_versions: vec!["1.0.0".to_string()],
+            vulnerabilities: vec![Vulnerability {
+                id: "CVE-2024-1234".to_string(),
+                severity: VulnerabilitySeverity::High,
+                description: "Test vulnerability".to_string(),
+                url: None,
+            }],
+            latest: Some("2.0.0".to_string()),
+            ..Default::default()
+        };
+        let hint = create_inlay_hint(&dep, Some(&info));
+
+        match hint.label {
+            InlayHintLabel::String(s) => {
+                assert!(s.contains("🚫"));
+                assert!(s.contains("Yanked"));
+                assert!(!s.contains("⚠"));
             }
             _ => panic!("Expected string label"),
         }

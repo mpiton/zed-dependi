@@ -105,6 +105,7 @@ impl Registry for PubDevRegistry {
             vulnerabilities: vec![], // Will be filled by OSV
             deprecated: pkg.latest.pubspec.discontinued,
             yanked: pkg.latest.retracted,
+            yanked_versions: vec![], // Not applicable to pub.dev
         })
     }
 }

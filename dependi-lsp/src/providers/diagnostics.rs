@@ -25,10 +25,18 @@ pub fn create_diagnostics(
             diagnostics.push(diag);
         }
 
-        // Add deprecation diagnostic
         let cache_key = cache_key_fn(&dep.name);
         if let Some(version_info) = cache.get(&cache_key) {
-            if version_info.deprecated {
+            // Add yanked version diagnostic (highest priority)
+            if version_info.is_version_yanked(&dep.version) {
+                tracing::debug!(
+                    "Package {} {} is yanked, creating diagnostic",
+                    dep.name,
+                    dep.version
+                );
+                diagnostics.push(create_yanked_diagnostic(dep, &version_info));
+            } else if version_info.deprecated {
+                // Add deprecation diagnostic
                 tracing::debug!(
                     "Package {} {} is deprecated, creating diagnostic",
                     dep.name,
@@ -36,7 +44,7 @@ pub fn create_diagnostics(
                 );
                 diagnostics.push(create_deprecation_diagnostic(dep, &version_info));
             } else {
-                // Add vulnerability diagnostics only if not deprecated
+                // Add vulnerability diagnostics only if not deprecated or yanked
                 for vuln in &version_info.vulnerabilities {
                     // Filter by minimum severity if specified
                     if let Some(min) = min_severity
@@ -154,6 +162,64 @@ fn create_deprecation_diagnostic(dep: &Dependency, version_info: &VersionInfo) -
         },
         tags: None,
         code_description: None,
+        data: None,
+    }
+}
+
+/// Create a diagnostic for a yanked version
+fn create_yanked_diagnostic(dep: &Dependency, version_info: &VersionInfo) -> Diagnostic {
+    let mut message = format!(
+        "The version '{}' of '{}' has been yanked from crates.io and should not be used.",
+        dep.version, dep.name
+    );
+
+    if let Some(latest) = &version_info.latest {
+        message.push_str(&format!(" Update to {}.", latest));
+    }
+
+    let crates_io_url = format!("https://crates.io/crates/{}", dep.name);
+    let mut related_info = vec![DiagnosticRelatedInformation {
+        location: Location {
+            uri: Url::parse(&crates_io_url)
+                .unwrap_or_else(|_| Url::parse("https://crates.io").expect("Invalid fallback URL")),
+            range: Range::default(),
+        },
+        message: "View package on crates.io".to_string(),
+    }];
+
+    if let Some(repo) = &version_info.repository {
+        related_info.push(DiagnosticRelatedInformation {
+            location: Location {
+                uri: Url::parse(repo).unwrap_or_else(|_| {
+                    Url::parse("https://github.com").expect("Invalid fallback URL")
+                }),
+                range: Range::default(),
+            },
+            message: "View repository for more information".to_string(),
+        });
+    }
+
+    Diagnostic {
+        range: Range {
+            start: Position {
+                line: dep.line,
+                character: dep.version_start,
+            },
+            end: Position {
+                line: dep.line,
+                character: dep.version_end,
+            },
+        },
+        severity: Some(DiagnosticSeverity::WARNING),
+        code: Some(NumberOrString::String("yanked-version".to_string())),
+        source: Some("dependi".to_string()),
+        message,
+        related_information: Some(related_info),
+        tags: None,
+        code_description: Some(CodeDescription {
+            href: Url::parse(&crates_io_url)
+                .unwrap_or_else(|_| Url::parse("https://crates.io").expect("Invalid fallback URL")),
+        }),
         data: None,
     }
 }
@@ -430,6 +496,175 @@ mod tests {
             vuln_diags.len(),
             0,
             "Deprecated packages should not show individual vulnerability diagnostics"
+        );
+    }
+
+    #[test]
+    fn test_yanked_diagnostic() {
+        let deps = vec![create_test_dependency("serde", "1.0.0", 5)];
+        let cache = MemoryCache::new();
+        cache.insert(
+            "test:serde".to_string(),
+            VersionInfo {
+                yanked_versions: vec!["1.0.0".to_string()],
+                latest: Some("2.0.0".to_string()),
+                ..Default::default()
+            },
+        );
+
+        let diagnostics = create_diagnostics(&deps, &cache, |name| format!("test:{}", name), None);
+
+        let yanked_diags: Vec<_> = diagnostics
+            .iter()
+            .filter(|d| {
+                d.code
+                    .as_ref()
+                    .and_then(|c| match c {
+                        NumberOrString::String(s) => Some(s.contains("yanked")),
+                        _ => None,
+                    })
+                    .unwrap_or(false)
+            })
+            .collect();
+
+        assert_eq!(yanked_diags.len(), 1);
+        assert!(yanked_diags[0].message.contains("yanked"));
+        assert_eq!(yanked_diags[0].severity, Some(DiagnosticSeverity::WARNING));
+    }
+
+    #[test]
+    fn test_no_yanked_diagnostic_for_non_yanked() {
+        let deps = vec![create_test_dependency("serde", "1.0.0", 5)];
+        let cache = MemoryCache::new();
+        cache.insert(
+            "test:serde".to_string(),
+            VersionInfo {
+                yanked_versions: vec!["0.9.0".to_string()],
+                latest: Some("1.0.0".to_string()),
+                ..Default::default()
+            },
+        );
+
+        let diagnostics = create_diagnostics(&deps, &cache, |name| format!("test:{}", name), None);
+
+        let yanked_diags: Vec<_> = diagnostics
+            .iter()
+            .filter(|d| {
+                d.code
+                    .as_ref()
+                    .and_then(|c| match c {
+                        NumberOrString::String(s) => Some(s.contains("yanked")),
+                        _ => None,
+                    })
+                    .unwrap_or(false)
+            })
+            .collect();
+
+        assert_eq!(yanked_diags.len(), 0);
+    }
+
+    #[test]
+    fn test_yanked_priority_over_deprecated_diagnostic() {
+        let deps = vec![create_test_dependency("serde", "1.0.0", 5)];
+        let cache = MemoryCache::new();
+        cache.insert(
+            "test:serde".to_string(),
+            VersionInfo {
+                yanked_versions: vec!["1.0.0".to_string()],
+                deprecated: true,
+                latest: Some("2.0.0".to_string()),
+                ..Default::default()
+            },
+        );
+
+        let diagnostics = create_diagnostics(&deps, &cache, |name| format!("test:{}", name), None);
+
+        let yanked_diags: Vec<_> = diagnostics
+            .iter()
+            .filter(|d| {
+                d.code
+                    .as_ref()
+                    .and_then(|c| match c {
+                        NumberOrString::String(s) => Some(s.contains("yanked")),
+                        _ => None,
+                    })
+                    .unwrap_or(false)
+            })
+            .collect();
+
+        let deprecated_diags: Vec<_> = diagnostics
+            .iter()
+            .filter(|d| {
+                d.code
+                    .as_ref()
+                    .and_then(|c| match c {
+                        NumberOrString::String(s) => Some(s.contains("deprecated")),
+                        _ => None,
+                    })
+                    .unwrap_or(false)
+            })
+            .collect();
+
+        assert_eq!(yanked_diags.len(), 1, "Should show yanked diagnostic");
+        assert_eq!(
+            deprecated_diags.len(),
+            0,
+            "Yanked packages should not show deprecated diagnostic"
+        );
+    }
+
+    #[test]
+    fn test_yanked_priority_over_vulnerabilities_diagnostic() {
+        let deps = vec![create_test_dependency("serde", "1.0.0", 5)];
+        let cache = MemoryCache::new();
+        cache.insert(
+            "test:serde".to_string(),
+            VersionInfo {
+                yanked_versions: vec!["1.0.0".to_string()],
+                vulnerabilities: vec![Vulnerability {
+                    id: "CVE-2024-1234".to_string(),
+                    severity: VulnerabilitySeverity::High,
+                    description: "Test vulnerability".to_string(),
+                    url: None,
+                }],
+                latest: Some("2.0.0".to_string()),
+                ..Default::default()
+            },
+        );
+
+        let diagnostics = create_diagnostics(&deps, &cache, |name| format!("test:{}", name), None);
+
+        let yanked_diags: Vec<_> = diagnostics
+            .iter()
+            .filter(|d| {
+                d.code
+                    .as_ref()
+                    .and_then(|c| match c {
+                        NumberOrString::String(s) => Some(s.contains("yanked")),
+                        _ => None,
+                    })
+                    .unwrap_or(false)
+            })
+            .collect();
+
+        let vuln_diags: Vec<_> = diagnostics
+            .iter()
+            .filter(|d| {
+                d.code
+                    .as_ref()
+                    .and_then(|c| match c {
+                        NumberOrString::String(s) => Some(s.starts_with("CVE")),
+                        _ => None,
+                    })
+                    .unwrap_or(false)
+            })
+            .collect();
+
+        assert_eq!(yanked_diags.len(), 1, "Should show yanked diagnostic");
+        assert_eq!(
+            vuln_diags.len(),
+            0,
+            "Yanked packages should not show vulnerability diagnostics"
         );
     }
 }
