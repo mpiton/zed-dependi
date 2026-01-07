@@ -714,7 +714,7 @@ mod tests {
 
     #[test]
     fn test_npm_local_deps_detection() {
-        use crate::parsers::{npm::NpmParser, Parser};
+        use crate::parsers::{Parser, npm::NpmParser};
 
         let content = r#"{
   "dependencies": {
@@ -779,7 +779,11 @@ mod tests {
 
         match hint.label {
             InlayHintLabel::String(s) => {
-                assert!(s.contains("📦") || s.contains("Local"), "Expected 📦 Local in label, got: {}", s);
+                assert!(
+                    s.contains("📦") || s.contains("Local"),
+                    "Expected 📦 Local in label, got: {}",
+                    s
+                );
             }
             _ => panic!("Expected string label"),
         }
@@ -821,7 +825,11 @@ mod tests {
 
         match hint.label {
             InlayHintLabel::String(s) => {
-                assert!(s.contains("📦") || s.contains("Local"), "Expected 📦 Local in label, got: {}", s);
+                assert!(
+                    s.contains("📦") || s.contains("Local"),
+                    "Expected 📦 Local in label, got: {}",
+                    s
+                );
             }
             _ => panic!("Expected string label"),
         }

@@ -4,7 +4,7 @@ use tower_lsp::lsp_types::*;
 
 use crate::cache::Cache;
 use crate::parsers::Dependency;
-use crate::providers::inlay_hints::{is_local_dependency, VersionStatus, compare_versions};
+use crate::providers::inlay_hints::{VersionStatus, compare_versions, is_local_dependency};
 use crate::registries::{VersionInfo, Vulnerability, VulnerabilitySeverity};
 
 /// Create diagnostics for a list of dependencies
