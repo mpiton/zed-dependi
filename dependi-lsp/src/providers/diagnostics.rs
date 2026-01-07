@@ -4,7 +4,7 @@ use tower_lsp::lsp_types::*;
 
 use crate::cache::Cache;
 use crate::parsers::Dependency;
-use crate::providers::inlay_hints::{VersionStatus, compare_versions};
+use crate::providers::inlay_hints::{VersionStatus, compare_versions, is_local_dependency};
 use crate::registries::{VersionInfo, Vulnerability, VulnerabilitySeverity};
 
 /// Create diagnostics for a list of dependencies
@@ -20,6 +20,12 @@ pub fn create_diagnostics(
     let mut diagnostics = Vec::new();
 
     for dep in dependencies {
+        // Show informational diagnostic for local/path dependencies
+        if is_local_dependency(&dep.version) {
+            diagnostics.push(create_local_dependency_diagnostic(dep));
+            continue;
+        }
+
         // Add outdated version diagnostic
         if let Some(diag) = create_outdated_diagnostic(dep, cache, &cache_key_fn) {
             diagnostics.push(diag);
@@ -97,6 +103,30 @@ fn create_outdated_diagnostic(
             data: None,
         }),
         VersionStatus::UpToDate | VersionStatus::Unknown => None,
+    }
+}
+
+/// Create a diagnostic for a local/path dependency
+fn create_local_dependency_diagnostic(dep: &Dependency) -> Diagnostic {
+    Diagnostic {
+        range: Range {
+            start: Position {
+                line: dep.line,
+                character: dep.version_start,
+            },
+            end: Position {
+                line: dep.line,
+                character: dep.version_end,
+            },
+        },
+        severity: Some(DiagnosticSeverity::HINT),
+        code: Some(NumberOrString::String("local".to_string())),
+        source: Some("dependi".to_string()),
+        message: "📦 Local".to_string(),
+        related_information: None,
+        tags: None,
+        code_description: None,
+        data: None,
     }
 }
 

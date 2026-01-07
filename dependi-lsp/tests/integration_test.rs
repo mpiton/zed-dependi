@@ -217,11 +217,14 @@ fn test_inlay_hint_generation() {
         _ => panic!("Expected string label"),
     }
 
-    // Unknown version (no info)
+    // Unknown version (no info) - shows ⚡ with troubleshooting tooltip
     let hint = create_inlay_hint(&dep_outdated, None);
     match hint.label {
         tower_lsp::lsp_types::InlayHintLabel::String(s) => {
-            assert!(s.contains("?"), "Expected question mark for unknown");
+            assert!(
+                s.contains("⚡"),
+                "Expected lightning bolt for unknown/error status"
+            );
         }
         _ => panic!("Expected string label"),
     }
