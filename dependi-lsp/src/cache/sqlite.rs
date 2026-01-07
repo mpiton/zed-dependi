@@ -10,6 +10,7 @@ use r2d2::{Pool, PooledConnection};
 use r2d2_sqlite::SqliteConnectionManager;
 use rusqlite::params;
 
+use crate::cache::{ReadCache, WriteCache};
 use crate::registries::VersionInfo;
 
 /// Default TTL for cache entries (1 hour)
@@ -21,11 +22,17 @@ static TEST_DB_COUNTER: AtomicU64 = AtomicU64::new(0);
 /// Configuration for SQLite cache pool
 #[derive(Debug, Clone)]
 pub struct SqliteCacheConfig {
+    /// Maximum number of connections in the pool
     pub max_pool_size: u32,
+    /// Minimum number of idle connections to maintain
     pub min_idle_connections: u32,
+    /// Timeout in seconds for acquiring a connection
     pub connection_timeout_secs: u64,
+    /// SQLite busy timeout in milliseconds
     pub busy_timeout_ms: u32,
+    /// SQLite cache size in kilobytes
     pub cache_size_kb: i64,
+    /// Time-to-live for cache entries in seconds
     pub ttl_secs: i64,
 }
 
@@ -163,6 +170,7 @@ impl SqliteCache {
         Ok(cache_dir.join("dependi"))
     }
 
+    /// Get a connection from the pool, returning None if unavailable
     fn get_conn(&self) -> Option<PooledConnection<SqliteConnectionManager>> {
         self.pool.get().ok()
     }
@@ -192,9 +200,10 @@ impl SqliteCache {
         )?;
         Ok(())
     }
+}
 
-    /// Get a value from the cache
-    pub fn get(&self, key: &str) -> Option<VersionInfo> {
+impl ReadCache for SqliteCache {
+    fn get(&self, key: &str) -> Option<VersionInfo> {
         let conn = self.get_conn()?;
         let now = current_timestamp();
 
@@ -216,9 +225,10 @@ impl SqliteCache {
             Err(_) => None,
         }
     }
+}
 
-    /// Insert a value into the cache
-    pub fn insert(&self, key: String, value: VersionInfo) {
+impl WriteCache for SqliteCache {
+    fn insert(&self, key: String, value: VersionInfo) {
         let Some(conn) = self.get_conn() else {
             return;
         };
@@ -234,6 +244,22 @@ impl SqliteCache {
         );
     }
 
+    fn remove(&self, key: &str) {
+        let Some(conn) = self.get_conn() else {
+            return;
+        };
+        let _ = conn.execute("DELETE FROM packages WHERE key = ?", [key]);
+    }
+
+    fn clear(&self) {
+        let Some(conn) = self.get_conn() else {
+            return;
+        };
+        let _ = conn.execute("DELETE FROM packages", []);
+    }
+}
+
+impl SqliteCache {
     /// Insert multiple values in a single transaction
     #[cfg(test)]
     pub fn insert_batch(&self, entries: Vec<(String, VersionInfo)>) -> anyhow::Result<usize> {
@@ -259,9 +285,9 @@ impl SqliteCache {
         Ok(count)
     }
 
-    /// Remove a value from the cache
+    /// Remove a value from the cache, returning whether it existed
     #[cfg(test)]
-    pub fn remove(&self, key: &str) -> bool {
+    pub fn remove_with_result(&self, key: &str) -> bool {
         let Some(conn) = self.get_conn() else {
             return false;
         };
@@ -270,9 +296,9 @@ impl SqliteCache {
             .unwrap_or(false)
     }
 
-    /// Clear all entries from the cache
+    /// Clear all entries from the cache, returning the count
     #[cfg(test)]
-    pub fn clear(&self) -> anyhow::Result<usize> {
+    pub fn clear_with_count(&self) -> anyhow::Result<usize> {
         let conn = self.pool.get()?;
         let rows = conn.execute("DELETE FROM packages", [])?;
         Ok(rows)
@@ -302,7 +328,9 @@ impl SqliteCache {
 /// Pool statistics for monitoring
 #[derive(Debug, Clone, Copy)]
 pub struct PoolState {
+    /// Total number of connections in the pool
     pub connections: u32,
+    /// Number of idle connections available
     pub idle_connections: u32,
 }
 
@@ -391,11 +419,11 @@ mod tests {
         cache.insert("test:package".to_string(), info);
         assert!(cache.get("test:package").is_some());
 
-        let removed = cache.remove("test:package");
+        let removed = cache.remove_with_result("test:package");
         assert!(removed);
         assert!(cache.get("test:package").is_none());
 
-        let removed_again = cache.remove("test:package");
+        let removed_again = cache.remove_with_result("test:package");
         assert!(!removed_again);
     }
 
@@ -408,7 +436,7 @@ mod tests {
         cache.insert("pkg2".to_string(), info.clone());
         cache.insert("pkg3".to_string(), info);
 
-        let cleared = cache.clear().unwrap();
+        let cleared = cache.clear_with_count().unwrap();
         assert_eq!(cleared, 3);
 
         assert!(cache.get("pkg1").is_none());
