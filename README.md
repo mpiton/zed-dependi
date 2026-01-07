@@ -11,7 +11,7 @@ Dependency management extension for the [Zed](https://zed.dev) editor.
 - **Inlay Hints**: See latest versions inline next to your dependencies
   - `✓` - Version is up to date
   - `-> X.Y.Z` - Update available
-  - `⚠ N` - Vulnerabilities detected
+  - `⚠ N vulns` - Vulnerabilities detected
   - `⚠ Deprecated` - Package is deprecated
   - `⊘ Yanked` - Version has been yanked
   - `→ Local` - Local/path dependency

@@ -50,15 +50,23 @@ pub fn create_diagnostics(
                 );
                 diagnostics.push(create_deprecation_diagnostic(dep, &version_info));
             } else {
-                // Add vulnerability diagnostics only if not deprecated or yanked
-                for vuln in &version_info.vulnerabilities {
-                    // Filter by minimum severity if specified
-                    if let Some(min) = min_severity
-                        && !meets_severity_threshold(&vuln.severity, &min)
-                    {
-                        continue;
-                    }
-                    diagnostics.push(create_vulnerability_diagnostic(dep, vuln));
+                // Add vulnerability diagnostic (summary) only if not deprecated or yanked
+                let filtered_vulns: Vec<_> = version_info
+                    .vulnerabilities
+                    .iter()
+                    .filter(|vuln| {
+                        min_severity
+                            .as_ref()
+                            .map(|min| meets_severity_threshold(&vuln.severity, min))
+                            .unwrap_or(true)
+                    })
+                    .collect();
+
+                if !filtered_vulns.is_empty() {
+                    diagnostics.push(create_vulnerability_summary_diagnostic(
+                        dep,
+                        &filtered_vulns,
+                    ));
                 }
             }
         }
@@ -254,28 +262,52 @@ fn create_yanked_diagnostic(dep: &Dependency, version_info: &VersionInfo) -> Dia
     }
 }
 
-/// Create a diagnostic for a security vulnerability
-fn create_vulnerability_diagnostic(dep: &Dependency, vuln: &Vulnerability) -> Diagnostic {
-    // Map vulnerability severity to diagnostic severity
-    let severity = match vuln.severity {
+/// Create a summary diagnostic for multiple vulnerabilities
+fn create_vulnerability_summary_diagnostic(
+    dep: &Dependency,
+    vulns: &[&Vulnerability],
+) -> Diagnostic {
+    let count = vulns.len();
+
+    // Use the highest severity among all vulnerabilities
+    let severity_to_num = |s: &VulnerabilitySeverity| match s {
+        VulnerabilitySeverity::Critical => 4,
+        VulnerabilitySeverity::High => 3,
+        VulnerabilitySeverity::Medium => 2,
+        VulnerabilitySeverity::Low => 1,
+    };
+    let max_severity = vulns
+        .iter()
+        .map(|v| &v.severity)
+        .max_by_key(|s| severity_to_num(s))
+        .unwrap_or(&VulnerabilitySeverity::Low);
+
+    let diagnostic_severity = match max_severity {
         VulnerabilitySeverity::Critical | VulnerabilitySeverity::High => DiagnosticSeverity::ERROR,
         VulnerabilitySeverity::Medium => DiagnosticSeverity::WARNING,
         VulnerabilitySeverity::Low => DiagnosticSeverity::HINT,
     };
 
-    let severity_text = match vuln.severity {
-        VulnerabilitySeverity::Critical => "CRITICAL",
-        VulnerabilitySeverity::High => "HIGH",
-        VulnerabilitySeverity::Medium => "MEDIUM",
-        VulnerabilitySeverity::Low => "LOW",
-    };
+    // Build summary message
+    let vuln_word = if count == 1 { "vuln" } else { "vulns" };
+    let vuln_ids: Vec<_> = vulns.iter().map(|v| v.id.as_str()).collect();
+    let message = format!("⚠ {} {}: {}", count, vuln_word, vuln_ids.join(", "));
 
-    let message = format!(
-        "Security vulnerability {} ({}): {}",
-        vuln.id,
-        severity_text,
-        truncate_string(&vuln.description, 150)
-    );
+    // Collect related information for all vulnerabilities
+    let related_info: Vec<_> = vulns
+        .iter()
+        .filter_map(|vuln| {
+            vuln.url.as_ref().map(|url| DiagnosticRelatedInformation {
+                location: Location {
+                    uri: Url::parse(url).unwrap_or_else(|_| {
+                        Url::parse("https://osv.dev").expect("Invalid fallback URL")
+                    }),
+                    range: Range::default(),
+                },
+                message: format!("{}: {}", vuln.id, truncate_string(&vuln.description, 80)),
+            })
+        })
+        .collect();
 
     Diagnostic {
         range: Range {
@@ -288,26 +320,21 @@ fn create_vulnerability_diagnostic(dep: &Dependency, vuln: &Vulnerability) -> Di
                 character: dep.version_end,
             },
         },
-        severity: Some(severity),
-        code: Some(NumberOrString::String(vuln.id.clone())),
+        severity: Some(diagnostic_severity),
+        code: Some(NumberOrString::String(format!("{}-vulns", count))),
         source: Some("dependi-security".to_string()),
         message,
-        related_information: vuln.url.as_ref().map(|url| {
-            vec![DiagnosticRelatedInformation {
-                location: Location {
-                    uri: Url::parse(url).unwrap_or_else(|_| {
-                        Url::parse("https://osv.dev").expect("Invalid fallback URL")
-                    }),
-                    range: Range::default(),
-                },
-                message: "View security advisory".to_string(),
-            }]
-        }),
+        related_information: if related_info.is_empty() {
+            None
+        } else {
+            Some(related_info)
+        },
         tags: None,
-        code_description: vuln
-            .url
-            .as_ref()
-            .and_then(|url| Url::parse(url).ok().map(|href| CodeDescription { href })),
+        code_description: vulns.first().and_then(|v| {
+            v.url
+                .as_ref()
+                .and_then(|url| Url::parse(url).ok().map(|href| CodeDescription { href }))
+        }),
         data: None,
     }
 }
