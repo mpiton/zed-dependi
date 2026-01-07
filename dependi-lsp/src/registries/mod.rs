@@ -101,6 +101,7 @@ pub mod nuget;
 pub mod packagist;
 pub mod pub_dev;
 pub mod pypi;
+pub mod rubygems;
 
 #[cfg(test)]
 mod tests {

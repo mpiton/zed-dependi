@@ -15,6 +15,7 @@ use crate::parsers::go::GoParser;
 use crate::parsers::npm::NpmParser;
 use crate::parsers::php::PhpParser;
 use crate::parsers::python::PythonParser;
+use crate::parsers::ruby::RubyParser;
 use crate::parsers::{Dependency, Parser};
 use crate::providers::code_actions::create_code_actions;
 use crate::providers::completion::get_completions;
@@ -27,6 +28,7 @@ use crate::registries::nuget::NuGetRegistry;
 use crate::registries::packagist::PackagistRegistry;
 use crate::registries::pub_dev::PubDevRegistry;
 use crate::registries::pypi::PyPiRegistry;
+use crate::registries::rubygems::RubyGemsRegistry;
 use crate::registries::{Registry, VersionInfo, VulnerabilitySeverity};
 use crate::vulnerabilities::cache::VulnerabilityCache;
 use crate::vulnerabilities::osv::OsvClient;
@@ -42,6 +44,7 @@ pub enum FileType {
     Php,
     Dart,
     Csharp,
+    Ruby,
 }
 
 impl FileType {
@@ -55,6 +58,7 @@ impl FileType {
             FileType::Php => Ecosystem::Packagist,
             FileType::Dart => Ecosystem::Pub,
             FileType::Csharp => Ecosystem::NuGet,
+            FileType::Ruby => Ecosystem::RubyGems,
         }
     }
 }
@@ -83,6 +87,7 @@ pub struct DependiBackend {
     php_parser: PhpParser,
     dart_parser: DartParser,
     csharp_parser: CsharpParser,
+    ruby_parser: RubyParser,
     /// Registry clients
     crates_io: Arc<CratesIoRegistry>,
     npm_registry: Arc<NpmRegistry>,
@@ -91,6 +96,7 @@ pub struct DependiBackend {
     packagist: Arc<PackagistRegistry>,
     pub_dev: Arc<PubDevRegistry>,
     nuget: Arc<NuGetRegistry>,
+    rubygems: Arc<RubyGemsRegistry>,
     /// Vulnerability scanning
     osv_client: Arc<OsvClient>,
     vuln_cache: Arc<VulnerabilityCache>,
@@ -110,6 +116,7 @@ impl DependiBackend {
             php_parser: PhpParser::new(),
             dart_parser: DartParser::new(),
             csharp_parser: CsharpParser::new(),
+            ruby_parser: RubyParser::new(),
             crates_io: Arc::new(CratesIoRegistry::default()),
             npm_registry: Arc::new(NpmRegistry::default()),
             pypi: Arc::new(PyPiRegistry::default()),
@@ -117,6 +124,7 @@ impl DependiBackend {
             packagist: Arc::new(PackagistRegistry::default()),
             pub_dev: Arc::new(PubDevRegistry::default()),
             nuget: Arc::new(NuGetRegistry::default()),
+            rubygems: Arc::new(RubyGemsRegistry::default()),
             osv_client: Arc::new(OsvClient::default()),
             vuln_cache: Arc::new(VulnerabilityCache::new()),
         }
@@ -143,6 +151,8 @@ impl DependiBackend {
             Some(FileType::Dart)
         } else if path.ends_with(".csproj") {
             Some(FileType::Csharp)
+        } else if path.ends_with("Gemfile") {
+            Some(FileType::Ruby)
         } else {
             None
         }
@@ -158,6 +168,7 @@ impl DependiBackend {
             Some(FileType::Php) => self.php_parser.parse(content),
             Some(FileType::Dart) => self.dart_parser.parse(content),
             Some(FileType::Csharp) => self.csharp_parser.parse(content),
+            Some(FileType::Ruby) => self.ruby_parser.parse(content),
             None => vec![],
         }
     }
@@ -172,6 +183,7 @@ impl DependiBackend {
             FileType::Php => format!("packagist:{}", package_name),
             FileType::Dart => format!("pub:{}", package_name),
             FileType::Csharp => format!("nuget:{}", package_name),
+            FileType::Ruby => format!("rubygems:{}", package_name),
         }
     }
 
@@ -197,6 +209,7 @@ impl DependiBackend {
             FileType::Php => self.packagist.get_version_info(package_name).await,
             FileType::Dart => self.pub_dev.get_version_info(package_name).await,
             FileType::Csharp => self.nuget.get_version_info(package_name).await,
+            FileType::Ruby => self.rubygems.get_version_info(package_name).await,
         };
 
         match result {
@@ -305,6 +318,7 @@ impl DependiBackend {
         let packagist = Arc::clone(&self.packagist);
         let pub_dev = Arc::clone(&self.pub_dev);
         let nuget = Arc::clone(&self.nuget);
+        let rubygems = Arc::clone(&self.rubygems);
         let cache = Arc::clone(&self.version_cache);
 
         let fetch_tasks: Vec<_> = dependencies
@@ -319,6 +333,7 @@ impl DependiBackend {
                 let packagist = Arc::clone(&packagist);
                 let pub_dev = Arc::clone(&pub_dev);
                 let nuget = Arc::clone(&nuget);
+                let rubygems = Arc::clone(&rubygems);
                 let cache = Arc::clone(&cache);
                 async move {
                     // Check cache first
@@ -334,6 +349,7 @@ impl DependiBackend {
                         FileType::Php => packagist.get_version_info(&name).await,
                         FileType::Dart => pub_dev.get_version_info(&name).await,
                         FileType::Csharp => nuget.get_version_info(&name).await,
+                        FileType::Ruby => rubygems.get_version_info(&name).await,
                     };
                     if let Ok(info) = result {
                         cache.insert(cache_key, info);

@@ -23,6 +23,8 @@ pub enum Ecosystem {
     Pub,
     /// .NET packages (NuGet)
     NuGet,
+    /// Ruby gems (RubyGems.org)
+    RubyGems,
 }
 
 impl Ecosystem {
@@ -36,6 +38,7 @@ impl Ecosystem {
             Ecosystem::Packagist => "Packagist",
             Ecosystem::Pub => "Pub",
             Ecosystem::NuGet => "NuGet",
+            Ecosystem::RubyGems => "RubyGems",
         }
     }
 }

@@ -15,4 +15,5 @@ name = "Dependi LSP"
 # - Plain Text: requirements.txt (Python)
 # - YAML: pubspec.yaml (Dart/Flutter)
 # - XML: *.csproj (C#/.NET)
-languages = ["TOML", "JSON", "Go Mod", "Plain Text", "YAML", "XML"]
+# - Ruby: Gemfile
+languages = ["TOML", "JSON", "Go Mod", "Plain Text", "YAML", "XML", "Ruby"]
