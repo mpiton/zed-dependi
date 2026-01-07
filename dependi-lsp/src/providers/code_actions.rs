@@ -18,18 +18,14 @@ pub fn create_code_actions(
     file_type: FileType,
     cache_key_fn: impl Fn(&str) -> String,
 ) -> Vec<CodeActionOrCommand> {
-    let deps_in_range: Vec<_> = dependencies
+    let mut actions: Vec<CodeActionOrCommand> = dependencies
         .iter()
         .filter(|dep| dep.line >= range.start.line && dep.line <= range.end.line)
-        .collect();
-
-    let mut actions: Vec<CodeActionOrCommand> = deps_in_range
-        .iter()
         .filter_map(|dep| create_update_action(dep, cache, uri, file_type, &cache_key_fn))
         .collect();
 
     if let Some(update_all) =
-        create_update_all_action(&deps_in_range, cache, uri, file_type, &cache_key_fn)
+        create_update_all_action(dependencies, cache, uri, file_type, &cache_key_fn)
     {
         actions.insert(0, update_all);
     }
@@ -90,7 +86,7 @@ fn create_update_action(
 
 /// Create an "Update All Dependencies" code action when 2+ updates are available
 fn create_update_all_action(
-    dependencies: &[&Dependency],
+    dependencies: &[Dependency],
     cache: &impl Cache,
     uri: &Url,
     file_type: FileType,
@@ -103,7 +99,7 @@ fn create_update_all_action(
             let version_info = cache.get(&cache_key)?;
 
             match compare_versions(&dep.version, &version_info) {
-                VersionStatus::UpdateAvailable(new_version) => Some((*dep, new_version)),
+                VersionStatus::UpdateAvailable(new_version) => Some((dep, new_version)),
                 _ => None,
             }
         })
