@@ -71,7 +71,7 @@ fn create_hint_label_and_tooltip(
             • github:owner/repo",
             dep.name
         );
-        return ("[Local]".to_string(), Some(tooltip));
+        return ("→ Local".to_string(), Some(tooltip));
     }
 
     tracing::debug!(
@@ -775,8 +775,8 @@ mod tests {
         match hint.label {
             InlayHintLabel::String(s) => {
                 assert!(
-                    s.contains("📦") || s.contains("Local"),
-                    "Expected 📦 Local in label, got: {}",
+                    s.contains("→") || s.contains("Local"),
+                    "Expected → Local in label, got: {}",
                     s
                 );
             }
@@ -821,8 +821,8 @@ mod tests {
         match hint.label {
             InlayHintLabel::String(s) => {
                 assert!(
-                    s.contains("📦") || s.contains("Local"),
-                    "Expected 📦 Local in label, got: {}",
+                    s.contains("→") || s.contains("Local"),
+                    "Expected → Local in label, got: {}",
                     s
                 );
             }
