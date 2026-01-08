@@ -168,10 +168,13 @@ impl DependiBackend {
         }
     }
 
-    async fn fetch_vulnerabilities(
-        &self,
-        dependencies: &[crate::parsers::Dependency],
+    async fn fetch_vulnerabilities_background(
+        dependencies: Vec<crate::parsers::Dependency>,
         file_type: FileType,
+        cache: Arc<HybridCache>,
+        osv_client: Arc<OsvClient>,
+        vuln_cache: Arc<VulnerabilityCache>,
+        client: Client,
     ) {
         use crate::vulnerabilities::cache::VulnCacheKey;
 
@@ -182,7 +185,7 @@ impl DependiBackend {
             .iter()
             .filter(|dep| {
                 let vuln_key = VulnCacheKey::new(ecosystem, &dep.name, &dep.version);
-                !self.vuln_cache.contains(&vuln_key)
+                !vuln_cache.contains(&vuln_key)
             })
             .map(|dep| VulnerabilityQuery {
                 ecosystem,
@@ -192,53 +195,78 @@ impl DependiBackend {
             .collect();
 
         if queries.is_empty() {
-            tracing::debug!("All vulnerability info cached, skipping OSV query");
+            tracing::debug!("Background: All vulnerability info cached, skipping OSV query");
             return;
         }
 
-        tracing::info!("Querying OSV.dev for {} packages", queries.len());
+        tracing::info!(
+            "Background: Querying OSV.dev for {} packages",
+            queries.len()
+        );
 
         // Batch query OSV.dev
-        match self.osv_client.query_batch(&queries).await {
+        match osv_client.query_batch(&queries).await {
             Ok(results) => {
+                let mut updated_count = 0;
+
                 // Update vulnerability cache and version_cache with results
                 for (query, result) in queries.iter().zip(results.iter()) {
                     // Mark this package as queried in vuln_cache
                     let vuln_key =
                         VulnCacheKey::new(ecosystem, &query.package_name, &query.version);
-                    self.vuln_cache.insert(vuln_key);
+                    vuln_cache.insert(vuln_key);
 
                     // Store vulnerabilities and deprecated status in version_cache
                     let cache_key = file_type.cache_key(&query.package_name);
-                    if let Some(mut info) = self.version_cache.get(&cache_key) {
+                    if let Some(mut info) = cache.get(&cache_key) {
                         info.vulnerabilities = result.vulnerabilities.clone();
                         info.deprecated = result.deprecated;
                         if result.deprecated {
                             tracing::info!(
-                                "Package {} {} is deprecated (unmaintained)",
+                                "Background: Package {} {} is deprecated (unmaintained)",
                                 query.package_name,
                                 query.version
                             );
                         }
                         tracing::debug!(
-                            "Updated {} {} with {} vulnerabilities, deprecated={}",
+                            "Background: Updated {} {} with {} vulnerabilities, deprecated={}",
                             query.package_name,
                             query.version,
                             result.vulnerabilities.len(),
                             result.deprecated
                         );
-                        self.version_cache.insert(cache_key, info);
+                        cache.insert(cache_key, info);
+                        updated_count += 1;
                     } else {
                         tracing::warn!(
-                            "Could not update vulnerabilities for {}: not found in version cache",
+                            "Background: Could not update vulnerabilities for {}: not found in version cache",
                             query.package_name
                         );
                     }
                 }
-                tracing::info!("Cached vulnerability info for {} packages", queries.len());
+                tracing::info!(
+                    "Background: Cached vulnerability info for {} packages",
+                    updated_count
+                );
+
+                // Refresh UI with new vulnerability data
+                tracing::debug!("Background: Refreshing inlay hints after vulnerability check");
+                client
+                    .send_request::<request::InlayHintRefreshRequest>(())
+                    .await
+                    .ok();
+                client
+                    .send_request::<request::WorkspaceDiagnosticRefresh>(())
+                    .await
+                    .ok();
+
+                tracing::info!("Background: Vulnerability check complete, UI updated");
             }
             Err(e) => {
-                tracing::warn!("Failed to fetch vulnerabilities from OSV.dev: {}", e);
+                tracing::warn!(
+                    "Background: Failed to fetch vulnerabilities from OSV.dev: {}",
+                    e
+                );
             }
         }
     }
@@ -322,18 +350,7 @@ impl DependiBackend {
             let _ = handle.await;
         }
 
-        // Fetch vulnerabilities from OSV.dev (if security is enabled)
-        let security_enabled = self
-            .config
-            .read()
-            .map(|c| c.security.enabled)
-            .unwrap_or(true);
-
-        if security_enabled && !dependencies.is_empty() {
-            self.fetch_vulnerabilities(&dependencies, file_type).await;
-        }
-
-        // Store document state
+        // Store document state IMMEDIATELY (before vulnerability check)
         self.documents.insert(
             uri.clone(),
             DocumentState {
@@ -342,8 +359,8 @@ impl DependiBackend {
             },
         );
 
-        // Publish diagnostics (if enabled)
-        let (diagnostics_enabled, security_show_diags, min_severity) = self
+        // Publish diagnostics IMMEDIATELY (versions are available, vulnerabilities will update later)
+        let (diagnostics_enabled, security_show_diags, min_severity, security_enabled) = self
             .config
             .read()
             .map(|c| {
@@ -355,12 +372,12 @@ impl DependiBackend {
                     } else {
                         None
                     },
+                    c.security.enabled,
                 )
             })
-            .unwrap_or((true, true, None));
+            .unwrap_or((true, true, None, true));
 
         if diagnostics_enabled {
-            // Pass min_severity filter only if security diagnostics are enabled
             let severity_filter = if security_show_diags {
                 min_severity
             } else {
@@ -378,11 +395,32 @@ impl DependiBackend {
                 .await;
         }
 
-        // Refresh inlay hints
+        // Refresh inlay hints IMMEDIATELY (versions are available)
         self.client
             .send_request::<request::InlayHintRefreshRequest>(())
             .await
             .ok();
+
+        // Fetch vulnerabilities from OSV.dev in BACKGROUND (non-blocking)
+        if security_enabled && !dependencies.is_empty() {
+            let dependencies_clone = dependencies.clone();
+            let cache_clone = Arc::clone(&self.version_cache);
+            let osv_client_clone = Arc::clone(&self.osv_client);
+            let vuln_cache_clone = Arc::clone(&self.vuln_cache);
+            let client_clone = self.client.clone();
+
+            tokio::spawn(async move {
+                Self::fetch_vulnerabilities_background(
+                    dependencies_clone,
+                    file_type,
+                    cache_clone,
+                    osv_client_clone,
+                    vuln_cache_clone,
+                    client_clone,
+                )
+                .await;
+            });
+        }
     }
 
     /// Generate a vulnerability report for a document
