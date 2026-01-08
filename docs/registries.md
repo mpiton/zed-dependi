@@ -9,7 +9,7 @@ in dependi-lsp, including API details, rate limits, and common operations.
 |----------|-----------|-----------------|----------|------------|
 | [crates.io](#cratesio) | Rust | `Cargo.toml` | `https://crates.io/api/v1` | 1 req/s |
 | [npm](#npm) | Node.js | `package.json` | `https://registry.npmjs.org` | ≤1 req/s recommended |
-| [PyPI](#pypi) | Python | `requirements.txt`, `pyproject.toml` | `https://pypi.org/pypi` | No official limit |
+| [PyPI](#pypi) | Python | `requirements.txt`, `pyproject.toml` | `https://pypi.org/pypi` | ~20 req/s |
 | [Go Proxy](#go-proxy) | Go | `go.mod` | `https://proxy.golang.org` | Fair use |
 | [Packagist](#packagist) | PHP | `composer.json` | `https://repo.packagist.org` | ~60/min |
 | [pub.dev](#pubdev) | Dart/Flutter | `pubspec.yaml` | `https://pub.dev/api` | ~100/min |
@@ -113,8 +113,8 @@ GET https://pypi.org/pypi/{package-name}/json
 
 #### Rate Limiting
 
-- **Limit:** No official limit; be respectful
-- **CDN:** Fastly CDN caching
+- **Limit:** ~20 requests per second per IP
+- **Blocking:** Aggressive crawlers may be blocked
 
 #### Quirks
 
