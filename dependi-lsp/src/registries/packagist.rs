@@ -8,6 +8,7 @@ use reqwest::Client;
 use serde::Deserialize;
 
 use super::http_client::create_shared_client;
+use super::version_utils::is_prerelease_php;
 use super::{Registry, VersionInfo};
 
 /// Client for the Packagist registry
@@ -123,10 +124,10 @@ impl Registry for PackagistRegistry {
         versions.sort_by(|a, b| compare_packagist_versions(b, a));
 
         // Find latest stable version
-        let latest_stable = versions.iter().find(|v| !is_prerelease(v)).cloned();
+        let latest_stable = versions.iter().find(|v| !is_prerelease_php(v)).cloned();
 
         // Find latest prerelease
-        let latest_prerelease = versions.iter().find(|v| is_prerelease(v)).cloned();
+        let latest_prerelease = versions.iter().find(|v| is_prerelease_php(v)).cloned();
 
         // Get metadata from first (latest) entry
         let latest_entry = entries.first();
@@ -179,16 +180,6 @@ impl Registry for PackagistRegistry {
 /// Check if a version is a dev version (e.g., dev-master, dev-main)
 fn is_dev_version(version: &str) -> bool {
     version.starts_with("dev-") || version.ends_with("-dev")
-}
-
-/// Check if a version is a prerelease
-fn is_prerelease(version: &str) -> bool {
-    let v = version.to_lowercase();
-    v.contains("alpha")
-        || v.contains("beta")
-        || v.contains("rc")
-        || v.contains("-rc")
-        || v.contains("dev")
 }
 
 /// Compare Packagist versions for sorting
@@ -261,12 +252,12 @@ mod tests {
 
     #[test]
     fn test_is_prerelease() {
-        assert!(is_prerelease("1.0.0-alpha"));
-        assert!(is_prerelease("1.0.0-beta.1"));
-        assert!(is_prerelease("1.0.0-RC1"));
-        assert!(is_prerelease("dev-master"));
-        assert!(!is_prerelease("1.0.0"));
-        assert!(!is_prerelease("v2.3.4"));
+        assert!(is_prerelease_php("1.0.0-alpha"));
+        assert!(is_prerelease_php("1.0.0-beta.1"));
+        assert!(is_prerelease_php("1.0.0-RC1"));
+        assert!(is_prerelease_php("dev-master"));
+        assert!(!is_prerelease_php("1.0.0"));
+        assert!(!is_prerelease_php("v2.3.4"));
     }
 
     #[test]

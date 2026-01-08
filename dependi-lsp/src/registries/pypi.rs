@@ -8,6 +8,7 @@ use reqwest::Client;
 use serde::Deserialize;
 
 use super::http_client::create_shared_client;
+use super::version_utils::is_prerelease_python;
 use super::{Registry, VersionInfo};
 
 /// Client for the PyPI registry
@@ -129,12 +130,12 @@ impl Registry for PyPiRegistry {
         // Find latest stable version (non-prerelease)
         let latest_stable = versions
             .iter()
-            .find(|v| !is_prerelease(v))
+            .find(|v| !is_prerelease_python(v))
             .cloned()
             .or_else(|| Some(pypi_response.info.version.clone()));
 
         // Find latest prerelease
-        let latest_prerelease = versions.iter().find(|v| is_prerelease(v)).cloned();
+        let latest_prerelease = versions.iter().find(|v| is_prerelease_python(v)).cloned();
 
         // Extract repository URL from project_urls
         let repository = pypi_response.info.project_urls.as_ref().and_then(|urls| {
@@ -210,19 +211,6 @@ fn normalize_package_name(name: &str) -> String {
     name.to_lowercase().replace(['_', '.'], "-")
 }
 
-/// Check if a version is a prerelease
-fn is_prerelease(version: &str) -> bool {
-    let v = version.to_lowercase();
-    v.contains("dev")
-        || v.contains("alpha")
-        || v.contains("beta")
-        || v.contains("rc")
-        || v.contains('a') && v.chars().last().is_some_and(|c| c.is_ascii_digit())
-        || v.contains('b') && v.chars().last().is_some_and(|c| c.is_ascii_digit())
-        || v.contains(".dev")
-        || v.contains(".post") // post-releases are actually stable, but let's include for completeness
-}
-
 /// Compare Python versions for sorting
 /// Returns Ordering for descending sort (newer versions first)
 fn compare_python_versions(a: &str, b: &str) -> std::cmp::Ordering {
@@ -274,14 +262,14 @@ mod tests {
 
     #[test]
     fn test_is_prerelease() {
-        assert!(is_prerelease("1.0.0a1"));
-        assert!(is_prerelease("1.0.0b2"));
-        assert!(is_prerelease("1.0.0rc1"));
-        assert!(is_prerelease("1.0.0.dev1"));
-        assert!(is_prerelease("2.0.0alpha"));
-        assert!(is_prerelease("2.0.0beta"));
-        assert!(!is_prerelease("1.0.0"));
-        assert!(!is_prerelease("2.3.4"));
+        assert!(is_prerelease_python("1.0.0a1"));
+        assert!(is_prerelease_python("1.0.0b2"));
+        assert!(is_prerelease_python("1.0.0rc1"));
+        assert!(is_prerelease_python("1.0.0.dev1"));
+        assert!(is_prerelease_python("2.0.0alpha"));
+        assert!(is_prerelease_python("2.0.0beta"));
+        assert!(!is_prerelease_python("1.0.0"));
+        assert!(!is_prerelease_python("2.3.4"));
     }
 
     #[test]

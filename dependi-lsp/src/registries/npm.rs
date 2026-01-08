@@ -8,6 +8,7 @@ use reqwest::Client;
 use serde::Deserialize;
 
 use super::http_client::create_shared_client;
+use super::version_utils::is_prerelease_npm;
 use super::{Registry, VersionInfo};
 
 /// Client for the npm registry
@@ -178,7 +179,7 @@ impl Registry for NpmRegistry {
             .dist_tags
             .as_ref()
             .and_then(|t| t.next.clone())
-            .or_else(|| versions.iter().find(|v| is_prerelease(v)).cloned());
+            .or_else(|| versions.iter().find(|v| is_prerelease_npm(v)).cloned());
 
         // Check if latest version is deprecated
         let deprecated = pkg
@@ -224,27 +225,18 @@ impl Registry for NpmRegistry {
     }
 }
 
-fn is_prerelease(version: &str) -> bool {
-    version.contains('-')
-        || version.contains("alpha")
-        || version.contains("beta")
-        || version.contains("rc")
-        || version.contains("canary")
-        || version.contains("next")
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
 
     #[test]
     fn test_is_prerelease() {
-        assert!(is_prerelease("1.0.0-alpha"));
-        assert!(is_prerelease("1.0.0-beta.1"));
-        assert!(is_prerelease("1.0.0-rc.1"));
-        assert!(is_prerelease("18.3.0-canary"));
-        assert!(!is_prerelease("1.0.0"));
-        assert!(!is_prerelease("2.3.4"));
+        assert!(is_prerelease_npm("1.0.0-alpha"));
+        assert!(is_prerelease_npm("1.0.0-beta.1"));
+        assert!(is_prerelease_npm("1.0.0-rc.1"));
+        assert!(is_prerelease_npm("18.3.0-canary"));
+        assert!(!is_prerelease_npm("1.0.0"));
+        assert!(!is_prerelease_npm("2.3.4"));
     }
 
     #[test]

@@ -8,6 +8,7 @@ use reqwest::Client;
 use serde::Deserialize;
 
 use super::http_client::create_shared_client;
+use super::version_utils::is_prerelease_nuget;
 use super::{Registry, VersionInfo};
 
 /// Client for the NuGet registry
@@ -165,10 +166,10 @@ impl Registry for NuGetRegistry {
             .collect();
 
         // Find latest stable version
-        let latest_stable = versions.iter().find(|v| !is_prerelease(v)).cloned();
+        let latest_stable = versions.iter().find(|v| !is_prerelease_nuget(v)).cloned();
 
         // Find latest prerelease
-        let latest_prerelease = versions.iter().find(|v| is_prerelease(v)).cloned();
+        let latest_prerelease = versions.iter().find(|v| is_prerelease_nuget(v)).cloned();
 
         // Get metadata from latest version
         let latest_entry = all_versions.first();
@@ -206,26 +207,18 @@ impl Registry for NuGetRegistry {
     }
 }
 
-fn is_prerelease(version: &str) -> bool {
-    version.contains('-')
-        || version.to_lowercase().contains("alpha")
-        || version.to_lowercase().contains("beta")
-        || version.to_lowercase().contains("preview")
-        || version.to_lowercase().contains("rc")
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
 
     #[test]
     fn test_is_prerelease() {
-        assert!(is_prerelease("1.0.0-alpha"));
-        assert!(is_prerelease("1.0.0-beta.1"));
-        assert!(is_prerelease("1.0.0-preview"));
-        assert!(is_prerelease("1.0.0-rc.1"));
-        assert!(is_prerelease("1.0.0-Alpha"));
-        assert!(!is_prerelease("1.0.0"));
-        assert!(!is_prerelease("2.0.0"));
+        assert!(is_prerelease_nuget("1.0.0-alpha"));
+        assert!(is_prerelease_nuget("1.0.0-beta.1"));
+        assert!(is_prerelease_nuget("1.0.0-preview"));
+        assert!(is_prerelease_nuget("1.0.0-rc.1"));
+        assert!(is_prerelease_nuget("1.0.0-Alpha"));
+        assert!(!is_prerelease_nuget("1.0.0"));
+        assert!(!is_prerelease_nuget("2.0.0"));
     }
 }

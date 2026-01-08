@@ -151,6 +151,7 @@ pub mod packagist;
 pub mod pub_dev;
 pub mod pypi;
 pub mod rubygems;
+pub mod version_utils;
 
 #[cfg(test)]
 mod tests {

@@ -8,6 +8,7 @@ use reqwest::Client;
 use serde::Deserialize;
 
 use super::http_client::create_shared_client;
+use super::version_utils::is_prerelease_go;
 use super::{Registry, VersionInfo};
 
 /// Client for the Go module proxy
@@ -86,13 +87,18 @@ impl Registry for GoProxyRegistry {
         sorted_versions.sort_by(|a, b| compare_go_versions(b, a));
 
         // Find latest stable version (no prerelease suffix)
-        let latest_stable = latest
-            .as_ref()
-            .map(|l| l.version.clone())
-            .or_else(|| sorted_versions.iter().find(|v| !is_prerelease(v)).cloned());
+        let latest_stable = latest.as_ref().map(|l| l.version.clone()).or_else(|| {
+            sorted_versions
+                .iter()
+                .find(|v| !is_prerelease_go(v))
+                .cloned()
+        });
 
         // Find latest prerelease
-        let latest_prerelease = sorted_versions.iter().find(|v| is_prerelease(v)).cloned();
+        let latest_prerelease = sorted_versions
+            .iter()
+            .find(|v| is_prerelease_go(v))
+            .cloned();
 
         // Build repository URL for common hosts
         let repository =
@@ -226,16 +232,6 @@ fn encode_module_path(path: &str) -> String {
     result
 }
 
-/// Check if a version is a prerelease
-fn is_prerelease(version: &str) -> bool {
-    // Go uses semver-like versions with v prefix
-    // Prereleases have -rc, -beta, -alpha, etc.
-    version.contains("-rc")
-        || version.contains("-alpha")
-        || version.contains("-beta")
-        || version.contains("-pre")
-}
-
 /// Compare Go versions for sorting
 fn compare_go_versions(a: &str, b: &str) -> std::cmp::Ordering {
     // Strip 'v' prefix if present
@@ -295,11 +291,11 @@ mod tests {
 
     #[test]
     fn test_is_prerelease() {
-        assert!(is_prerelease("v1.0.0-rc1"));
-        assert!(is_prerelease("v2.0.0-beta.1"));
-        assert!(is_prerelease("v3.0.0-alpha"));
-        assert!(!is_prerelease("v1.0.0"));
-        assert!(!is_prerelease("v2.3.4"));
+        assert!(is_prerelease_go("v1.0.0-rc1"));
+        assert!(is_prerelease_go("v2.0.0-beta.1"));
+        assert!(is_prerelease_go("v3.0.0-alpha"));
+        assert!(!is_prerelease_go("v1.0.0"));
+        assert!(!is_prerelease_go("v2.3.4"));
     }
 
     #[test]
