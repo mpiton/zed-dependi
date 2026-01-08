@@ -46,7 +46,7 @@ We welcome:
 
 ### Project Structure
 
-```
+```text
 zed-dependi/
 ├── dependi-lsp/           # Language Server (Rust binary)
 │   ├── src/
@@ -239,6 +239,93 @@ cargo test -- --nocapture
 - Address review feedback promptly
 - Keep discussions constructive
 
+## Release Process (Maintainers)
+
+This section documents the release workflow for maintainers.
+
+### Versioning Strategy
+
+We follow [Semantic Versioning](https://semver.org/) (SemVer):
+
+| Commit Type | Version Bump | Example |
+|-------------|--------------|---------|
+| `fix:` | Patch (0.0.x) | Bug fixes, minor corrections |
+| `feat:` | Minor (0.x.0) | New features, non-breaking additions |
+| `feat!:` or `BREAKING CHANGE:` | Major (x.0.0) | Breaking API changes |
+
+### Changelog Maintenance
+
+Maintain `CHANGELOG.md` with the following structure:
+
+```markdown
+# Changelog
+
+## [Unreleased]
+### Added
+### Changed
+### Fixed
+### Removed
+
+## [1.1.0] - 2025-01-08
+### Added
+- New feature X
+### Fixed
+- Bug Y
+```
+
+When preparing a release, move items from `[Unreleased]` to the new version section.
+
+### Publishing Procedure
+
+1. **Update version numbers**
+   ```bash
+   # Update dependi-lsp/Cargo.toml
+   version = "X.Y.Z"
+
+   # Update dependi-zed/extension.toml
+   version = "X.Y.Z"
+   ```
+
+2. **Update CHANGELOG.md**
+   - Move `[Unreleased]` items to new version section
+   - Add release date
+
+3. **Commit and tag**
+   ```bash
+   git add -A
+   git commit -m "chore: release vX.Y.Z"
+   git tag vX.Y.Z
+   git push origin main --tags
+   ```
+
+4. **CI/CD takes over**
+   - `.github/workflows/release.yml` triggers on `v*` tags
+   - Builds binaries for Linux, macOS (Intel + ARM), Windows
+   - Creates GitHub release with auto-generated notes
+   - Uploads platform-specific archives
+
+5. **Verify the release**
+   - Check [GitHub Releases](https://github.com/mpiton/zed-dependi/releases)
+   - Verify all platform binaries are attached
+   - Test installation from release
+
+### Build Commands Reference
+
+```bash
+# Build LSP (release)
+cd dependi-lsp
+cargo build --release
+
+# Build extension (WASM)
+cd dependi-zed
+cargo build --release --target wasm32-wasip1
+
+# Run full CI checks locally
+cargo fmt --all -- --check
+cargo clippy --all-targets -- -D warnings
+cargo test
+```
+
 ## Bug Reports
 
 When reporting bugs, please include:
@@ -251,7 +338,7 @@ When reporting bugs, please include:
 6. **Actual behavior**
 7. **Relevant logs** (run `zed --foreground` to see logs)
 
-Use the bug report template when opening issues.
+To report a bug, use the [GitHub issue templates](.github/ISSUE_TEMPLATE/) which will guide you through providing the required information.
 
 ## Feature Requests
 
