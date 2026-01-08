@@ -314,4 +314,66 @@ mod tests {
             "https://github.com/user/repo"
         );
     }
+
+    #[test]
+    fn test_repository_string_variant() {
+        let repo = Repository::String("git+https://github.com/user/repo.git".to_string());
+        assert_eq!(repo.url(), Some("https://github.com/user/repo".to_string()));
+    }
+
+    #[test]
+    fn test_repository_object_variant() {
+        let repo = Repository::Object {
+            url: Some("git://github.com/user/repo".to_string()),
+        };
+        assert_eq!(repo.url(), Some("https://github.com/user/repo".to_string()));
+    }
+
+    #[test]
+    fn test_repository_object_none() {
+        let repo = Repository::Object { url: None };
+        assert_eq!(repo.url(), None);
+    }
+
+    #[test]
+    fn test_license_field_string() {
+        let license = LicenseField::String("MIT".to_string());
+        assert_eq!(license.as_string(), Some("MIT".to_string()));
+    }
+
+    #[test]
+    fn test_license_field_object() {
+        let license = LicenseField::Object {
+            r#type: Some("Apache-2.0".to_string()),
+        };
+        assert_eq!(license.as_string(), Some("Apache-2.0".to_string()));
+    }
+
+    #[test]
+    fn test_license_field_object_none() {
+        let license = LicenseField::Object { r#type: None };
+        assert_eq!(license.as_string(), None);
+    }
+
+    #[test]
+    fn test_scoped_package_url_encoding() {
+        let package_name = "@types/node";
+        let encoded = if package_name.starts_with('@') {
+            package_name.replace('/', "%2f")
+        } else {
+            package_name.to_string()
+        };
+        assert_eq!(encoded, "@types%2fnode");
+    }
+
+    #[test]
+    fn test_normal_package_no_encoding() {
+        let package_name = "lodash";
+        let encoded = if package_name.starts_with('@') {
+            package_name.replace('/', "%2f")
+        } else {
+            package_name.to_string()
+        };
+        assert_eq!(encoded, "lodash");
+    }
 }

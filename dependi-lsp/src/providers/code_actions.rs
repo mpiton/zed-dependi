@@ -703,4 +703,102 @@ mod tests {
             _ => panic!("Expected CodeAction"),
         }
     }
+
+    #[test]
+    fn test_format_version_all_file_types() {
+        assert_eq!(format_version("1.0.0", FileType::Cargo), "1.0.0");
+        assert_eq!(format_version("1.0.0", FileType::Npm), "1.0.0");
+        assert_eq!(format_version("1.0.0", FileType::Python), "1.0.0");
+        assert_eq!(format_version("1.0.0", FileType::Go), "v1.0.0");
+        assert_eq!(format_version("v1.0.0", FileType::Go), "v1.0.0");
+        assert_eq!(format_version("1.0.0", FileType::Php), "1.0.0");
+        assert_eq!(format_version("1.0.0", FileType::Dart), "1.0.0");
+        assert_eq!(format_version("1.0.0", FileType::Csharp), "1.0.0");
+        assert_eq!(format_version("1.0.0", FileType::Ruby), "1.0.0");
+    }
+
+    #[test]
+    fn test_normalize_version_with_partial_versions() {
+        let normalized = super::normalize_version("1");
+        assert_eq!(normalized, "1.0.0");
+
+        let normalized = super::normalize_version("1.2");
+        assert_eq!(normalized, "1.2.0");
+
+        let normalized = super::normalize_version("1.2.3");
+        assert_eq!(normalized, "1.2.3");
+    }
+
+    #[test]
+    fn test_normalize_version_with_range_operators() {
+        let normalized = super::normalize_version(">=1.0.0, <2.0.0");
+        assert_eq!(normalized, "1.0.0");
+
+        let normalized = super::normalize_version("<=1.5.0");
+        assert_eq!(normalized, "1.5.0");
+
+        let normalized = super::normalize_version(">1.0.0");
+        assert_eq!(normalized, "1.0.0");
+
+        let normalized = super::normalize_version("<2.0.0");
+        assert_eq!(normalized, "2.0.0");
+
+        let normalized = super::normalize_version("=1.0.0");
+        assert_eq!(normalized, "1.0.0");
+    }
+
+    #[test]
+    fn test_filter_deps_outside_range() {
+        let cache = MemoryCache::new();
+        cache.insert(
+            "test:serde".to_string(),
+            VersionInfo {
+                latest: Some("2.0.0".to_string()),
+                ..Default::default()
+            },
+        );
+
+        let deps = vec![create_test_dependency("serde", "1.0.0", 50)];
+        let uri = Url::parse("file:///test/Cargo.toml").unwrap();
+        let range = Range {
+            start: Position {
+                line: 0,
+                character: 0,
+            },
+            end: Position {
+                line: 10,
+                character: 0,
+            },
+        };
+
+        let actions = create_code_actions(&deps, &cache, &uri, range, FileType::Cargo, |name| {
+            format!("test:{}", name)
+        });
+
+        assert_eq!(actions.len(), 0);
+    }
+
+    #[test]
+    fn test_no_action_when_cache_empty() {
+        let cache = MemoryCache::new();
+
+        let deps = vec![create_test_dependency("serde", "1.0.0", 5)];
+        let uri = Url::parse("file:///test/Cargo.toml").unwrap();
+        let range = Range {
+            start: Position {
+                line: 0,
+                character: 0,
+            },
+            end: Position {
+                line: 10,
+                character: 0,
+            },
+        };
+
+        let actions = create_code_actions(&deps, &cache, &uri, range, FileType::Cargo, |name| {
+            format!("test:{}", name)
+        });
+
+        assert_eq!(actions.len(), 0);
+    }
 }

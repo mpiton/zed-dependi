@@ -1,0 +1,65 @@
+name: Test Coverage
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+permissions:
+  contents: read
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  coverage:
+    name: Code coverage
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v6
+
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Cache cargo registry
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            dependi-lsp/target
+          key: ${{ runner.os }}-cargo-coverage-${{ hashFiles('**/Cargo.lock') }}
+          restore-keys: |
+            ${{ runner.os }}-cargo-coverage-
+            ${{ runner.os }}-cargo-
+
+      - name: Install cargo-tarpaulin
+        run: cargo install cargo-tarpaulin
+
+      - name: Run tests with coverage
+        working-directory: dependi-lsp
+        run: |
+          cargo tarpaulin \
+            --out Xml \
+            --out Html \
+            --output-dir ../coverage \
+            --timeout 300
+
+      - name: Upload coverage artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: coverage-report
+          path: coverage/
+          retention-days: 30
+
+      - name: Check coverage threshold
+        working-directory: dependi-lsp
+        run: |
+          cargo tarpaulin --out Json --output-dir ../coverage --timeout 300 --skip-clean
+          COVERAGE=$(cat ../coverage/tarpaulin-report.json | python3 -c "import sys, json; print(json.load(sys.stdin).get('coverage', 0))")
+          echo "Coverage: $COVERAGE%"
+          if (( $(echo "$COVERAGE < 80" | bc -l) )); then
+            echo "::warning::Coverage is below 80% threshold"
+          fi

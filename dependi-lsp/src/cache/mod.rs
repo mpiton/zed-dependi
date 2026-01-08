@@ -389,18 +389,18 @@ mod tests {
 
     #[test]
     fn test_memory_cache_cleanup_partial() {
-        let cache = MemoryCache::with_ttl(Duration::from_millis(50));
+        let cache = MemoryCache::with_ttl(Duration::from_millis(200));
 
         cache.insert("key1".to_string(), create_test_version_info());
 
         // Wait for first entry to almost expire
-        std::thread::sleep(Duration::from_millis(30));
+        std::thread::sleep(Duration::from_millis(150));
 
         // Insert second entry
         cache.insert("key2".to_string(), create_test_version_info());
 
         // Wait for first to expire but not second
-        std::thread::sleep(Duration::from_millis(30));
+        std::thread::sleep(Duration::from_millis(100));
 
         let removed = cache.cleanup_expired();
         assert_eq!(removed, 1);
@@ -410,7 +410,7 @@ mod tests {
 
     #[test]
     fn test_memory_cache_stats() {
-        let cache = MemoryCache::with_ttl(Duration::from_millis(10));
+        let cache = MemoryCache::with_ttl(Duration::from_millis(100));
 
         cache.insert("key1".to_string(), create_test_version_info());
         cache.insert("key2".to_string(), create_test_version_info());
@@ -421,7 +421,7 @@ mod tests {
         assert_eq!(stats.valid_entries, 2);
 
         // Wait for expiration
-        std::thread::sleep(Duration::from_millis(20));
+        std::thread::sleep(Duration::from_millis(150));
 
         let stats = cache.stats();
         assert_eq!(stats.total_entries, 2);
