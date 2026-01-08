@@ -1,0 +1,101 @@
+name: Bug Report
+description: Report a bug or unexpected behavior
+labels: ["bug", "triage"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for taking the time to report a bug! Please fill out the form below.
+
+  - type: input
+    id: version
+    attributes:
+      label: Dependi Version
+      description: Check in Zed's extensions panel
+      placeholder: "e.g., 1.1.0"
+    validations:
+      required: true
+
+  - type: input
+    id: zed-version
+    attributes:
+      label: Zed Version
+      description: Run `zed --version` or check About Zed
+      placeholder: "e.g., 0.150.0"
+    validations:
+      required: true
+
+  - type: dropdown
+    id: os
+    attributes:
+      label: Operating System
+      options:
+        - macOS (Apple Silicon)
+        - macOS (Intel)
+        - Linux
+        - Windows
+    validations:
+      required: true
+
+  - type: dropdown
+    id: language
+    attributes:
+      label: Affected Language/File Type
+      options:
+        - Rust (Cargo.toml)
+        - JavaScript/TypeScript (package.json)
+        - Python (requirements.txt)
+        - Python (pyproject.toml)
+        - Go (go.mod)
+        - PHP (composer.json)
+        - Dart/Flutter (pubspec.yaml)
+        - C#/.NET (*.csproj)
+        - Ruby (Gemfile)
+        - Multiple/All
+        - Not applicable
+    validations:
+      required: true
+
+  - type: textarea
+    id: description
+    attributes:
+      label: Bug Description
+      description: A clear and concise description of the bug
+      placeholder: Describe what happened...
+    validations:
+      required: true
+
+  - type: textarea
+    id: steps
+    attributes:
+      label: Steps to Reproduce
+      description: How can we reproduce this issue?
+      placeholder: |
+        1. Open file '...'
+        2. Edit dependency '...'
+        3. See error...
+    validations:
+      required: true
+
+  - type: textarea
+    id: expected
+    attributes:
+      label: Expected Behavior
+      description: What did you expect to happen?
+    validations:
+      required: true
+
+  - type: textarea
+    id: logs
+    attributes:
+      label: Logs
+      description: |
+        Run `zed --foreground` and paste relevant logs here.
+        This will be automatically formatted as code.
+      render: shell
+
+  - type: textarea
+    id: context
+    attributes:
+      label: Additional Context
+      description: Add any other context, screenshots, or dependency file snippets

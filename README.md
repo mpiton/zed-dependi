@@ -704,7 +704,11 @@ See [CONTRIBUTING.md](CONTRIBUTING.md) for guidelines. Briefly:
 
 ## Contributing
 
-Contributions are welcome! Please open an issue or submit a pull request.
+Contributions are welcome! See [CONTRIBUTING.md](CONTRIBUTING.md) for detailed guidelines on:
+- Setting up your development environment
+- Code style and standards
+- Adding support for new languages
+- Submitting pull requests
 
 ## License
 
