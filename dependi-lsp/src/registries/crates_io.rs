@@ -64,8 +64,8 @@
 //!
 //! ## External References
 //!
-//! - [crates.io API Documentation](https://crates.io/data-access)
-//! - [Rate Limiting Policy](https://crates.io/policies#crawlers)
+//! - [crates.io Data Access](https://crates.io/data-access)
+//! - [crates.io Policies](https://crates.io/policies)
 //! - [Crate Metadata Schema](https://doc.rust-lang.org/cargo/reference/registry-index.html)
 
 use std::collections::HashMap;

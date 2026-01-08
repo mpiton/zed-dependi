@@ -66,7 +66,7 @@
 //!
 //! ## External References
 //!
-//! - [PyPI JSON API](https://warehouse.pypa.io/api-reference/json.html)
+//! - [PyPI JSON API](https://docs.pypi.org/api/json/)
 //! - [PEP 503 - Simple Repository API](https://peps.python.org/pep-0503/)
 //! - [PEP 440 - Version Identification](https://peps.python.org/pep-0440/)
 //! - [Trove Classifiers](https://pypi.org/classifiers/)

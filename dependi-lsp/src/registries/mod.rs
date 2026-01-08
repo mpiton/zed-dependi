@@ -56,13 +56,13 @@
 //! | Registry | Rate Limit | Notes |
 //! |----------|------------|-------|
 //! | crates.io | 1 req/s | **Strict** - client-side enforced |
-//! | npm | ~100/min | IP-based blocking for abuse |
-//! | PyPI | ~20 req/s | CDN-cached |
+//! | npm | ≤1 req/s recommended | No official limit; IP blocking for abuse |
+//! | PyPI | No official limit | CDN-cached; be respectful |
 //! | Go Proxy | Fair use | No hard limit |
 //! | Packagist | ~60/min | CDN-cached |
 //! | pub.dev | ~100/min | CDN-cached |
 //! | NuGet | Fair use | CDN-cached |
-//! | RubyGems | ~10 req/s | Blocking for abuse |
+//! | RubyGems | Varies by endpoint | ~10 req/s typical; blocking for abuse |
 //!
 //! ## Usage
 //!
