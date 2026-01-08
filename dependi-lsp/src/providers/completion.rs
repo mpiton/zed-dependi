@@ -343,4 +343,84 @@ mod tests {
 
         assert!(completions.is_none());
     }
+
+    #[test]
+    fn test_no_completions_no_cache() {
+        let cache = MemoryCache::new();
+        let deps = vec![create_test_dependency("unknown", "1.0.0", 5)];
+        let position = Position {
+            line: 5,
+            character: 13,
+        };
+
+        let completions = get_completions(&deps, position, &cache, |name| format!("test:{}", name));
+
+        assert!(completions.is_none());
+    }
+
+    #[test]
+    fn test_format_release_age_1_hour() {
+        let now = Utc::now();
+        let released = now - Duration::hours(1);
+        let age = format_release_age(released);
+        assert_eq!(age, "1 hour ago");
+    }
+
+    #[test]
+    fn test_format_release_age_1_minute() {
+        let now = Utc::now();
+        let released = now - Duration::minutes(1);
+        let age = format_release_age(released);
+        assert_eq!(age, "1 min ago");
+    }
+
+    #[test]
+    fn test_format_release_age_1_week() {
+        let now = Utc::now();
+        let released = now - Duration::days(7);
+        let age = format_release_age(released);
+        assert_eq!(age, "1 week ago");
+    }
+
+    #[test]
+    fn test_format_release_age_1_month() {
+        let now = Utc::now();
+        let released = now - Duration::days(30);
+        let age = format_release_age(released);
+        assert_eq!(age, "1 month ago");
+    }
+
+    #[test]
+    fn test_format_release_age_future_date() {
+        let now = Utc::now();
+        let released = now + Duration::days(5);
+        let age = format_release_age(released);
+        assert_eq!(age, "just now");
+    }
+
+    #[test]
+    fn test_completions_many_versions() {
+        let cache = MemoryCache::new();
+        let versions: Vec<String> = (0..20).map(|i| format!("1.0.{}", 20 - i)).collect();
+        cache.insert(
+            "test:serde".to_string(),
+            VersionInfo {
+                latest: Some("1.0.20".to_string()),
+                versions,
+                ..Default::default()
+            },
+        );
+
+        let deps = vec![create_test_dependency("serde", "1.0.0", 5)];
+        let position = Position {
+            line: 5,
+            character: 13,
+        };
+
+        let completions = get_completions(&deps, position, &cache, |name| format!("test:{}", name));
+
+        assert!(completions.is_some());
+        let items = completions.unwrap();
+        assert_eq!(items.len(), 10);
+    }
 }

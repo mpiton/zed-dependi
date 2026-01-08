@@ -716,4 +716,266 @@ mod tests {
             "Yanked packages should not show vulnerability diagnostics"
         );
     }
+
+    #[test]
+    fn test_local_dependency_diagnostic() {
+        let deps = vec![create_test_dependency("local-crate", "../local", 5)];
+        let cache = MemoryCache::new();
+
+        let diagnostics = create_diagnostics(&deps, &cache, |name| format!("test:{}", name), None);
+
+        assert_eq!(diagnostics.len(), 1);
+        assert!(diagnostics[0].message.contains("Local"));
+        assert_eq!(diagnostics[0].severity, Some(DiagnosticSeverity::HINT));
+    }
+
+    #[test]
+    fn test_vulnerability_summary_diagnostic() {
+        let deps = vec![create_test_dependency("vuln-dep", "1.0.0", 5)];
+        let cache = MemoryCache::new();
+        cache.insert(
+            "test:vuln-dep".to_string(),
+            VersionInfo {
+                latest: Some("1.0.0".to_string()),
+                vulnerabilities: vec![
+                    Vulnerability {
+                        id: "CVE-2024-1234".to_string(),
+                        severity: VulnerabilitySeverity::High,
+                        description: "High severity vulnerability".to_string(),
+                        url: Some("https://osv.dev/CVE-2024-1234".to_string()),
+                    },
+                    Vulnerability {
+                        id: "CVE-2024-5678".to_string(),
+                        severity: VulnerabilitySeverity::Medium,
+                        description: "Medium severity vulnerability".to_string(),
+                        url: None,
+                    },
+                ],
+                ..Default::default()
+            },
+        );
+
+        let diagnostics = create_diagnostics(&deps, &cache, |name| format!("test:{}", name), None);
+
+        let vuln_diags: Vec<_> = diagnostics
+            .iter()
+            .filter(|d| {
+                d.code
+                    .as_ref()
+                    .is_some_and(|c| matches!(c, NumberOrString::String(s) if s.contains("vulns")))
+            })
+            .collect();
+
+        assert_eq!(vuln_diags.len(), 1);
+        assert!(vuln_diags[0].message.contains("2 vulns"));
+        assert_eq!(vuln_diags[0].severity, Some(DiagnosticSeverity::ERROR));
+        assert!(vuln_diags[0].related_information.is_some());
+    }
+
+    #[test]
+    fn test_vulnerability_severity_filtering() {
+        let deps = vec![create_test_dependency("vuln-dep", "1.0.0", 5)];
+        let cache = MemoryCache::new();
+        cache.insert(
+            "test:vuln-dep".to_string(),
+            VersionInfo {
+                latest: Some("1.0.0".to_string()),
+                vulnerabilities: vec![
+                    Vulnerability {
+                        id: "CVE-2024-LOW".to_string(),
+                        severity: VulnerabilitySeverity::Low,
+                        description: "Low severity".to_string(),
+                        url: None,
+                    },
+                    Vulnerability {
+                        id: "CVE-2024-HIGH".to_string(),
+                        severity: VulnerabilitySeverity::High,
+                        description: "High severity".to_string(),
+                        url: None,
+                    },
+                ],
+                ..Default::default()
+            },
+        );
+
+        let diagnostics = create_diagnostics(
+            &deps,
+            &cache,
+            |name| format!("test:{}", name),
+            Some(VulnerabilitySeverity::High),
+        );
+
+        let vuln_diags: Vec<_> = diagnostics
+            .iter()
+            .filter(|d| {
+                d.code
+                    .as_ref()
+                    .is_some_and(|c| matches!(c, NumberOrString::String(s) if s.contains("vulns")))
+            })
+            .collect();
+
+        assert_eq!(vuln_diags.len(), 1);
+        assert!(vuln_diags[0].message.contains("1 vuln"));
+    }
+
+    #[test]
+    fn test_deprecation_diagnostic_with_repository() {
+        let deps = vec![create_test_dependency("old-dep", "1.0.0", 5)];
+        let cache = MemoryCache::new();
+        cache.insert(
+            "test:old-dep".to_string(),
+            VersionInfo {
+                deprecated: true,
+                latest: Some("2.0.0".to_string()),
+                repository: Some("https://github.com/user/old-dep".to_string()),
+                ..Default::default()
+            },
+        );
+
+        let diagnostics = create_diagnostics(&deps, &cache, |name| format!("test:{}", name), None);
+
+        let deprecation_diags: Vec<_> = diagnostics
+            .iter()
+            .filter(|d| {
+                d.code
+                    .as_ref()
+                    .is_some_and(|c| matches!(c, NumberOrString::String(s) if s.contains("deprecated")))
+            })
+            .collect();
+
+        assert_eq!(deprecation_diags.len(), 1);
+        assert!(deprecation_diags[0].related_information.is_some());
+        let related = deprecation_diags[0].related_information.as_ref().unwrap();
+        assert!(!related.is_empty());
+    }
+
+    #[test]
+    fn test_yanked_diagnostic_with_repository() {
+        let deps = vec![create_test_dependency("serde", "1.0.0", 5)];
+        let cache = MemoryCache::new();
+        cache.insert(
+            "test:serde".to_string(),
+            VersionInfo {
+                yanked_versions: vec!["1.0.0".to_string()],
+                latest: Some("2.0.0".to_string()),
+                repository: Some("https://github.com/serde-rs/serde".to_string()),
+                ..Default::default()
+            },
+        );
+
+        let diagnostics = create_diagnostics(&deps, &cache, |name| format!("test:{}", name), None);
+
+        let yanked_diags: Vec<_> = diagnostics
+            .iter()
+            .filter(|d| {
+                d.code
+                    .as_ref()
+                    .is_some_and(|c| matches!(c, NumberOrString::String(s) if s.contains("yanked")))
+            })
+            .collect();
+
+        assert_eq!(yanked_diags.len(), 1);
+        assert!(yanked_diags[0].related_information.is_some());
+        let related = yanked_diags[0].related_information.as_ref().unwrap();
+        assert_eq!(related.len(), 2);
+    }
+
+    #[test]
+    fn test_vulnerability_low_severity_hint() {
+        let deps = vec![create_test_dependency("vuln-dep", "1.0.0", 5)];
+        let cache = MemoryCache::new();
+        cache.insert(
+            "test:vuln-dep".to_string(),
+            VersionInfo {
+                latest: Some("1.0.0".to_string()),
+                vulnerabilities: vec![Vulnerability {
+                    id: "CVE-2024-LOW".to_string(),
+                    severity: VulnerabilitySeverity::Low,
+                    description: "Low severity".to_string(),
+                    url: None,
+                }],
+                ..Default::default()
+            },
+        );
+
+        let diagnostics = create_diagnostics(&deps, &cache, |name| format!("test:{}", name), None);
+
+        let vuln_diags: Vec<_> = diagnostics
+            .iter()
+            .filter(|d| {
+                d.code
+                    .as_ref()
+                    .is_some_and(|c| matches!(c, NumberOrString::String(s) if s.contains("vulns")))
+            })
+            .collect();
+
+        assert_eq!(vuln_diags.len(), 1);
+        assert_eq!(vuln_diags[0].severity, Some(DiagnosticSeverity::HINT));
+    }
+
+    #[test]
+    fn test_vulnerability_medium_severity_warning() {
+        let deps = vec![create_test_dependency("vuln-dep", "1.0.0", 5)];
+        let cache = MemoryCache::new();
+        cache.insert(
+            "test:vuln-dep".to_string(),
+            VersionInfo {
+                latest: Some("1.0.0".to_string()),
+                vulnerabilities: vec![Vulnerability {
+                    id: "CVE-2024-MED".to_string(),
+                    severity: VulnerabilitySeverity::Medium,
+                    description: "Medium severity".to_string(),
+                    url: None,
+                }],
+                ..Default::default()
+            },
+        );
+
+        let diagnostics = create_diagnostics(&deps, &cache, |name| format!("test:{}", name), None);
+
+        let vuln_diags: Vec<_> = diagnostics
+            .iter()
+            .filter(|d| {
+                d.code
+                    .as_ref()
+                    .is_some_and(|c| matches!(c, NumberOrString::String(s) if s.contains("vulns")))
+            })
+            .collect();
+
+        assert_eq!(vuln_diags.len(), 1);
+        assert_eq!(vuln_diags[0].severity, Some(DiagnosticSeverity::WARNING));
+    }
+
+    #[test]
+    fn test_vulnerability_critical_severity_error() {
+        let deps = vec![create_test_dependency("vuln-dep", "1.0.0", 5)];
+        let cache = MemoryCache::new();
+        cache.insert(
+            "test:vuln-dep".to_string(),
+            VersionInfo {
+                latest: Some("1.0.0".to_string()),
+                vulnerabilities: vec![Vulnerability {
+                    id: "CVE-2024-CRIT".to_string(),
+                    severity: VulnerabilitySeverity::Critical,
+                    description: "Critical severity".to_string(),
+                    url: None,
+                }],
+                ..Default::default()
+            },
+        );
+
+        let diagnostics = create_diagnostics(&deps, &cache, |name| format!("test:{}", name), None);
+
+        let vuln_diags: Vec<_> = diagnostics
+            .iter()
+            .filter(|d| {
+                d.code
+                    .as_ref()
+                    .is_some_and(|c| matches!(c, NumberOrString::String(s) if s.contains("vulns")))
+            })
+            .collect();
+
+        assert_eq!(vuln_diags.len(), 1);
+        assert_eq!(vuln_diags[0].severity, Some(DiagnosticSeverity::ERROR));
+    }
 }

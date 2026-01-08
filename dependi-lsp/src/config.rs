@@ -172,4 +172,96 @@ mod tests {
         assert!(config.inlay_hints.show_up_to_date);
         assert!(config.diagnostics.enabled);
     }
+
+    #[test]
+    fn test_security_config_defaults() {
+        let config = SecurityConfig::default();
+        assert!(config.enabled);
+        assert!(config.show_in_hints);
+        assert!(config.show_diagnostics);
+        assert_eq!(config.min_severity, "low");
+        assert_eq!(config.cache_ttl_secs, DEFAULT_VULN_CACHE_TTL_SECS);
+    }
+
+    #[test]
+    fn test_security_config_from_json() {
+        let json = json!({
+            "security": {
+                "enabled": false,
+                "show_in_hints": false,
+                "show_diagnostics": false,
+                "min_severity": "high",
+                "cache_ttl_secs": 3600
+            }
+        });
+
+        let config = Config::from_init_options(Some(json));
+        assert!(!config.security.enabled);
+        assert!(!config.security.show_in_hints);
+        assert!(!config.security.show_diagnostics);
+        assert_eq!(config.security.min_severity, "high");
+        assert_eq!(config.security.cache_ttl_secs, 3600);
+    }
+
+    #[test]
+    fn test_min_severity_level_parsing() {
+        use crate::registries::VulnerabilitySeverity;
+
+        let config = SecurityConfig {
+            min_severity: "low".to_string(),
+            ..Default::default()
+        };
+        assert_eq!(config.min_severity_level(), VulnerabilitySeverity::Low);
+
+        let config = SecurityConfig {
+            min_severity: "medium".to_string(),
+            ..Default::default()
+        };
+        assert_eq!(config.min_severity_level(), VulnerabilitySeverity::Medium);
+
+        let config = SecurityConfig {
+            min_severity: "high".to_string(),
+            ..Default::default()
+        };
+        assert_eq!(config.min_severity_level(), VulnerabilitySeverity::High);
+
+        let config = SecurityConfig {
+            min_severity: "critical".to_string(),
+            ..Default::default()
+        };
+        assert_eq!(config.min_severity_level(), VulnerabilitySeverity::Critical);
+    }
+
+    #[test]
+    fn test_from_init_options_none() {
+        let config = Config::from_init_options(None);
+        assert!(config.inlay_hints.enabled);
+        assert!(config.diagnostics.enabled);
+    }
+
+    #[test]
+    fn test_from_init_options_invalid_json() {
+        let json = json!("invalid");
+        let config = Config::from_init_options(Some(json));
+        assert!(config.inlay_hints.enabled);
+    }
+
+    #[test]
+    fn test_cache_config_defaults() {
+        let config = CacheConfig::default();
+        assert_eq!(config.ttl_secs, DEFAULT_CACHE_TTL_SECS);
+    }
+
+    #[test]
+    fn test_diagnostics_config_defaults() {
+        let config = DiagnosticsConfig::default();
+        assert!(config.enabled);
+    }
+
+    #[test]
+    fn test_inlay_hints_config_defaults() {
+        let config = InlayHintsConfig::default();
+        assert!(config.enabled);
+        assert!(config.show_up_to_date);
+    }
 }
