@@ -837,9 +837,9 @@ mod tests {
         let deprecation_diags: Vec<_> = diagnostics
             .iter()
             .filter(|d| {
-                d.code
-                    .as_ref()
-                    .is_some_and(|c| matches!(c, NumberOrString::String(s) if s.contains("deprecated")))
+                d.code.as_ref().is_some_and(
+                    |c| matches!(c, NumberOrString::String(s) if s.contains("deprecated")),
+                )
             })
             .collect();
 
