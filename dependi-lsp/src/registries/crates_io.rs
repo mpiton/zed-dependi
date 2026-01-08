@@ -1,4 +1,59 @@
-//! Client for crates.io registry
+//! # crates.io Registry Client
+//!
+//! This module implements a client for the [crates.io](https://crates.io) registry,
+//! the official Rust package registry managed by the Rust Foundation.
+//!
+//! ## API Details
+//!
+//! - **Base URL**: `https://crates.io/api/v1`
+//! - **API Version**: v1 (stable)
+//!
+//! ## Rate Limiting
+//!
+//! The crates.io API enforces **strict rate limits** to protect the service.
+//! This client implements a built-in rate limiter that enforces **1 request per second**.
+//!
+//! **Exceeding the rate limit may result in IP-based blocking.**
+//!
+//! ## API Endpoints Used
+//!
+//! ### Fetch Crate Info
+//!
+//! - **Endpoint**: `GET /api/v1/crates/{crate_name}`
+//! - **Response**: JSON containing crate metadata and all versions
+//! - **Fields**:
+//!   - `crate.max_stable_version`: Latest stable release
+//!   - `crate.description`: Package description
+//!   - `crate.homepage`: Optional homepage URL
+//!   - `crate.repository`: Optional repository URL
+//!   - `versions[]`: Array of all published versions
+//!
+//! ## Response Parsing
+//!
+//! - **Version format**: Semver with optional pre-release tags (`-alpha`, `-beta`, `-rc`)
+//! - **Date format**: RFC 3339 (`2024-01-15T10:30:00Z`)
+//! - **Yanked versions**: Marked with `yanked: true` in versions array
+//! - **License**: Per-version field (SPDX expression)
+//!
+//! ## Edge Cases and Quirks
+//!
+//! - **Name normalization**: Underscores and hyphens are equivalent (`foo-bar` = `foo_bar`)
+//! - **Case sensitivity**: Names are case-insensitive but stored lowercase
+//! - **404 responses**: Returned for both "not found" and "private crates"
+//! - **Yanked versions**: Still available but marked; users are warned
+//! - **Features**: `features` field lists Cargo feature flags (not exposed by this client)
+//!
+//! ## Error Handling
+//!
+//! - **Rate limiting**: Client-side enforcement (1 req/s)
+//! - **Network errors**: Returned as `anyhow::Error`
+//! - **API errors**: Non-success status codes return an error
+//!
+//! ## External References
+//!
+//! - [crates.io Data Access](https://crates.io/data-access)
+//! - [crates.io Policies](https://crates.io/policies)
+//! - [Crate Metadata Schema](https://doc.rust-lang.org/cargo/reference/registry-index.html)
 
 use std::collections::HashMap;
 use std::sync::Arc;

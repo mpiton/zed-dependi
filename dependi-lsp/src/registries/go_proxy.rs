@@ -1,4 +1,76 @@
-//! Client for Go module proxy (proxy.golang.org)
+//! # Go Module Proxy Client
+//!
+//! This module implements a client for the [Go Module Proxy](https://proxy.golang.org),
+//! the official module mirror and checksum database for Go modules.
+//!
+//! ## API Details
+//!
+//! - **Base URL**: `https://proxy.golang.org`
+//! - **API Version**: Module Proxy Protocol (stable)
+//! - **Authentication**: Not required for public modules
+//! - **GOPROXY**: Supports custom proxy URLs via environment variable
+//!
+//! ## Rate Limiting
+//!
+//! The Go proxy does not publish official rate limits but implements:
+//!
+//! - **Fair use policy**: No hard limits for normal usage
+//! - **CDN caching**: Most requests are served from cache
+//! - **Best practice**: Respect cache headers
+//!
+//! ## API Endpoints Used
+//!
+//! ### List Versions
+//!
+//! - **Endpoint**: `GET /{module}/@v/list`
+//! - **Response**: Plain text, one version per line
+//! - **Example**: `v1.0.0\nv1.0.1\nv1.1.0`
+//!
+//! ### Get Latest Version
+//!
+//! - **Endpoint**: `GET /{module}/@latest`
+//! - **Response**: JSON with version and timestamp
+//! - **Fields**:
+//!   - `Version`: Version string (e.g., `v1.2.3`)
+//!   - `Time`: RFC 3339 timestamp
+//!
+//! ### Get Version Info
+//!
+//! - **Endpoint**: `GET /{module}/@v/{version}.info`
+//! - **Response**: JSON with version metadata
+//! - **Fields**:
+//!   - `Version`: Canonical version string
+//!   - `Time`: RFC 3339 release timestamp
+//!
+//! ## Response Parsing
+//!
+//! - **Version format**: Semver with `v` prefix required (`v1.0.0`, `v2.0.0-rc1`)
+//! - **Date format**: RFC 3339 (`2024-01-15T10:30:00Z`)
+//! - **Module paths**: May contain version suffix for v2+ (`/v2`, `/v3`)
+//!
+//! ## Edge Cases and Quirks
+//!
+//! - **Module path encoding**: Uppercase letters become `!` + lowercase
+//!   (`github.com/Azure/sdk` → `github.com/!azure/sdk`)
+//! - **Major version suffixes**: v2+ modules have path suffix (`module/v2`)
+//! - **Pseudo-versions**: Auto-generated for commits without tags
+//!   (`v0.0.0-20210101000000-abcdef123456`)
+//! - **Private modules**: Not available on public proxy; require `GOPRIVATE`
+//! - **Checksum database**: `sum.golang.org` verifies module integrity
+//! - **Retracted versions**: Marked in `go.mod` but still listed
+//!
+//! ## Error Handling
+//!
+//! - **Network errors**: Returned as `anyhow::Error`
+//! - **API errors**: 404 for not found, 410 for gone/retracted
+//! - **Timeouts**: 10 second default timeout
+//!
+//! ## External References
+//!
+//! - [Go Module Proxy Protocol](https://go.dev/ref/mod#module-proxy)
+//! - [Module Version Numbering](https://go.dev/ref/mod#versions)
+//! - [Checksum Database](https://sum.golang.org/)
+//! - [GOPROXY Environment Variable](https://go.dev/ref/mod#environment-variables)
 
 use std::collections::HashMap;
 use std::sync::Arc;
@@ -21,7 +93,7 @@ impl GoProxyRegistry {
     /// Creates a GoProxyRegistry that uses the provided shared HTTP client and the default Go proxy base URL.
     ///
     /// `client` is the shared `reqwest::Client` used for all outgoing HTTP requests to the Go proxy.
-    /// The returned registry is configured with `base_url` set to "https://proxy.golang.org".
+    /// The returned registry is configured with `base_url` set to `https://proxy.golang.org`.
     ///
     /// # Examples
     ///

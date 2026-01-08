@@ -1,7 +1,71 @@
-//! Client for RubyGems.org registry
+//! # RubyGems Registry Client
 //!
-//! Provides package metadata and version information for Ruby gems.
-//! API documentation: https://guides.rubygems.org/rubygems-org-api/
+//! This module implements a client for [RubyGems.org](https://rubygems.org),
+//! the Ruby community's gem hosting service.
+//!
+//! ## API Details
+//!
+//! - **Base URL**: `https://rubygems.org/api/v1`
+//! - **API Version**: v1 (stable)
+//! - **Authentication**: API key for publishing (not needed for reading)
+//! - **CORS**: Enabled for browser-based access
+//!
+//! ## Rate Limiting
+//!
+//! RubyGems enforces rate limits:
+//!
+//! - **Standard limit**: ~10 requests per second per IP
+//! - **Blocking**: Aggressive crawlers may be blocked
+//! - **Best practice**: Use `If-Modified-Since` headers
+//!
+//! ## API Endpoints Used
+//!
+//! ### Fetch Gem Info
+//!
+//! - **Endpoint**: `GET /api/v1/gems/{gem-name}.json`
+//! - **Response**: JSON with gem metadata (latest version)
+//! - **Fields**:
+//!   - `version`: Latest version string
+//!   - `info`: Gem description
+//!   - `licenses[]`: Array of license identifiers
+//!   - `homepage_uri`: Homepage URL
+//!   - `source_code_uri`: Repository URL
+//!   - `project_uri`: RubyGems project page
+//!   - `version_created_at`: RFC 3339 release timestamp
+//!
+//! ### Fetch All Versions
+//!
+//! - **Endpoint**: `GET /api/v1/versions/{gem-name}.json`
+//! - **Response**: JSON array of version entries
+//! - **Fields**:
+//!   - `number`: Version string
+//!   - `created_at`: RFC 3339 publish timestamp
+//!
+//! ## Response Parsing
+//!
+//! - **Version format**: RubyGems versioning (`1.0.0`, `2.0.0.pre.1`)
+//! - **Date format**: RFC 3339 (`2024-01-15T10:30:00.000Z`)
+//! - **Prerelease**: Versions containing `.pre`, `.alpha`, `.beta`, `.rc`
+//!
+//! ## Edge Cases and Quirks
+//!
+//! - **Version ordering**: RubyGems uses its own ordering (not strictly semver)
+//! - **Yanked gems**: Available via separate endpoint (not implemented)
+//! - **Platform gems**: May have platform suffix (`-java`, `-x86_64-linux`)
+//! - **Prerelease format**: Uses `.pre.1` format (not `-pre.1`)
+//! - **No deprecation flag**: RubyGems API doesn't expose deprecation status
+//!
+//! ## Error Handling
+//!
+//! - **Network errors**: Returned as `anyhow::Error`
+//! - **API errors**: 404 for not found
+//! - **Timeouts**: 10 second default timeout
+//!
+//! ## External References
+//!
+//! - [RubyGems API](https://guides.rubygems.org/rubygems-org-api/)
+//! - [Gem Specification](https://guides.rubygems.org/specification-reference/)
+//! - [Version Format](https://guides.rubygems.org/patterns/#semantic-versioning)
 
 use std::collections::HashMap;
 use std::sync::Arc;
@@ -23,7 +87,7 @@ impl RubyGemsRegistry {
     /// Creates a RubyGemsRegistry that uses the provided shared HTTP client.
     ///
     /// The provided `client` will be used for all HTTP requests to the RubyGems API. The registry's
-    /// base API URL is set to "https://rubygems.org/api/v1".
+    /// base API URL is set to `https://rubygems.org/api/v1`.
     ///
     /// # Examples
     ///

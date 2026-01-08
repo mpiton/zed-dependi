@@ -1,4 +1,78 @@
-//! Registry clients for fetching package version information
+//! # Package Registry Clients
+//!
+//! This module provides clients for fetching package version information from
+//! various package registries across different programming ecosystems.
+//!
+//! ## Supported Registries
+//!
+//! | Registry | Ecosystem | Module |
+//! |----------|-----------|--------|
+//! | [crates.io](https://crates.io) | Rust | [`crates_io`] |
+//! | [npm](https://www.npmjs.com) | Node.js/JavaScript | [`npm`] |
+//! | [PyPI](https://pypi.org) | Python | [`pypi`] |
+//! | [Go Proxy](https://proxy.golang.org) | Go | [`go_proxy`] |
+//! | [Packagist](https://packagist.org) | PHP/Composer | [`packagist`] |
+//! | [pub.dev](https://pub.dev) | Dart/Flutter | [`pub_dev`] |
+//! | [NuGet](https://www.nuget.org) | .NET | [`nuget`] |
+//! | [RubyGems](https://rubygems.org) | Ruby | [`rubygems`] |
+//!
+//! ## Architecture
+//!
+//! All registry clients implement the [`Registry`] trait, providing a unified
+//! interface for fetching package metadata:
+//!
+//! ```ignore
+//! pub trait Registry: Send + Sync {
+//!     async fn get_version_info(&self, package_name: &str) -> anyhow::Result<VersionInfo>;
+//!     fn http_client(&self) -> Arc<Client>;
+//! }
+//! ```
+//!
+//! ## Shared HTTP Client
+//!
+//! Registry clients share a single HTTP client via [`http_client::create_shared_client`]
+//! for connection pooling, HTTP/2 multiplexing, and reduced memory footprint.
+//!
+//! ## Common Return Type
+//!
+//! All registries return [`VersionInfo`] containing:
+//!
+//! - **Latest stable version**: The most recent non-prerelease version
+//! - **Latest prerelease**: The most recent prerelease version (if any)
+//! - **All versions**: Complete list of available versions
+//! - **Metadata**: Description, homepage, repository, license
+//! - **Status**: Deprecated, yanked flags
+//! - **Release dates**: Publish timestamps for each version
+//!
+//! ## Vulnerability Detection
+//!
+//! Vulnerability information is populated separately via the OSV API
+//! (see `vulnerabilities` module), not by the registry clients themselves.
+//!
+//! ## Rate Limiting
+//!
+//! Each registry has different rate limiting policies:
+//!
+//! | Registry | Rate Limit | Notes |
+//! |----------|------------|-------|
+//! | crates.io | 1 req/s | **Strict** - client-side enforced |
+//! | npm | ≤1 req/s recommended | No official limit; IP blocking for abuse |
+//! | PyPI | No official limit | CDN-cached; be respectful |
+//! | Go Proxy | Fair use | No hard limit |
+//! | Packagist | ~60/min | CDN-cached |
+//! | pub.dev | ~100/min | CDN-cached |
+//! | NuGet | Fair use | CDN-cached |
+//! | RubyGems | Varies by endpoint | ~10 req/s typical; blocking for abuse |
+//!
+//! ## Usage
+//!
+//! ```ignore
+//! use dependi_lsp::registries::{Registry, crates_io::CratesIoRegistry};
+//!
+//! let registry = CratesIoRegistry::default();
+//! let info = registry.get_version_info("serde").await?;
+//! println!("Latest: {:?}", info.latest);
+//! ```
 
 use std::collections::HashMap;
 use std::sync::Arc;

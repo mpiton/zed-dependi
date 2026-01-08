@@ -1,4 +1,66 @@
-//! Client for pub.dev registry (Dart/Flutter packages)
+//! # pub.dev Registry Client
+//!
+//! This module implements a client for [pub.dev](https://pub.dev),
+//! the official package repository for Dart and Flutter packages.
+//!
+//! ## API Details
+//!
+//! - **Base URL**: `https://pub.dev/api`
+//! - **API Version**: REST API (stable)
+//! - **Authentication**: OAuth2 for private packages (not implemented)
+//! - **CORS**: Enabled for browser-based access
+//!
+//! ## Rate Limiting
+//!
+//! pub.dev enforces rate limits:
+//!
+//! - **Standard limit**: ~100 requests per minute per IP
+//! - **CDN caching**: Responses cached at edge
+//! - **Best practice**: Respect `Cache-Control` headers
+//!
+//! ## API Endpoints Used
+//!
+//! ### Fetch Package Info
+//!
+//! - **Endpoint**: `GET /api/packages/{package-name}`
+//! - **Response**: JSON with package metadata and all versions
+//! - **Fields**:
+//!   - `name`: Package name
+//!   - `latest`: Latest version info with pubspec
+//!   - `versions[]`: Array of all versions
+//!   - `versions[].version`: Version string
+//!   - `versions[].pubspec`: Parsed pubspec.yaml contents
+//!   - `versions[].retracted`: Whether version is retracted
+//!   - `versions[].published`: RFC 3339 publish timestamp
+//!
+//! ## Response Parsing
+//!
+//! - **Version format**: Semver (`1.0.0`, `2.0.0-dev.1`)
+//! - **Date format**: RFC 3339 (`2024-01-15T10:30:00.000Z`)
+//! - **Retracted versions**: `retracted: true` (equivalent to yanked)
+//! - **Discontinued packages**: `discontinued: true` in pubspec
+//!
+//! ## Edge Cases and Quirks
+//!
+//! - **SDK constraints**: `environment.sdk` in pubspec specifies Dart version
+//! - **Flutter constraints**: `environment.flutter` for Flutter SDK version
+//! - **Retracted versions**: Similar to yanked; still downloadable with warning
+//! - **Discontinued packages**: Marked in pubspec, may suggest replacement
+//! - **Null safety**: Packages may indicate null-safety migration status
+//! - **Platform support**: Flutter packages may specify platform compatibility
+//!
+//! ## Error Handling
+//!
+//! - **Network errors**: Returned as `anyhow::Error`
+//! - **API errors**: 404 for not found
+//! - **Timeouts**: 10 second default timeout
+//!
+//! ## External References
+//!
+//! - [pub.dev API](https://pub.dev/help/api)
+//! - [Pubspec Format](https://dart.dev/tools/pub/pubspec)
+//! - [Version Constraints](https://dart.dev/tools/pub/dependencies#version-constraints)
+//! - [Package Scoring](https://pub.dev/help/scoring)
 
 use std::collections::HashMap;
 use std::sync::Arc;

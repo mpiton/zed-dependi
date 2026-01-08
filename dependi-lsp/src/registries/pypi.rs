@@ -1,4 +1,69 @@
-//! Client for PyPI (Python Package Index) registry
+//! # PyPI Registry Client
+//!
+//! This module implements a client for [PyPI](https://pypi.org) (Python Package Index),
+//! the official third-party software repository for Python packages.
+//!
+//! ## API Details
+//!
+//! - **Base URL**: `https://pypi.org/pypi`
+//! - **API Version**: JSON API (stable)
+//! - **Authentication**: Not required for public packages
+//! - **CORS**: Enabled for browser-based access
+//!
+//! ## Rate Limiting
+//!
+//! PyPI enforces rate limits to protect the service:
+//!
+//! - **Standard limit**: ~20 requests per second per IP
+//! - **Blocking**: Aggressive crawlers may be blocked
+//! - **Best practice**: Use `If-Modified-Since` headers for caching
+//! - **CDN**: Responses are served via Fastly CDN
+//!
+//! ## API Endpoints Used
+//!
+//! ### Fetch Package Info
+//!
+//! - **Endpoint**: `GET /pypi/{package-name}/json`
+//! - **Response**: JSON with project metadata and all releases
+//! - **Fields**:
+//!   - `info.version`: Latest version
+//!   - `info.summary`: Package description
+//!   - `info.home_page`: Homepage URL
+//!   - `info.license`: License string
+//!   - `info.project_urls`: Map of URL types to URLs
+//!   - `info.classifiers`: Trove classifiers for categorization
+//!   - `releases{}`: Map of version string to release files
+//!
+//! ## Response Parsing
+//!
+//! - **Version format**: PEP 440 compliant (`1.0.0`, `1.0.0a1`, `1.0.0.dev1`)
+//! - **Date format**: ISO 8601 without timezone (`2024-01-15T10:30:00`)
+//! - **Yanked releases**: `yanked: true` in release file info
+//! - **Deprecated projects**: `Development Status :: 7 - Inactive` classifier
+//!
+//! ## Edge Cases and Quirks
+//!
+//! - **Name normalization**: Case-insensitive; underscores, hyphens, and dots
+//!   are all equivalent per [PEP 503](https://peps.python.org/pep-0503/)
+//!   (`Flask` = `flask` = `FLASK`, `typing_extensions` = `typing-extensions`)
+//! - **Project vs release metadata**: Some fields are project-level, others per-release
+//! - **Classifiers**: Used for deprecation status, Python version support, etc.
+//! - **requires_python**: Version constraint for Python interpreter (not exposed)
+//! - **Yanked releases**: Still downloadable but with warning
+//! - **Version ordering**: Uses PEP 440 ordering, not simple semver
+//!
+//! ## Error Handling
+//!
+//! - **Network errors**: Returned as `anyhow::Error`
+//! - **API errors**: 404 for not found
+//! - **Timeouts**: 10 second default timeout
+//!
+//! ## External References
+//!
+//! - [PyPI JSON API](https://docs.pypi.org/api/json/)
+//! - [PEP 503 - Simple Repository API](https://peps.python.org/pep-0503/)
+//! - [PEP 440 - Version Identification](https://peps.python.org/pep-0440/)
+//! - [Trove Classifiers](https://pypi.org/classifiers/)
 
 use std::collections::HashMap;
 use std::sync::Arc;
