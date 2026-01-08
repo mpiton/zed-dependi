@@ -2,13 +2,15 @@ use std::sync::{Arc, RwLock};
 
 use dashmap::DashMap;
 use reqwest::Client as HttpClient;
-use serde::{Deserialize, Serialize};
 use tower_lsp::jsonrpc::Result;
 use tower_lsp::lsp_types::*;
 use tower_lsp::{Client, LanguageServer};
 
 use crate::cache::{HybridCache, ReadCache, WriteCache};
 use crate::config::Config;
+use crate::document::DocumentState;
+use crate::file_types::FileType;
+use crate::parsers::Parser;
 use crate::parsers::cargo::CargoParser;
 use crate::parsers::csharp::CsharpParser;
 use crate::parsers::dart::DartParser;
@@ -17,7 +19,6 @@ use crate::parsers::npm::NpmParser;
 use crate::parsers::php::PhpParser;
 use crate::parsers::python::PythonParser;
 use crate::parsers::ruby::RubyParser;
-use crate::parsers::{Dependency, Parser};
 use crate::providers::code_actions::create_code_actions;
 use crate::providers::completion::{format_release_age, get_completions};
 use crate::providers::diagnostics::create_diagnostics;
@@ -32,46 +33,10 @@ use crate::registries::pub_dev::PubDevRegistry;
 use crate::registries::pypi::PyPiRegistry;
 use crate::registries::rubygems::RubyGemsRegistry;
 use crate::registries::{Registry, VersionInfo, VulnerabilitySeverity};
+use crate::reports::{VulnerabilityReportEntry, VulnerabilitySummary, generate_markdown_report};
+use crate::vulnerabilities::VulnerabilityQuery;
 use crate::vulnerabilities::cache::VulnerabilityCache;
 use crate::vulnerabilities::osv::OsvClient;
-use crate::vulnerabilities::{Ecosystem, VulnerabilityQuery};
-
-/// File type for determining which parser/registry to use
-#[derive(Debug, Clone, Copy, PartialEq)]
-pub enum FileType {
-    Cargo,
-    Npm,
-    Python,
-    Go,
-    Php,
-    Dart,
-    Csharp,
-    Ruby,
-}
-
-impl FileType {
-    /// Convert to vulnerability ecosystem
-    pub fn to_ecosystem(self) -> Ecosystem {
-        match self {
-            FileType::Cargo => Ecosystem::CratesIo,
-            FileType::Npm => Ecosystem::Npm,
-            FileType::Python => Ecosystem::PyPI,
-            FileType::Go => Ecosystem::Go,
-            FileType::Php => Ecosystem::Packagist,
-            FileType::Dart => Ecosystem::Pub,
-            FileType::Csharp => Ecosystem::NuGet,
-            FileType::Ruby => Ecosystem::RubyGems,
-        }
-    }
-}
-
-/// Document state with parsed dependencies
-struct DocumentState {
-    /// Parsed dependencies
-    dependencies: Vec<Dependency>,
-    /// Type of dependency file
-    file_type: FileType,
-}
 
 pub struct DependiBackend {
     client: Client,
@@ -153,37 +118,8 @@ impl DependiBackend {
         }
     }
 
-    /// Detect file type from URI
-    fn detect_file_type(uri: &Url) -> Option<FileType> {
-        let path = uri.path();
-        if path.ends_with("Cargo.toml") {
-            Some(FileType::Cargo)
-        } else if path.ends_with("package.json") {
-            Some(FileType::Npm)
-        } else if path.ends_with("requirements.txt")
-            || path.ends_with("requirements-dev.txt")
-            || path.ends_with("requirements-test.txt")
-            || path.ends_with("pyproject.toml")
-        {
-            Some(FileType::Python)
-        } else if path.ends_with("go.mod") {
-            Some(FileType::Go)
-        } else if path.ends_with("composer.json") {
-            Some(FileType::Php)
-        } else if path.ends_with("pubspec.yaml") {
-            Some(FileType::Dart)
-        } else if path.ends_with(".csproj") {
-            Some(FileType::Csharp)
-        } else if path.ends_with("Gemfile") {
-            Some(FileType::Ruby)
-        } else {
-            None
-        }
-    }
-
-    /// Parse a document and extract dependencies
-    fn parse_document(&self, uri: &Url, content: &str) -> Vec<Dependency> {
-        match Self::detect_file_type(uri) {
+    fn parse_document(&self, uri: &Url, content: &str) -> Vec<crate::parsers::Dependency> {
+        match FileType::detect(uri) {
             Some(FileType::Cargo) => self.cargo_parser.parse(content),
             Some(FileType::Npm) => self.npm_parser.parse(content),
             Some(FileType::Python) => self.python_parser.parse(content),
@@ -196,27 +132,12 @@ impl DependiBackend {
         }
     }
 
-    /// Get cache key for a package (includes registry prefix)
-    fn cache_key(file_type: FileType, package_name: &str) -> String {
-        match file_type {
-            FileType::Cargo => format!("crates:{}", package_name),
-            FileType::Npm => format!("npm:{}", package_name),
-            FileType::Python => format!("pypi:{}", package_name),
-            FileType::Go => format!("go:{}", package_name),
-            FileType::Php => format!("packagist:{}", package_name),
-            FileType::Dart => format!("pub:{}", package_name),
-            FileType::Csharp => format!("nuget:{}", package_name),
-            FileType::Ruby => format!("rubygems:{}", package_name),
-        }
-    }
-
-    /// Fetch version info for a package (with caching)
     async fn get_version_info(
         &self,
         file_type: FileType,
         package_name: &str,
     ) -> Option<VersionInfo> {
-        let cache_key = Self::cache_key(file_type, package_name);
+        let cache_key = file_type.cache_key(package_name);
 
         // Check cache first
         if let Some(cached) = self.version_cache.get(&cache_key) {
@@ -247,8 +168,11 @@ impl DependiBackend {
         }
     }
 
-    /// Fetch vulnerabilities from OSV.dev for all dependencies
-    async fn fetch_vulnerabilities(&self, dependencies: &[Dependency], file_type: FileType) {
+    async fn fetch_vulnerabilities(
+        &self,
+        dependencies: &[crate::parsers::Dependency],
+        file_type: FileType,
+    ) {
         use crate::vulnerabilities::cache::VulnCacheKey;
 
         let ecosystem = file_type.to_ecosystem();
@@ -285,7 +209,7 @@ impl DependiBackend {
                     self.vuln_cache.insert(vuln_key);
 
                     // Store vulnerabilities and deprecated status in version_cache
-                    let cache_key = Self::cache_key(file_type, &query.package_name);
+                    let cache_key = file_type.cache_key(&query.package_name);
                     if let Some(mut info) = self.version_cache.get(&cache_key) {
                         info.vulnerabilities = result.vulnerabilities.clone();
                         info.deprecated = result.deprecated;
@@ -319,9 +243,8 @@ impl DependiBackend {
         }
     }
 
-    /// Process a document: parse and fetch version info
     async fn process_document(&self, uri: &Url, content: &str) {
-        let Some(file_type) = Self::detect_file_type(uri) else {
+        let Some(file_type) = FileType::detect(uri) else {
             return;
         };
 
@@ -348,7 +271,7 @@ impl DependiBackend {
             .iter()
             .map(|dep| {
                 let name = dep.name.clone();
-                let cache_key = Self::cache_key(file_type, &name);
+                let cache_key = file_type.cache_key(&name);
                 let crates_io = Arc::clone(&crates_io);
                 let npm_registry = Arc::clone(&npm_registry);
                 let pypi = Arc::clone(&pypi);
@@ -446,7 +369,7 @@ impl DependiBackend {
             let diagnostics = create_diagnostics(
                 &dependencies,
                 &self.version_cache,
-                |name| Self::cache_key(file_type, name),
+                |name| file_type.cache_key(name),
                 severity_filter,
             );
 
@@ -517,7 +440,7 @@ impl DependiBackend {
         let mut summary = VulnerabilitySummary::default();
 
         for dep in &dependencies {
-            let cache_key = Self::cache_key(file_type, &dep.name);
+            let cache_key = file_type.cache_key(&dep.name);
             if let Some(info) = self.version_cache.get(&cache_key) {
                 for vuln in &info.vulnerabilities {
                     summary.total += 1;
@@ -559,98 +482,6 @@ impl DependiBackend {
             }
         }
     }
-}
-
-/// Summary of vulnerabilities by severity
-#[derive(Debug, Clone, Default, Serialize, Deserialize)]
-struct VulnerabilitySummary {
-    total: u32,
-    critical: u32,
-    high: u32,
-    medium: u32,
-    low: u32,
-}
-
-/// Entry in the vulnerability report
-#[derive(Debug, Clone, Serialize, Deserialize)]
-struct VulnerabilityReportEntry {
-    package: String,
-    version: String,
-    id: String,
-    severity: String,
-    description: String,
-    url: Option<String>,
-}
-
-/// Generate a markdown vulnerability report
-fn generate_markdown_report(
-    uri: &Url,
-    summary: &VulnerabilitySummary,
-    vulnerabilities: &[VulnerabilityReportEntry],
-) -> String {
-    let mut lines = vec![
-        "# Vulnerability Report".to_string(),
-        String::new(),
-        format!("**File**: {}", uri.path()),
-        format!("**Date**: {}", chrono::Local::now().format("%Y-%m-%d")),
-        String::new(),
-        "## Summary".to_string(),
-        "| Severity | Count |".to_string(),
-        "|----------|-------|".to_string(),
-        format!("| ⚠ Critical | {} |", summary.critical),
-        format!("| ▲ High | {} |", summary.high),
-        format!("| ● Medium | {} |", summary.medium),
-        format!("| ○ Low | {} |", summary.low),
-        format!("| **Total** | **{}** |", summary.total),
-        String::new(),
-    ];
-
-    if !vulnerabilities.is_empty() {
-        lines.push("## Vulnerabilities".to_string());
-        lines.push(String::new());
-
-        // Group by package
-        let mut current_package = String::new();
-        for vuln in vulnerabilities {
-            if vuln.package != current_package {
-                current_package = vuln.package.clone();
-                lines.push(format!("### {}@{}", vuln.package, vuln.version));
-                lines.push(String::new());
-            }
-
-            let severity_icon = match vuln.severity.as_str() {
-                "critical" => "⚠",
-                "high" => "▲",
-                "medium" => "●",
-                _ => "○",
-            };
-
-            if let Some(url) = &vuln.url {
-                lines.push(format!(
-                    "- **[{}]({})** ({} {}): {}",
-                    vuln.id,
-                    url,
-                    severity_icon,
-                    vuln.severity.to_uppercase(),
-                    vuln.description
-                ));
-            } else {
-                lines.push(format!(
-                    "- **{}** ({} {}): {}",
-                    vuln.id,
-                    severity_icon,
-                    vuln.severity.to_uppercase(),
-                    vuln.description
-                ));
-            }
-        }
-    } else {
-        lines.push("## No vulnerabilities found".to_string());
-        lines.push(String::new());
-        lines.push("✅ All dependencies are free of known security vulnerabilities.".to_string());
-    }
-
-    lines.join("\n")
 }
 
 #[tower_lsp::async_trait]
@@ -791,7 +622,7 @@ impl LanguageServer for DependiBackend {
                 })
             })
             .filter_map(|dep| {
-                let cache_key = Self::cache_key(file_type, &dep.name);
+                let cache_key = file_type.cache_key(&dep.name);
                 let version_info = self.version_cache.get(&cache_key);
                 let hint = create_inlay_hint(dep, version_info.as_ref());
 
@@ -955,7 +786,7 @@ impl LanguageServer for DependiBackend {
             uri,
             params.range,
             file_type,
-            |name| Self::cache_key(file_type, name),
+            |name| file_type.cache_key(name),
         );
 
         Ok(Some(actions))
@@ -972,7 +803,7 @@ impl LanguageServer for DependiBackend {
         let file_type = doc.file_type;
         let completions =
             get_completions(&doc.dependencies, position, &self.version_cache, |name| {
-                Self::cache_key(file_type, name)
+                file_type.cache_key(name)
             });
 
         match completions {
