@@ -1,0 +1,223 @@
+name: Contributor Experience
+
+on:
+  pull_request_target:
+    types: [opened, closed]
+  issues:
+    types: [opened]
+
+permissions:
+  pull-requests: write
+  issues: write
+
+jobs:
+  welcome-first-time-contributor:
+    name: Welcome First-Time Contributors
+    runs-on: ubuntu-latest
+    if: github.event_name == 'pull_request_target' && github.event.action == 'opened'
+    steps:
+      - name: Check if first PR
+        id: check
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const creator = context.payload.pull_request.user.login;
+            const { data: prs } = await github.rest.pulls.list({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              state: 'all',
+              per_page: 100
+            });
+            const prsByCreator = prs.filter(pr => pr.user.login === creator);
+            const isFirstPR = prsByCreator.length === 1;
+            core.setOutput('is_first_pr', isFirstPR);
+            return isFirstPR;
+
+      - name: Add first-contribution label
+        if: steps.check.outputs.is_first_pr == 'true'
+        uses: actions/github-script@v7
+        with:
+          script: |
+            await github.rest.issues.addLabels({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              issue_number: context.payload.pull_request.number,
+              labels: ['first-contribution']
+            });
+
+      - name: Welcome message
+        if: steps.check.outputs.is_first_pr == 'true'
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const creator = context.payload.pull_request.user.login;
+            await github.rest.issues.createComment({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              issue_number: context.payload.pull_request.number,
+              body: `Welcome to Dependi, @${creator}! 🎉
+
+Thank you for your first contribution to this project! We really appreciate you taking the time to help improve Dependi.
+
+A maintainer will review your PR soon. In the meantime, please make sure:
+- All CI checks pass (formatting, clippy, tests)
+- Your changes are documented if needed
+- You've filled out the PR template
+
+If you have any questions, feel free to ask here or in [GitHub Discussions](https://github.com/mpiton/zed-dependi/discussions).
+
+Happy coding! 🚀`
+            });
+
+  thank-merged-contributor:
+    name: Thank Merged Contributors
+    runs-on: ubuntu-latest
+    if: github.event_name == 'pull_request_target' && github.event.action == 'closed' && github.event.pull_request.merged == true
+    steps:
+      - name: Check if first merged PR
+        id: check
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const creator = context.payload.pull_request.user.login;
+            const { data: prs } = await github.rest.pulls.list({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              state: 'closed',
+              per_page: 100
+            });
+            const mergedPRsByCreator = prs.filter(pr =>
+              pr.user.login === creator && pr.merged_at !== null
+            );
+            const isFirstMergedPR = mergedPRsByCreator.length === 1;
+            core.setOutput('is_first_merged', isFirstMergedPR);
+            return isFirstMergedPR;
+
+      - name: Thank first-time contributor
+        if: steps.check.outputs.is_first_merged == 'true'
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const creator = context.payload.pull_request.user.login;
+            await github.rest.issues.createComment({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              issue_number: context.payload.pull_request.number,
+              body: `Congratulations on your first merged PR, @${creator}! 🎊
+
+Your contribution is now part of Dependi. Thank you for helping make dependency management better for Zed users!
+
+You're now officially a Dependi contributor. We hope to see you again! 💜`
+            });
+
+  welcome-first-issue:
+    name: Welcome First Issue
+    runs-on: ubuntu-latest
+    if: github.event_name == 'issues' && github.event.action == 'opened'
+    steps:
+      - name: Check if first issue
+        id: check
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const creator = context.payload.issue.user.login;
+            const { data: issues } = await github.rest.issues.listForRepo({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              creator: creator,
+              state: 'all',
+              per_page: 100
+            });
+            const isFirstIssue = issues.length === 1;
+            core.setOutput('is_first_issue', isFirstIssue);
+            return isFirstIssue;
+
+      - name: Welcome message for first issue
+        if: steps.check.outputs.is_first_issue == 'true'
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const creator = context.payload.issue.user.login;
+            await github.rest.issues.createComment({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              issue_number: context.payload.issue.number,
+              body: `Thanks for opening your first issue, @${creator}! 👋
+
+A maintainer will take a look as soon as possible.
+
+While you wait, you might find helpful information in:
+- [README](https://github.com/mpiton/zed-dependi#readme) - Features and configuration
+- [CONTRIBUTING.md](https://github.com/mpiton/zed-dependi/blob/main/CONTRIBUTING.md) - How to contribute
+- [Discussions](https://github.com/mpiton/zed-dependi/discussions) - Questions and ideas`
+            });
+
+  auto-label-pr:
+    name: Auto-Label PRs
+    runs-on: ubuntu-latest
+    if: github.event_name == 'pull_request_target' && github.event.action == 'opened'
+    steps:
+      - name: Label based on files changed
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const { data: files } = await github.rest.pulls.listFiles({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              pull_number: context.payload.pull_request.number
+            });
+
+            const labels = new Set();
+
+            for (const file of files) {
+              const path = file.filename;
+
+              // Documentation
+              if (path.endsWith('.md') || path.startsWith('docs/')) {
+                labels.add('documentation');
+              }
+
+              // Parsers
+              if (path.includes('parsers/')) {
+                labels.add('parsers');
+              }
+
+              // Registries
+              if (path.includes('registries/')) {
+                labels.add('registries');
+              }
+
+              // LSP providers
+              if (path.includes('providers/')) {
+                labels.add('lsp');
+              }
+
+              // Vulnerabilities
+              if (path.includes('vulnerabilities/')) {
+                labels.add('security');
+              }
+
+              // CI/CD
+              if (path.startsWith('.github/')) {
+                labels.add('ci');
+              }
+
+              // Extension
+              if (path.startsWith('dependi-zed/')) {
+                labels.add('extension');
+              }
+
+              // Tests
+              if (path.includes('test') || path.includes('_test.rs')) {
+                labels.add('tests');
+              }
+            }
+
+            if (labels.size > 0) {
+              await github.rest.issues.addLabels({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                issue_number: context.payload.pull_request.number,
+                labels: Array.from(labels)
+              });
+            }
