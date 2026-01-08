@@ -8,6 +8,7 @@ use reqwest::Client;
 use serde::Deserialize;
 
 use super::http_client::create_shared_client;
+use super::version_utils::is_prerelease_dart;
 use super::{Registry, VersionInfo};
 
 /// Client for the pub.dev registry
@@ -109,12 +110,12 @@ impl Registry for PubDevRegistry {
         // Find latest stable version
         let latest_stable = versions
             .iter()
-            .find(|v| !is_prerelease(v))
+            .find(|v| !is_prerelease_dart(v))
             .cloned()
             .or_else(|| Some(pkg.latest.version.clone()));
 
         // Find latest prerelease
-        let latest_prerelease = versions.iter().find(|v| is_prerelease(v)).cloned();
+        let latest_prerelease = versions.iter().find(|v| is_prerelease_dart(v)).cloned();
 
         // Collect release dates
         let release_dates: HashMap<String, DateTime<Utc>> = pkg
@@ -146,25 +147,17 @@ impl Registry for PubDevRegistry {
     }
 }
 
-fn is_prerelease(version: &str) -> bool {
-    version.contains('-')
-        || version.contains("dev")
-        || version.contains("alpha")
-        || version.contains("beta")
-        || version.contains("rc")
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
 
     #[test]
     fn test_is_prerelease() {
-        assert!(is_prerelease("1.0.0-dev.1"));
-        assert!(is_prerelease("1.0.0-alpha"));
-        assert!(is_prerelease("1.0.0-beta.1"));
-        assert!(is_prerelease("1.0.0-rc.1"));
-        assert!(!is_prerelease("1.0.0"));
-        assert!(!is_prerelease("2.0.0"));
+        assert!(is_prerelease_dart("1.0.0-dev.1"));
+        assert!(is_prerelease_dart("1.0.0-alpha"));
+        assert!(is_prerelease_dart("1.0.0-beta.1"));
+        assert!(is_prerelease_dart("1.0.0-rc.1"));
+        assert!(!is_prerelease_dart("1.0.0"));
+        assert!(!is_prerelease_dart("2.0.0"));
     }
 }

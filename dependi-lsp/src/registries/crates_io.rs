@@ -10,6 +10,7 @@ use serde::Deserialize;
 use tokio::sync::Mutex;
 
 use super::http_client::create_shared_client;
+use super::version_utils::is_prerelease_rust;
 use super::{Registry, VersionInfo};
 
 /// Rate limiter to respect crates.io's 1 request/second limit
@@ -149,7 +150,7 @@ impl Registry for CratesIoRegistry {
                 crate_response
                     .versions
                     .iter()
-                    .find(|v| !v.yanked && !is_prerelease(&v.num))
+                    .find(|v| !v.yanked && !is_prerelease_rust(&v.num))
                     .map(|v| v.num.clone())
             });
 
@@ -157,7 +158,7 @@ impl Registry for CratesIoRegistry {
         let latest_prerelease = crate_response
             .versions
             .iter()
-            .find(|v| !v.yanked && is_prerelease(&v.num))
+            .find(|v| !v.yanked && is_prerelease_rust(&v.num))
             .map(|v| v.num.clone());
 
         // Get all versions (not yanked)
@@ -215,23 +216,16 @@ impl Registry for CratesIoRegistry {
     }
 }
 
-fn is_prerelease(version: &str) -> bool {
-    version.contains('-')
-        || version.contains("alpha")
-        || version.contains("beta")
-        || version.contains("rc")
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
 
     #[test]
     fn test_is_prerelease() {
-        assert!(is_prerelease("1.0.0-alpha"));
-        assert!(is_prerelease("1.0.0-beta.1"));
-        assert!(is_prerelease("1.0.0-rc1"));
-        assert!(!is_prerelease("1.0.0"));
-        assert!(!is_prerelease("2.3.4"));
+        assert!(is_prerelease_rust("1.0.0-alpha"));
+        assert!(is_prerelease_rust("1.0.0-beta.1"));
+        assert!(is_prerelease_rust("1.0.0-rc1"));
+        assert!(!is_prerelease_rust("1.0.0"));
+        assert!(!is_prerelease_rust("2.3.4"));
     }
 }
