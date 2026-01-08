@@ -73,9 +73,11 @@ pub fn generate_markdown_report(
         lines.push(String::new());
 
         let mut current_package = String::new();
+        let mut current_version = String::new();
         for vuln in vulnerabilities {
-            if vuln.package != current_package {
+            if vuln.package != current_package || vuln.version != current_version {
                 current_package = vuln.package.clone();
+                current_version = vuln.version.clone();
                 lines.push(format!("### {}@{}", vuln.package, vuln.version));
                 lines.push(String::new());
             }
@@ -158,6 +160,43 @@ mod tests {
         assert!(report.contains("### tokio@1.0.0"));
         assert!(report.contains("CVE-2021-1234"));
         assert!(report.contains("CVE-2021-5678"));
+    }
+
+    #[test]
+    fn test_generate_markdown_report_same_package_different_versions() {
+        let uri = Url::parse("file:///project/Cargo.toml").unwrap();
+        let summary = VulnerabilitySummary {
+            total: 2,
+            critical: 1,
+            high: 1,
+            medium: 0,
+            low: 0,
+        };
+        let vulnerabilities = vec![
+            VulnerabilityReportEntry {
+                package: "serde".to_string(),
+                version: "1.0.0".to_string(),
+                id: "CVE-2021-1111".to_string(),
+                severity: "critical".to_string(),
+                description: "Old version vulnerability".to_string(),
+                url: None,
+            },
+            VulnerabilityReportEntry {
+                package: "serde".to_string(),
+                version: "2.0.0".to_string(),
+                id: "CVE-2021-2222".to_string(),
+                severity: "high".to_string(),
+                description: "New version vulnerability".to_string(),
+                url: None,
+            },
+        ];
+
+        let report = generate_markdown_report(&uri, &summary, &vulnerabilities);
+
+        assert!(report.contains("### serde@1.0.0"));
+        assert!(report.contains("### serde@2.0.0"));
+        assert!(report.contains("CVE-2021-1111"));
+        assert!(report.contains("CVE-2021-2222"));
     }
 
     #[test]
