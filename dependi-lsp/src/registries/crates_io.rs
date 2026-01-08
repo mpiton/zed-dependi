@@ -7,19 +7,12 @@
 //!
 //! - **Base URL**: `https://crates.io/api/v1`
 //! - **API Version**: v1 (stable)
-//! - **Authentication**: Optional API token for higher rate limits
-//! - **CORS**: Enabled for browser-based access
 //!
 //! ## Rate Limiting
 //!
-//! The crates.io API enforces **strict rate limits** to protect the service:
+//! The crates.io API enforces **strict rate limits** to protect the service.
+//! This client implements a built-in rate limiter that enforces **1 request per second**.
 //!
-//! - **Anonymous**: 1 request per second (enforced by this client)
-//! - **Authenticated**: Higher limits with API token
-//! - **Headers**: `X-RateLimit-Remaining`, `X-RateLimit-Reset`
-//! - **Backoff**: 429 responses include `Retry-After` header
-//!
-//! This client implements a built-in rate limiter that enforces the 1 req/s limit.
 //! **Exceeding the rate limit may result in IP-based blocking.**
 //!
 //! ## API Endpoints Used
@@ -52,9 +45,9 @@
 //!
 //! ## Error Handling
 //!
-//! - **Rate limiting**: Client-side enforcement + server 429 handling
+//! - **Rate limiting**: Client-side enforcement (1 req/s)
 //! - **Network errors**: Returned as `anyhow::Error`
-//! - **API errors**: 404 for not found, 429 for rate limit, 5xx for server issues
+//! - **API errors**: Non-success status codes return an error
 //!
 //! ## External References
 //!
