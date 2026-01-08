@@ -4,8 +4,8 @@ use std::collections::HashMap;
 
 use tower_lsp::lsp_types::*;
 
-use crate::backend::FileType;
 use crate::cache::ReadCache;
+use crate::file_types::FileType;
 use crate::parsers::Dependency;
 use crate::providers::inlay_hints::{VersionStatus, compare_versions};
 

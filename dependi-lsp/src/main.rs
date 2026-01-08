@@ -1,9 +1,12 @@
 mod backend;
 mod cache;
 mod config;
+mod document;
+mod file_types;
 mod parsers;
 mod providers;
 mod registries;
+mod reports;
 mod utils;
 mod vulnerabilities;
 

@@ -6,8 +6,11 @@
 pub mod backend;
 pub mod cache;
 pub mod config;
+pub mod document;
+pub mod file_types;
 pub mod parsers;
 pub mod providers;
 pub mod registries;
+pub mod reports;
 pub mod utils;
 pub mod vulnerabilities;
