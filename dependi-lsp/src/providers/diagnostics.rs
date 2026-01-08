@@ -6,6 +6,7 @@ use crate::cache::ReadCache;
 use crate::parsers::Dependency;
 use crate::providers::inlay_hints::{VersionStatus, compare_versions, is_local_dependency};
 use crate::registries::{VersionInfo, Vulnerability, VulnerabilitySeverity};
+use crate::utils::truncate_string;
 
 /// Create diagnostics for a list of dependencies
 ///
@@ -336,15 +337,6 @@ fn create_vulnerability_summary_diagnostic(
                 .and_then(|url| Url::parse(url).ok().map(|href| CodeDescription { href }))
         }),
         data: None,
-    }
-}
-
-/// Truncate a string to max length with ellipsis
-fn truncate_string(s: &str, max_len: usize) -> String {
-    if s.len() <= max_len {
-        s.to_string()
-    } else {
-        format!("{}...", &s[..max_len.saturating_sub(3)])
     }
 }
 

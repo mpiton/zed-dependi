@@ -4,6 +4,7 @@ mod config;
 mod parsers;
 mod providers;
 mod registries;
+mod utils;
 mod vulnerabilities;
 
 use std::path::PathBuf;

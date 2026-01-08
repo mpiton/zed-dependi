@@ -4,6 +4,7 @@ use tower_lsp::lsp_types::{InlayHint, InlayHintKind, InlayHintLabel, Position};
 
 use crate::parsers::Dependency;
 use crate::registries::{VersionInfo, VulnerabilitySeverity};
+use crate::utils::truncate_string;
 
 /// Result of comparing a dependency version with the latest available
 #[derive(Debug, Clone)]
@@ -316,15 +317,6 @@ pub fn is_local_dependency(version: &str) -> bool {
         || version.starts_with("portal:")
         // npm aliases
         || version.starts_with("npm:")
-}
-
-/// Truncate a string to max length with ellipsis
-fn truncate_string(s: &str, max_len: usize) -> String {
-    if s.len() <= max_len {
-        s.to_string()
-    } else {
-        format!("{}...", &s[..max_len.saturating_sub(3)])
-    }
 }
 
 /// Compare a dependency version with the latest available
