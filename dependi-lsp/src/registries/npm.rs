@@ -48,12 +48,6 @@
 //! - **Private packages**: Require authentication; return 401/403 without token
 //! - **Engines field**: Contains Node.js version constraints (not exposed by this client)
 //!
-//! ## Caching Strategy
-//!
-//! - **TTL**: Version data cached for 5 minutes (configurable)
-//! - **Cache keys**: Package name (including scope)
-//! - **Invalidation**: Manual or on version mismatch
-//!
 //! ## Error Handling
 //!
 //! - **Network errors**: Returned as `anyhow::Error`

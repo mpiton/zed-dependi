@@ -8,8 +8,8 @@ in dependi-lsp, including API details, rate limits, and common operations.
 | Registry | Ecosystem | Dependency File | Base URL | Rate Limit |
 |----------|-----------|-----------------|----------|------------|
 | [crates.io](#cratesio) | Rust | `Cargo.toml` | `https://crates.io/api/v1` | 1 req/s |
-| [npm](#npm) | Node.js | `package.json` | `https://registry.npmjs.org` | ~100/min |
-| [PyPI](#pypi) | Python | `requirements.txt`, `pyproject.toml` | `https://pypi.org/pypi` | ~20 req/s |
+| [npm](#npm) | Node.js | `package.json` | `https://registry.npmjs.org` | ≤1 req/s recommended |
+| [PyPI](#pypi) | Python | `requirements.txt`, `pyproject.toml` | `https://pypi.org/pypi` | No official limit |
 | [Go Proxy](#go-proxy) | Go | `go.mod` | `https://proxy.golang.org` | Fair use |
 | [Packagist](#packagist) | PHP | `composer.json` | `https://repo.packagist.org` | ~60/min |
 | [pub.dev](#pubdev) | Dart/Flutter | `pubspec.yaml` | `https://pub.dev/api` | ~100/min |
@@ -64,8 +64,8 @@ GET https://crates.io/api/v1/crates/{crate_name}
 
 #### External Links
 
-- [API Documentation](https://crates.io/data-access)
-- [Rate Limiting Policy](https://crates.io/policies#crawlers)
+- [Data Access](https://crates.io/data-access)
+- [Policies](https://crates.io/policies)
 
 ---
 
@@ -83,7 +83,7 @@ GET https://registry.npmjs.org/@scope%2fpackage-name  # Scoped packages
 
 #### Rate Limiting
 
-- **Limit:** No hard limit, but ~100/min recommended
+- **Limit:** ≤1 req/s recommended; no official per-minute limit
 - **Enforcement:** IP-based blocking for abuse
 
 #### Quirks
@@ -113,7 +113,7 @@ GET https://pypi.org/pypi/{package-name}/json
 
 #### Rate Limiting
 
-- **Limit:** ~20 requests per second
+- **Limit:** No official limit; be respectful
 - **CDN:** Fastly CDN caching
 
 #### Quirks
@@ -125,7 +125,7 @@ GET https://pypi.org/pypi/{package-name}/json
 
 #### External Links
 
-- [JSON API](https://warehouse.pypa.io/api-reference/json.html)
+- [JSON API](https://docs.pypi.org/api/json/)
 - [PEP 503](https://peps.python.org/pep-0503/)
 - [PEP 440](https://peps.python.org/pep-0440/)
 

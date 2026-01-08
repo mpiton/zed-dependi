@@ -59,13 +59,6 @@
 //! - **Checksum database**: `sum.golang.org` verifies module integrity
 //! - **Retracted versions**: Marked in `go.mod` but still listed
 //!
-//! ## Caching Strategy
-//!
-//! - **TTL**: Version list cached for 5 minutes (configurable)
-//! - **Cache keys**: Module path (case-encoded)
-//! - **Invalidation**: Manual or on version mismatch
-//! - **Version times**: Fetched in parallel (limited to 10 versions)
-//!
 //! ## Error Handling
 //!
 //! - **Network errors**: Returned as `anyhow::Error`

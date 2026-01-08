@@ -52,12 +52,6 @@
 //! - **Yanked releases**: Still downloadable but with warning
 //! - **Version ordering**: Uses PEP 440 ordering, not simple semver
 //!
-//! ## Caching Strategy
-//!
-//! - **TTL**: Version data cached for 5 minutes (configurable)
-//! - **Cache keys**: Package name (normalized)
-//! - **Invalidation**: Manual or on version mismatch
-//!
 //! ## Error Handling
 //!
 //! - **Network errors**: Returned as `anyhow::Error`

@@ -49,12 +49,6 @@
 //! - **Null safety**: Packages may indicate null-safety migration status
 //! - **Platform support**: Flutter packages may specify platform compatibility
 //!
-//! ## Caching Strategy
-//!
-//! - **TTL**: Version data cached for 5 minutes (configurable)
-//! - **Cache keys**: Package name
-//! - **Invalidation**: Manual or on version mismatch
-//!
 //! ## Error Handling
 //!
 //! - **Network errors**: Returned as `anyhow::Error`

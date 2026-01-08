@@ -50,12 +50,6 @@
 //! - **Abandoned packages**: Can specify replacement package name as string
 //! - **Multiple licenses**: Array of SPDX identifiers
 //!
-//! ## Caching Strategy
-//!
-//! - **TTL**: Version data cached for 5 minutes (configurable)
-//! - **Cache keys**: Package name (`vendor/package`)
-//! - **Invalidation**: Manual or on version mismatch
-//!
 //! ## Error Handling
 //!
 //! - **Network errors**: Returned as `anyhow::Error`

@@ -52,12 +52,6 @@
 //! - **Unlisted vs deprecated**: Unlisted hides from search; deprecated shows warning
 //! - **License**: Either `licenseExpression` (SPDX) or `licenseUrl` (legacy)
 //!
-//! ## Caching Strategy
-//!
-//! - **TTL**: Version data cached for 5 minutes (configurable)
-//! - **Cache keys**: Package ID (lowercase)
-//! - **Invalidation**: Manual or on version mismatch
-//!
 //! ## Error Handling
 //!
 //! - **Network errors**: Returned as `anyhow::Error`

@@ -50,12 +50,6 @@
 //! - **Yanked versions**: Still available but marked; users are warned
 //! - **Features**: `features` field lists Cargo feature flags (not exposed by this client)
 //!
-//! ## Caching Strategy
-//!
-//! - **TTL**: Version data cached for 5 minutes (configurable)
-//! - **Cache keys**: Crate name (normalized)
-//! - **Invalidation**: Manual or on version mismatch
-//!
 //! ## Error Handling
 //!
 //! - **Rate limiting**: Client-side enforcement + server 429 handling

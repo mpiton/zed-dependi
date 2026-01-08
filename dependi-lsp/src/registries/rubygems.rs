@@ -55,12 +55,6 @@
 //! - **Prerelease format**: Uses `.pre.1` format (not `-pre.1`)
 //! - **No deprecation flag**: RubyGems API doesn't expose deprecation status
 //!
-//! ## Caching Strategy
-//!
-//! - **TTL**: Version data cached for 5 minutes (configurable)
-//! - **Cache keys**: Gem name
-//! - **Invalidation**: Manual or on version mismatch
-//!
 //! ## Error Handling
 //!
 //! - **Network errors**: Returned as `anyhow::Error`
