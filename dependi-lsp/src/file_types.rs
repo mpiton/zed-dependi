@@ -7,19 +7,35 @@ use tower_lsp::lsp_types::Url;
 
 use crate::vulnerabilities::Ecosystem;
 
+/// Supported dependency file types.
+///
+/// Each variant corresponds to a specific package manager ecosystem
+/// and determines which parser and registry client to use.
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub enum FileType {
+    /// Rust packages (Cargo.toml)
     Cargo,
+    /// JavaScript/Node.js packages (package.json)
     Npm,
+    /// Python packages (requirements.txt, pyproject.toml)
     Python,
+    /// Go modules (go.mod)
     Go,
+    /// PHP packages (composer.json)
     Php,
+    /// Dart/Flutter packages (pubspec.yaml)
     Dart,
+    /// C#/.NET packages (*.csproj)
     Csharp,
+    /// Ruby gems (Gemfile)
     Ruby,
 }
 
 impl FileType {
+    /// Detect the file type from a document URI.
+    ///
+    /// Returns `Some(FileType)` if the URI matches a known dependency file pattern,
+    /// or `None` if the file type is not recognized.
     pub fn detect(uri: &Url) -> Option<Self> {
         let path = uri.path();
         if path.ends_with("Cargo.toml") {
@@ -47,6 +63,9 @@ impl FileType {
         }
     }
 
+    /// Convert to the corresponding vulnerability ecosystem identifier.
+    ///
+    /// Used for querying the OSV.dev API with the correct ecosystem.
     pub fn to_ecosystem(self) -> Ecosystem {
         match self {
             FileType::Cargo => Ecosystem::CratesIo,
@@ -60,6 +79,10 @@ impl FileType {
         }
     }
 
+    /// Generate a cache key for a package.
+    ///
+    /// The cache key includes the registry prefix (e.g., "crates:", "npm:")
+    /// to avoid collisions between packages with the same name in different ecosystems.
     pub fn cache_key(self, package_name: &str) -> String {
         match self {
             FileType::Cargo => format!("crates:{}", package_name),

@@ -6,25 +6,46 @@
 use serde::{Deserialize, Serialize};
 use tower_lsp::lsp_types::Url;
 
+/// Summary of vulnerabilities grouped by severity level.
+///
+/// Used to provide an overview of the vulnerability scan results.
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct VulnerabilitySummary {
+    /// Total number of vulnerabilities found.
     pub total: u32,
+    /// Number of critical severity vulnerabilities.
     pub critical: u32,
+    /// Number of high severity vulnerabilities.
     pub high: u32,
+    /// Number of medium severity vulnerabilities.
     pub medium: u32,
+    /// Number of low severity vulnerabilities.
     pub low: u32,
 }
 
+/// A single vulnerability entry in a report.
+///
+/// Contains all relevant information about a vulnerability affecting a package.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct VulnerabilityReportEntry {
+    /// Name of the affected package.
     pub package: String,
+    /// Version of the affected package.
     pub version: String,
+    /// Vulnerability identifier (e.g., CVE-2021-1234, GHSA-xxxx).
     pub id: String,
+    /// Severity level (critical, high, medium, low).
     pub severity: String,
+    /// Human-readable description of the vulnerability.
     pub description: String,
+    /// URL for more information about the vulnerability.
     pub url: Option<String>,
 }
 
+/// Generate a Markdown-formatted vulnerability report.
+///
+/// Creates a human-readable report with a summary table and detailed
+/// vulnerability entries grouped by package.
 pub fn generate_markdown_report(
     uri: &Url,
     summary: &VulnerabilitySummary,
