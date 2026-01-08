@@ -46,7 +46,7 @@ pub struct VersionInfo {
 
 #### API Endpoint
 
-```
+```text
 GET https://crates.io/api/v1/crates/{crate_name}
 ```
 
@@ -76,7 +76,7 @@ GET https://crates.io/api/v1/crates/{crate_name}
 
 #### API Endpoint
 
-```
+```text
 GET https://registry.npmjs.org/{package-name}
 GET https://registry.npmjs.org/@scope%2fpackage-name  # Scoped packages
 ```
@@ -107,7 +107,7 @@ GET https://registry.npmjs.org/@scope%2fpackage-name  # Scoped packages
 
 #### API Endpoint
 
-```
+```text
 GET https://pypi.org/pypi/{package-name}/json
 ```
 
@@ -138,7 +138,7 @@ GET https://pypi.org/pypi/{package-name}/json
 
 #### API Endpoints
 
-```
+```text
 GET https://proxy.golang.org/{module}/@v/list     # List versions
 GET https://proxy.golang.org/{module}/@latest     # Latest version
 GET https://proxy.golang.org/{module}/@v/{v}.info # Version info
@@ -170,7 +170,7 @@ GET https://proxy.golang.org/{module}/@v/{v}.info # Version info
 
 #### API Endpoint
 
-```
+```text
 GET https://repo.packagist.org/p2/{vendor}/{package}.json
 ```
 
@@ -199,7 +199,7 @@ GET https://repo.packagist.org/p2/{vendor}/{package}.json
 
 #### API Endpoint
 
-```
+```text
 GET https://pub.dev/api/packages/{package-name}
 ```
 
@@ -228,7 +228,7 @@ GET https://pub.dev/api/packages/{package-name}
 
 #### API Endpoint
 
-```
+```text
 GET https://api.nuget.org/v3/registration5-semver1/{package-id}/index.json
 ```
 
@@ -258,7 +258,7 @@ GET https://api.nuget.org/v3/registration5-semver1/{package-id}/index.json
 
 #### API Endpoints
 
-```
+```text
 GET https://rubygems.org/api/v1/gems/{gem-name}.json      # Gem info
 GET https://rubygems.org/api/v1/versions/{gem-name}.json  # All versions
 ```
