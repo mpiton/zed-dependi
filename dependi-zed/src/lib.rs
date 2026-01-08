@@ -154,7 +154,12 @@ impl DependiExtension {
             zed::download_file(&asset.download_url, &version_dir, file_type)
                 .map_err(|e| format!("Failed to download: {e}"))?;
 
-            if let Some(expected_checksum) = fetch_checksum(&release.version, &asset_name)? {
+            let checksum_name = asset_name
+                .strip_suffix(".tar.gz")
+                .or_else(|| asset_name.strip_suffix(".zip"))
+                .unwrap_or(&asset_name);
+
+            if let Some(expected_checksum) = fetch_checksum(&release.version, checksum_name)? {
                 verify_checksum(&binary_path, &expected_checksum)?;
             }
 
