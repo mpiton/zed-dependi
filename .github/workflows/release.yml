@@ -52,15 +52,19 @@ jobs:
         if: matrix.os != 'windows-latest'
         run: |
           cd dependi-lsp/target/${{ matrix.target }}/release
+          sha256sum ${{ matrix.artifact_name }} > ${{ matrix.asset_name }}.binary.sha256
           tar -czvf ${{ matrix.asset_name }}.tar.gz ${{ matrix.artifact_name }}
           mv ${{ matrix.asset_name }}.tar.gz ../../../../
+          mv ${{ matrix.asset_name }}.binary.sha256 ../../../../
 
       - name: Package (Windows)
         if: matrix.os == 'windows-latest'
         run: |
           cd dependi-lsp/target/${{ matrix.target }}/release
+          sha256sum ${{ matrix.artifact_name }} > ${{ matrix.asset_name }}.binary.sha256
           7z a ${{ matrix.asset_name }}.zip ${{ matrix.artifact_name }}
           mv ${{ matrix.asset_name }}.zip ../../../../
+          mv ${{ matrix.asset_name }}.binary.sha256 ../../../../
         shell: bash
 
       - name: Upload artifact (Unix)
@@ -68,14 +72,18 @@ jobs:
         uses: actions/upload-artifact@v6
         with:
           name: ${{ matrix.asset_name }}
-          path: ${{ matrix.asset_name }}.tar.gz
+          path: |
+            ${{ matrix.asset_name }}.tar.gz
+            ${{ matrix.asset_name }}.binary.sha256
 
       - name: Upload artifact (Windows)
         if: matrix.os == 'windows-latest'
         uses: actions/upload-artifact@v6
         with:
           name: ${{ matrix.asset_name }}
-          path: ${{ matrix.asset_name }}.zip
+          path: |
+            ${{ matrix.asset_name }}.zip
+            ${{ matrix.asset_name }}.binary.sha256
 
   release:
     needs: build
@@ -95,6 +103,7 @@ jobs:
           files: |
             artifacts/**/*.tar.gz
             artifacts/**/*.zip
+            artifacts/**/*.binary.sha256
           generate_release_notes: true
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
