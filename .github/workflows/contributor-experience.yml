@@ -64,7 +64,7 @@ A maintainer will review your PR soon. In the meantime, please make sure:
 - Your changes are documented if needed
 - You've filled out the PR template
 
-If you have any questions, feel free to ask here or in [GitHub Discussions](https://github.com/mpiton/zed-dependi/discussions).
+If you have any questions, feel free to ask here.
 
 Happy coding! 🚀`
             });
@@ -149,7 +149,7 @@ A maintainer will take a look as soon as possible.
 While you wait, you might find helpful information in:
 - [README](https://github.com/mpiton/zed-dependi#readme) - Features and configuration
 - [CONTRIBUTING.md](https://github.com/mpiton/zed-dependi/blob/main/CONTRIBUTING.md) - How to contribute
-- [Discussions](https://github.com/mpiton/zed-dependi/discussions) - Questions and ideas`
+- [Issues](https://github.com/mpiton/zed-dependi/issues) - Questions and bug reports`
             });
 
   auto-label-pr:
