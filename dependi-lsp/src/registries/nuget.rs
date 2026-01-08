@@ -1,4 +1,75 @@
-//! Client for NuGet registry (.NET packages)
+//! # NuGet Registry Client
+//!
+//! This module implements a client for [NuGet Gallery](https://www.nuget.org),
+//! the package manager for .NET packages.
+//!
+//! ## API Details
+//!
+//! - **Base URL**: `https://api.nuget.org/v3`
+//! - **API Version**: v3 (NuGet Server API)
+//! - **Authentication**: API key for publishing (not needed for reading)
+//! - **CORS**: Limited support
+//!
+//! ## Rate Limiting
+//!
+//! NuGet does not publish hard rate limits but implements:
+//!
+//! - **Fair use policy**: No hard limits for normal usage
+//! - **CDN caching**: Most responses served from Azure CDN
+//! - **Best practice**: Use conditional requests
+//!
+//! ## API Endpoints Used
+//!
+//! ### Package Registration (Metadata)
+//!
+//! - **Endpoint**: `GET /registration5-semver1/{package-id-lower}/index.json`
+//! - **Response**: JSON with registration pages containing version metadata
+//! - **Fields**:
+//!   - `items[]`: Array of registration pages
+//!   - `items[].items[]`: Array of version entries (may require fetching page)
+//!   - `catalogEntry.version`: Version string
+//!   - `catalogEntry.description`: Package description
+//!   - `catalogEntry.projectUrl`: Project homepage
+//!   - `catalogEntry.licenseExpression`: SPDX license
+//!   - `catalogEntry.listed`: Whether version is listed (unlisted = hidden)
+//!   - `catalogEntry.deprecation`: Deprecation info if deprecated
+//!   - `catalogEntry.published`: RFC 3339 publish timestamp
+//!
+//! ## Response Parsing
+//!
+//! - **Version format**: Semver with optional prerelease (`1.0.0`, `2.0.0-preview.1`)
+//! - **Date format**: RFC 3339 (`2024-01-15T10:30:00+00:00`)
+//! - **Unlisted packages**: `listed: false` (hidden from search but downloadable)
+//! - **Deprecated packages**: `deprecation` object present
+//!
+//! ## Edge Cases and Quirks
+//!
+//! - **Package ID case**: IDs are case-insensitive but URLs use lowercase
+//! - **Paged responses**: Large packages may have items in separate pages
+//! - **Version ranges**: Uses NuGet version range syntax `[1.0.0,2.0.0)`
+//! - **Framework targeting**: Packages may target multiple .NET versions
+//! - **Dependency groups**: Dependencies organized by target framework
+//! - **Unlisted vs deprecated**: Unlisted hides from search; deprecated shows warning
+//! - **License**: Either `licenseExpression` (SPDX) or `licenseUrl` (legacy)
+//!
+//! ## Caching Strategy
+//!
+//! - **TTL**: Version data cached for 5 minutes (configurable)
+//! - **Cache keys**: Package ID (lowercase)
+//! - **Invalidation**: Manual or on version mismatch
+//!
+//! ## Error Handling
+//!
+//! - **Network errors**: Returned as `anyhow::Error`
+//! - **API errors**: 404 for not found
+//! - **Timeouts**: 10 second default timeout
+//!
+//! ## External References
+//!
+//! - [NuGet Server API](https://learn.microsoft.com/en-us/nuget/api/overview)
+//! - [Package Metadata Resource](https://learn.microsoft.com/en-us/nuget/api/registration-base-url-resource)
+//! - [NuGet Versioning](https://learn.microsoft.com/en-us/nuget/concepts/package-versioning)
+//! - [Version Ranges](https://learn.microsoft.com/en-us/nuget/concepts/package-versioning#version-ranges)
 
 use std::collections::HashMap;
 use std::sync::Arc;

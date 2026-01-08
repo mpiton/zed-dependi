@@ -1,4 +1,73 @@
-//! Client for Packagist (PHP package registry)
+//! # Packagist Registry Client
+//!
+//! This module implements a client for [Packagist](https://packagist.org),
+//! the main Composer repository for PHP packages.
+//!
+//! ## API Details
+//!
+//! - **Base URL**: `https://repo.packagist.org`
+//! - **API Version**: p2 (Package API v2)
+//! - **Authentication**: Optional API token for private packages
+//! - **CORS**: Enabled for browser-based access
+//!
+//! ## Rate Limiting
+//!
+//! Packagist enforces rate limits to protect the service:
+//!
+//! - **Standard limit**: ~60 requests per minute per IP
+//! - **CDN caching**: Most package data served from CDN
+//! - **Best practice**: Use `If-Modified-Since` headers
+//!
+//! ## API Endpoints Used
+//!
+//! ### Fetch Package Info (p2 API)
+//!
+//! - **Endpoint**: `GET /p2/{vendor}/{package}.json`
+//! - **Response**: JSON with package metadata and all versions
+//! - **Fields**:
+//!   - `packages.{name}[]`: Array of version entries
+//!   - `version`: Version string
+//!   - `description`: Package description
+//!   - `homepage`: Homepage URL
+//!   - `license[]`: Array of license identifiers
+//!   - `source.url`: Repository URL
+//!   - `abandoned`: Deprecation status (bool or replacement package name)
+//!   - `time`: RFC 3339 release timestamp
+//!
+//! ## Response Parsing
+//!
+//! - **Version format**: Semver with optional `v` prefix and stability flags
+//! - **Date format**: RFC 3339 (`2024-01-15T10:30:00+00:00`)
+//! - **Dev versions**: `dev-master`, `dev-main`, `1.0.x-dev` (filtered out)
+//! - **Abandoned packages**: `abandoned` field is truthy (bool or string)
+//!
+//! ## Edge Cases and Quirks
+//!
+//! - **Package naming**: Must be `vendor/package` format (e.g., `laravel/framework`)
+//! - **Dev branches**: Prefixed with `dev-` or suffixed with `-dev` (excluded)
+//! - **Stability flags**: `@stable`, `@RC`, `@beta`, `@alpha`, `@dev`
+//! - **Version aliases**: May have `branch-alias` in `extra` field
+//! - **Abandoned packages**: Can specify replacement package name as string
+//! - **Multiple licenses**: Array of SPDX identifiers
+//!
+//! ## Caching Strategy
+//!
+//! - **TTL**: Version data cached for 5 minutes (configurable)
+//! - **Cache keys**: Package name (`vendor/package`)
+//! - **Invalidation**: Manual or on version mismatch
+//!
+//! ## Error Handling
+//!
+//! - **Network errors**: Returned as `anyhow::Error`
+//! - **API errors**: 404 for not found
+//! - **Invalid names**: Error returned if not `vendor/package` format
+//! - **Timeouts**: 10 second default timeout
+//!
+//! ## External References
+//!
+//! - [Packagist API](https://packagist.org/apidoc)
+//! - [Composer Version Constraints](https://getcomposer.org/doc/articles/versions.md)
+//! - [Composer Repositories](https://getcomposer.org/doc/05-repositories.md)
 
 use std::collections::HashMap;
 use std::sync::Arc;
@@ -20,7 +89,7 @@ pub struct PackagistRegistry {
 impl PackagistRegistry {
     /// Creates a PackagistRegistry configured with the given shared HTTP client and the default Packagist API base URL.
     ///
-    /// The registry's base URL is set to "https://repo.packagist.org".
+    /// The registry's base URL is set to `https://repo.packagist.org`.
     ///
     /// # Examples
     ///

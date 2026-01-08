@@ -1,4 +1,70 @@
-//! Client for npm registry
+//! # npm Registry Client
+//!
+//! This module implements a client for the [npm](https://www.npmjs.com) registry,
+//! the default package registry for Node.js and JavaScript packages.
+//!
+//! ## API Details
+//!
+//! - **Base URL**: `https://registry.npmjs.org`
+//! - **API Version**: Registry API (stable)
+//! - **Authentication**: Bearer token from `.npmrc` (optional)
+//! - **CORS**: Enabled for browser-based access
+//!
+//! ## Rate Limiting
+//!
+//! npm does **not** enforce hard rate limits on read operations, but implements:
+//!
+//! - **IP-based blocking**: For abusive behavior patterns
+//! - **Cloudflare protection**: May trigger CAPTCHA for suspicious traffic
+//! - **Best practice**: Keep requests under 100/minute for bulk operations
+//!
+//! ## API Endpoints Used
+//!
+//! ### Fetch Package Info
+//!
+//! - **Endpoint**: `GET /{package-name}`
+//! - **Scoped packages**: `GET /@scope%2fpackage-name` (URL encoded `/`)
+//! - **Response**: JSON with full package metadata
+//! - **Fields**:
+//!   - `dist-tags.latest`: Current stable version
+//!   - `dist-tags.next`: Latest prerelease (if exists)
+//!   - `versions{}`: Map of version string to version metadata
+//!   - `time{}`: Map of version string to publish timestamp
+//!
+//! ## Response Parsing
+//!
+//! - **Version format**: Semver with optional prerelease (`-alpha`, `-beta`, `-canary`)
+//! - **Date format**: RFC 3339 (`2024-01-15T10:30:00.000Z`)
+//! - **Deprecated packages**: `deprecated` field in version metadata (string message)
+//! - **License**: Can be string or object with `type` field
+//! - **Repository**: Can be string or object with `url` field
+//!
+//! ## Edge Cases and Quirks
+//!
+//! - **Scoped packages**: Must URL-encode the slash (`@scope/pkg` → `@scope%2fpkg`)
+//! - **Repository URL formats**: May include `git+https://`, `git://`, or `.git` suffix
+//! - **Large packages**: May have thousands of versions (e.g., lodash)
+//! - **Unpublished packages**: Return 404 but may have been available previously
+//! - **Private packages**: Require authentication; return 401/403 without token
+//! - **Engines field**: Contains Node.js version constraints (not exposed by this client)
+//!
+//! ## Caching Strategy
+//!
+//! - **TTL**: Version data cached for 5 minutes (configurable)
+//! - **Cache keys**: Package name (including scope)
+//! - **Invalidation**: Manual or on version mismatch
+//!
+//! ## Error Handling
+//!
+//! - **Network errors**: Returned as `anyhow::Error`
+//! - **API errors**: 404 for not found, 401/403 for auth issues
+//! - **Timeouts**: 10 second default timeout
+//!
+//! ## External References
+//!
+//! - [npm Registry API](https://github.com/npm/registry/blob/main/docs/REGISTRY-API.md)
+//! - [Package Metadata Specification](https://github.com/npm/registry/blob/main/docs/responses/package-metadata.md)
+//! - [npm CLI Documentation](https://docs.npmjs.com/cli)
 
 use std::collections::HashMap;
 use std::sync::Arc;
@@ -21,7 +87,7 @@ impl NpmRegistry {
     /// Constructs an NpmRegistry that uses the provided shared HTTP client and the default npm registry base URL.
     ///
     /// The supplied `client` is used for all HTTP requests performed by the registry; the base URL is set to
-    /// "https://registry.npmjs.org".
+    /// `https://registry.npmjs.org`.
     ///
     /// # Examples
     ///

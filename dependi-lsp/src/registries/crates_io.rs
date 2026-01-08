@@ -1,4 +1,72 @@
-//! Client for crates.io registry
+//! # crates.io Registry Client
+//!
+//! This module implements a client for the [crates.io](https://crates.io) registry,
+//! the official Rust package registry managed by the Rust Foundation.
+//!
+//! ## API Details
+//!
+//! - **Base URL**: `https://crates.io/api/v1`
+//! - **API Version**: v1 (stable)
+//! - **Authentication**: Optional API token for higher rate limits
+//! - **CORS**: Enabled for browser-based access
+//!
+//! ## Rate Limiting
+//!
+//! The crates.io API enforces **strict rate limits** to protect the service:
+//!
+//! - **Anonymous**: 1 request per second (enforced by this client)
+//! - **Authenticated**: Higher limits with API token
+//! - **Headers**: `X-RateLimit-Remaining`, `X-RateLimit-Reset`
+//! - **Backoff**: 429 responses include `Retry-After` header
+//!
+//! This client implements a built-in rate limiter that enforces the 1 req/s limit.
+//! **Exceeding the rate limit may result in IP-based blocking.**
+//!
+//! ## API Endpoints Used
+//!
+//! ### Fetch Crate Info
+//!
+//! - **Endpoint**: `GET /api/v1/crates/{crate_name}`
+//! - **Response**: JSON containing crate metadata and all versions
+//! - **Fields**:
+//!   - `crate.max_stable_version`: Latest stable release
+//!   - `crate.description`: Package description
+//!   - `crate.homepage`: Optional homepage URL
+//!   - `crate.repository`: Optional repository URL
+//!   - `versions[]`: Array of all published versions
+//!
+//! ## Response Parsing
+//!
+//! - **Version format**: Semver with optional pre-release tags (`-alpha`, `-beta`, `-rc`)
+//! - **Date format**: RFC 3339 (`2024-01-15T10:30:00Z`)
+//! - **Yanked versions**: Marked with `yanked: true` in versions array
+//! - **License**: Per-version field (SPDX expression)
+//!
+//! ## Edge Cases and Quirks
+//!
+//! - **Name normalization**: Underscores and hyphens are equivalent (`foo-bar` = `foo_bar`)
+//! - **Case sensitivity**: Names are case-insensitive but stored lowercase
+//! - **404 responses**: Returned for both "not found" and "private crates"
+//! - **Yanked versions**: Still available but marked; users are warned
+//! - **Features**: `features` field lists Cargo feature flags (not exposed by this client)
+//!
+//! ## Caching Strategy
+//!
+//! - **TTL**: Version data cached for 5 minutes (configurable)
+//! - **Cache keys**: Crate name (normalized)
+//! - **Invalidation**: Manual or on version mismatch
+//!
+//! ## Error Handling
+//!
+//! - **Rate limiting**: Client-side enforcement + server 429 handling
+//! - **Network errors**: Returned as `anyhow::Error`
+//! - **API errors**: 404 for not found, 429 for rate limit, 5xx for server issues
+//!
+//! ## External References
+//!
+//! - [crates.io API Documentation](https://crates.io/data-access)
+//! - [Rate Limiting Policy](https://crates.io/policies#crawlers)
+//! - [Crate Metadata Schema](https://doc.rust-lang.org/cargo/reference/registry-index.html)
 
 use std::collections::HashMap;
 use std::sync::Arc;
