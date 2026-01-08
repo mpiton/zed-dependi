@@ -265,7 +265,10 @@ pub struct DependiBackend {
     osv_client: Arc<OsvClient>,
     vuln_cache: Arc<VulnerabilityCache>,
     /// Debounce tasks for did_change notifications (per-URI)
-    debounce_tasks: Arc<DashMap<Url, tokio::task::JoinHandle<()>>>,
+    /// Maps URI -> (generation, JoinHandle) for safe cleanup with racing tasks
+    debounce_tasks: Arc<DashMap<Url, (u64, tokio::task::JoinHandle<()>)>>,
+    /// Generation counter for debounce tasks (incremented on each spawn)
+    debounce_generation: Arc<std::sync::atomic::AtomicU64>,
     /// Pending content changes awaiting debounce completion
     pending_changes: Arc<DashMap<Url, String>>,
 }
@@ -317,6 +320,7 @@ impl DependiBackend {
             osv_client: Arc::new(OsvClient::default()),
             vuln_cache: Arc::new(VulnerabilityCache::new()),
             debounce_tasks: Arc::new(DashMap::new()),
+            debounce_generation: Arc::new(std::sync::atomic::AtomicU64::new(0)),
             pending_changes: Arc::new(DashMap::new()),
         }
     }
@@ -661,6 +665,8 @@ impl LanguageServer for DependiBackend {
     }
 
     async fn did_change(&self, params: DidChangeTextDocumentParams) {
+        use std::sync::atomic::Ordering;
+
         let uri = params.text_document.uri;
 
         // With FULL sync, we get the entire document content
@@ -672,9 +678,12 @@ impl LanguageServer for DependiBackend {
                 .insert(uri.clone(), change.text.clone());
 
             // Cancel any existing debounce task for this URI
-            if let Some((_, handle)) = self.debounce_tasks.remove(&uri) {
+            if let Some((_, (_, handle))) = self.debounce_tasks.remove(&uri) {
                 handle.abort();
             }
+
+            // Increment generation for this new task
+            let generation = self.debounce_generation.fetch_add(1, Ordering::SeqCst) + 1;
 
             // Get debounce delay from config (default 200ms)
             let debounce_ms = self
@@ -707,12 +716,13 @@ impl LanguageServer for DependiBackend {
                     pending_changes.remove(&uri_clone);
                 }
 
-                // Clean up task handle
-                debounce_tasks.remove(&uri_clone);
+                // Clean up task handle only if generation matches (no newer task spawned)
+                debounce_tasks
+                    .remove_if(&uri_clone, |_, (stored_gen, _)| *stored_gen == generation);
             });
 
-            // Store new task handle
-            self.debounce_tasks.insert(uri, handle);
+            // Store new task handle with generation
+            self.debounce_tasks.insert(uri, (generation, handle));
         }
     }
 
@@ -724,7 +734,7 @@ impl LanguageServer for DependiBackend {
             tracing::debug!("Document saved: {}", uri);
 
             // Cancel any pending debounce task for this URI (save bypasses debounce)
-            if let Some((_, handle)) = self.debounce_tasks.remove(&uri) {
+            if let Some((_, (_, handle))) = self.debounce_tasks.remove(&uri) {
                 handle.abort();
             }
             self.pending_changes.remove(&uri);
@@ -739,7 +749,7 @@ impl LanguageServer for DependiBackend {
         tracing::debug!("Document closed: {}", uri);
 
         // Cancel any pending debounce task for this URI
-        if let Some((_, handle)) = self.debounce_tasks.remove(&uri) {
+        if let Some((_, (_, handle))) = self.debounce_tasks.remove(&uri) {
             handle.abort();
         }
         self.pending_changes.remove(&uri);
