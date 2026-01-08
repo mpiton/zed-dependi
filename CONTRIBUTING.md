@@ -376,8 +376,8 @@ By contributing to Dependi, you agree that your contributions will be licensed u
 
 ## Questions?
 
-- Open a GitHub Discussion for questions
-- Check existing issues and discussions first
+- Open a GitHub Issue for questions
+- Check existing issues first
 - Be specific and provide context
 
 Thank you for contributing to Dependi!
