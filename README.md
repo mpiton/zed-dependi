@@ -417,6 +417,284 @@ security-scan:
 └─────────────────────────────────────────────────────────────┘
 ```
 
+## Troubleshooting
+
+### LSP Server Not Starting
+
+**Symptoms:**
+- No inlay hints or diagnostics appear
+- No completions for dependency versions
+- Extension seems inactive
+
+**Solutions:**
+1. Check Zed's extension panel to verify Dependi is installed and enabled
+2. View Zed logs for errors: run `zed --foreground` from terminal
+3. Reinstall the extension from Zed Extensions marketplace
+4. Check if firewall/proxy is blocking network requests to package registries
+
+### LSP Server Crashes or Freezes
+
+**Symptoms:**
+- Editor becomes unresponsive when opening dependency files
+- LSP process repeatedly restarts
+- High memory usage
+
+**Solutions:**
+1. Clear the cache directory and restart Zed:
+   ```bash
+   # Linux
+   rm -rf ~/.cache/dependi/
+
+   # macOS
+   rm -rf ~/Library/Caches/dependi/
+
+   # Windows
+   rmdir /s %LOCALAPPDATA%\dependi
+   ```
+2. Update to the latest Dependi version
+3. Check if the issue occurs with a specific dependency file
+4. File a bug report with reproduction steps
+
+### Outdated Cache Data
+
+**Symptoms:**
+- Recently published packages not showing as latest
+- Old version information displayed
+- Known updates not appearing
+
+**Solutions:**
+1. Cache automatically refreshes after 1 hour (default TTL)
+2. Clear cache manually to force refresh:
+   ```bash
+   rm -rf ~/.cache/dependi/
+   ```
+3. Restart Zed after clearing cache
+4. Verify the registry is accessible (try visiting crates.io, npmjs.com, etc.)
+
+### Registry Rate Limiting
+
+**Symptoms:**
+- Intermittent failures fetching package info
+- `? Unknown` hints appearing temporarily
+- Slow responses when opening files
+
+**Solutions:**
+1. Wait a few minutes for rate limits to reset
+2. The cache reduces API calls - avoid clearing cache unnecessarily
+3. For npm, consider setting up authentication (see registry documentation)
+4. Large monorepos may trigger rate limits - be patient on first load
+
+### Network/Proxy Issues
+
+**Symptoms:**
+- All package lookups failing
+- Timeout errors in logs
+- Works on some networks but not others
+
+**Solutions:**
+1. Configure system proxy settings (Dependi uses system proxy)
+2. Ensure registry URLs are allowed through corporate firewall:
+   - `https://crates.io`
+   - `https://registry.npmjs.org`
+   - `https://pypi.org`
+   - `https://proxy.golang.org`
+   - `https://packagist.org`
+   - `https://pub.dev`
+   - `https://api.nuget.org`
+   - `https://rubygems.org`
+   - `https://api.osv.dev` (vulnerability scanning)
+3. Check DNS resolution for registry domains
+4. Try temporarily disabling VPN if using one
+
+### Configuration Not Applying
+
+**Symptoms:**
+- Custom settings in `settings.json` are ignored
+- Default behavior despite configuration changes
+
+**Solutions:**
+1. Verify JSON syntax is valid in `settings.json`
+2. Ensure settings are under the correct path:
+   ```json
+   {
+     "lsp": {
+       "dependi": {
+         "initialization_options": {
+           // your settings here
+         }
+       }
+     }
+   }
+   ```
+3. Restart Zed after configuration changes
+4. Check for typos in setting names (see Configuration Options table above)
+
+## FAQ
+
+### How does the cache work?
+
+Dependi uses a hybrid caching system:
+- **Memory cache**: Fast access during the current session
+- **SQLite cache**: Persistent storage in the system cache directory:
+  - Linux: `~/.cache/dependi/cache.db`
+  - macOS: `~/Library/Caches/dependi/cache.db`
+  - Windows: `%LOCALAPPDATA%\dependi\cache.db`
+
+Cache entries expire after 1 hour by default (configurable via `cache.ttl_secs`). Vulnerability data is cached for 6 hours. When you open a dependency file, cached data is used immediately while fresh data is fetched in the background.
+
+### How do I clear the cache?
+
+Delete the cache directory:
+```bash
+# Linux
+rm -rf ~/.cache/dependi/
+
+# macOS
+rm -rf ~/Library/Caches/dependi/
+
+# Windows
+rmdir /s %LOCALAPPDATA%\dependi
+```
+Then restart Zed. The cache will rebuild as you open dependency files.
+
+### Can I use this offline?
+
+Yes, with limitations. If packages were previously cached, their information remains available offline until the cache expires. New packages or those not in cache won't have version information. For fully offline work, consider increasing the cache TTL:
+```json
+{
+  "lsp": {
+    "dependi": {
+      "initialization_options": {
+        "cache": {
+          "ttl_secs": 86400
+        }
+      }
+    }
+  }
+}
+```
+
+### Which package registries are supported?
+
+| Language | Registry | URL |
+|----------|----------|-----|
+| Rust | crates.io | https://crates.io |
+| JavaScript/TypeScript | npm | https://registry.npmjs.org |
+| Python | PyPI | https://pypi.org |
+| Go | Go Proxy | https://proxy.golang.org |
+| PHP | Packagist | https://packagist.org |
+| Dart/Flutter | pub.dev | https://pub.dev |
+| C#/.NET | NuGet | https://api.nuget.org |
+| Ruby | RubyGems | https://rubygems.org |
+
+### What data does the extension collect?
+
+Dependi:
+- Fetches package metadata from public registries
+- Queries OSV.dev API for vulnerability information
+- Caches all data locally on your machine
+- Does **NOT** send your code, file contents, or personal data anywhere
+- Only makes requests to official package registries and OSV.dev
+
+### How does vulnerability scanning work?
+
+Dependi queries the [OSV.dev](https://osv.dev) API (Google's Open Source Vulnerability database) for each of your dependencies. The results show:
+- **Severity levels**: Critical, High, Medium, Low
+- **CVE/Advisory IDs** in hover tooltips
+- **Diagnostic markers** in the editor
+
+Configure minimum severity level with `security.min_severity`:
+```json
+{
+  "lsp": {
+    "dependi": {
+      "initialization_options": {
+        "security": {
+          "min_severity": "high"
+        }
+      }
+    }
+  }
+}
+```
+
+### How do I disable specific features?
+
+Use `initialization_options` in your Zed settings:
+```json
+{
+  "lsp": {
+    "dependi": {
+      "initialization_options": {
+        "inlay_hints": { "enabled": false },
+        "diagnostics": { "enabled": false },
+        "security": { "enabled": false }
+      }
+    }
+  }
+}
+```
+
+### How do I ignore certain packages?
+
+Use the `ignore` setting with glob patterns:
+```json
+{
+  "lsp": {
+    "dependi": {
+      "initialization_options": {
+        "ignore": ["internal-*", "my-private-pkg", "@company/*"]
+      }
+    }
+  }
+}
+```
+
+### Why do some packages show "? Unknown"?
+
+This can happen when:
+- The package doesn't exist on the registry
+- Network request failed or timed out
+- Registry is temporarily unavailable
+- Package name has a typo
+
+Check your network connection and verify the package exists on its registry.
+
+### Can I see outdated packages without inlay hints?
+
+Yes! Even with inlay hints disabled, diagnostics will highlight outdated dependencies. Enable diagnostics in settings:
+```json
+{
+  "lsp": {
+    "dependi": {
+      "initialization_options": {
+        "diagnostics": { "enabled": true }
+      }
+    }
+  }
+}
+```
+
+### How do I report a bug or request a feature?
+
+1. Check [existing issues](https://github.com/mpiton/zed-dependi/issues) first
+2. Open a new issue with:
+   - Dependi version
+   - Zed version
+   - Operating system
+   - Steps to reproduce
+   - Expected vs actual behavior
+   - Relevant logs (`zed --foreground`)
+
+### How do I contribute?
+
+See [CONTRIBUTING.md](CONTRIBUTING.md) for guidelines. Briefly:
+1. Fork the repository
+2. Create a feature branch
+3. Make changes and add tests
+4. Run `cargo test` and `cargo clippy`
+5. Submit a pull request
+
 ## Roadmap
 
 - [x] **v0.1.0 (MVP)**: Cargo.toml + package.json support with inlay hints
