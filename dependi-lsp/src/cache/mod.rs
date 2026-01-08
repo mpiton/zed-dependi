@@ -1,4 +1,15 @@
 //! Cache layer for package version information
+//!
+//! This module provides traits and implementations for caching package
+//! metadata. The cache layer uses a trait hierarchy:
+//!
+//! - **ReadCache**: For read-only cache operations
+//! - **WriteCache**: Extends ReadCache with write operations
+//!
+//! This separation allows for:
+//! - Read-only cache views for providers that don't need to write
+//! - Dependency injection with minimal interface requirements
+//! - Clear separation of concerns
 
 use std::fmt::Display;
 use std::sync::Arc;
@@ -12,16 +23,68 @@ pub mod sqlite;
 
 pub use sqlite::SqliteCache;
 
-/// Trait for cache implementations
-pub trait Cache: Send + Sync {
+/// Trait for read-only cache operations
+///
+/// This trait defines the minimal interface for reading cached values.
+/// Implementations can provide additional write operations via the
+/// [`WriteCache`] trait.
+pub trait ReadCache: Send + Sync {
     /// Get a value from the cache
+    ///
+    /// Returns `None` if the key doesn't exist or the entry is expired.
     fn get(&self, key: &str) -> Option<VersionInfo>;
+
+    /// Check if a key exists in the cache (without fetching the value)
+    #[allow(dead_code)]
+    fn contains(&self, key: &str) -> bool {
+        self.get(key).is_some()
+    }
 }
 
-// Implement Cache for Arc<T> where T: Cache
-impl<T: Cache> Cache for Arc<T> {
+/// Trait for writeable cache operations
+///
+/// This trait extends [`ReadCache`] with the ability to insert and update
+/// cache entries. Caches that support both read and write operations should
+/// implement this trait.
+pub trait WriteCache: ReadCache {
+    /// Insert a value into the cache
+    ///
+    /// If a value with the same key already exists, it will be overwritten.
+    fn insert(&self, key: String, value: VersionInfo);
+
+    /// Remove a value from the cache
+    #[allow(dead_code)]
+    fn remove(&self, key: &str);
+
+    /// Clear all entries from the cache
+    #[allow(dead_code)]
+    fn clear(&self);
+}
+
+#[deprecated(since = "0.1.0", note = "Use ReadCache instead")]
+pub use ReadCache as Cache;
+
+impl<T: ReadCache> ReadCache for Arc<T> {
     fn get(&self, key: &str) -> Option<VersionInfo> {
         (**self).get(key)
+    }
+
+    fn contains(&self, key: &str) -> bool {
+        (**self).contains(key)
+    }
+}
+
+impl<T: WriteCache> WriteCache for Arc<T> {
+    fn insert(&self, key: String, value: VersionInfo) {
+        (**self).insert(key, value)
+    }
+
+    fn remove(&self, key: &str) {
+        (**self).remove(key)
+    }
+
+    fn clear(&self) {
+        (**self).clear()
     }
 }
 
@@ -63,9 +126,10 @@ impl MemoryCache {
             ttl: DEFAULT_TTL,
         }
     }
+}
 
-    /// Get a value from the cache
-    pub fn get(&self, key: &str) -> Option<VersionInfo> {
+impl ReadCache for MemoryCache {
+    fn get(&self, key: &str) -> Option<VersionInfo> {
         self.entries.get(key).and_then(|entry| {
             if entry.is_expired() {
                 None
@@ -74,9 +138,10 @@ impl MemoryCache {
             }
         })
     }
+}
 
-    /// Insert a value into the cache
-    pub fn insert(&self, key: String, value: VersionInfo) {
+impl WriteCache for MemoryCache {
+    fn insert(&self, key: String, value: VersionInfo) {
         self.entries.insert(
             key,
             CacheEntry {
@@ -86,15 +151,20 @@ impl MemoryCache {
             },
         );
     }
-}
 
-impl Cache for MemoryCache {
-    fn get(&self, key: &str) -> Option<VersionInfo> {
-        self.get(key)
+    fn remove(&self, key: &str) {
+        self.entries.remove(key);
+    }
+
+    fn clear(&self) {
+        self.entries.clear();
     }
 }
 
 impl MemoryCache {
+    /// Remove all expired entries from the cache
+    ///
+    /// Returns the number of entries removed.
     pub fn cleanup_expired(&self) -> usize {
         let before = self.entries.len();
         self.entries.retain(|_, entry| !entry.is_expired());
@@ -109,6 +179,9 @@ impl MemoryCache {
         removed
     }
 
+    /// Get statistics about the cache contents
+    ///
+    /// Returns counts of total, expired, and valid entries.
     pub fn stats(&self) -> CacheStats {
         let total = self.entries.len();
         let expired = self.entries.iter().filter(|e| e.is_expired()).count();
@@ -119,16 +192,19 @@ impl MemoryCache {
         }
     }
 
+    /// Get the number of entries in the cache (including expired)
     #[cfg(test)]
     pub fn len(&self) -> usize {
         self.entries.len()
     }
 
+    /// Check if the cache is empty
     #[cfg(test)]
     pub fn is_empty(&self) -> bool {
         self.entries.is_empty()
     }
 
+    /// Create a new cache with custom TTL
     #[cfg(test)]
     pub fn with_ttl(ttl: Duration) -> Self {
         Self {
@@ -138,10 +214,14 @@ impl MemoryCache {
     }
 }
 
+/// Statistics about cache contents
 #[derive(Debug, Clone)]
 pub struct CacheStats {
+    /// Total number of entries in the cache
     pub total_entries: usize,
+    /// Number of expired entries
     pub expired_entries: usize,
+    /// Number of valid (non-expired) entries
     pub valid_entries: usize,
 }
 
@@ -193,6 +273,7 @@ impl HybridCache {
         Self { memory, sqlite }
     }
 
+    /// Spawn a background task that periodically cleans up expired entries
     fn spawn_cleanup_task(memory: MemoryCache, sqlite: Option<Arc<SqliteCache>>) {
         tokio::spawn(async move {
             let mut interval = tokio::time::interval(CLEANUP_INTERVAL);
@@ -223,9 +304,10 @@ impl HybridCache {
             }
         });
     }
+}
 
-    /// Get a value from the cache (memory first, then SQLite)
-    pub fn get(&self, key: &str) -> Option<VersionInfo> {
+impl ReadCache for HybridCache {
+    fn get(&self, key: &str) -> Option<VersionInfo> {
         // Fast path: check memory cache first
         if let Some(value) = self.memory.get(key) {
             return Some(value);
@@ -242,22 +324,28 @@ impl HybridCache {
 
         None
     }
+}
 
-    /// Insert a value into both caches
-    pub fn insert(&self, key: String, value: VersionInfo) {
-        // Insert into memory cache
+impl WriteCache for HybridCache {
+    fn insert(&self, key: String, value: VersionInfo) {
         self.memory.insert(key.clone(), value.clone());
-
-        // Insert into SQLite cache
         if let Some(ref sqlite) = self.sqlite {
             sqlite.insert(key, value);
         }
     }
-}
 
-impl Cache for HybridCache {
-    fn get(&self, key: &str) -> Option<VersionInfo> {
-        self.get(key)
+    fn remove(&self, key: &str) {
+        self.memory.remove(key);
+        if let Some(ref sqlite) = self.sqlite {
+            sqlite.remove(key);
+        }
+    }
+
+    fn clear(&self) {
+        self.memory.clear();
+        if let Some(ref sqlite) = self.sqlite {
+            sqlite.clear();
+        }
     }
 }
 

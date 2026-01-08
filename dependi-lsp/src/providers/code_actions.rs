@@ -5,7 +5,7 @@ use std::collections::HashMap;
 use tower_lsp::lsp_types::*;
 
 use crate::backend::FileType;
-use crate::cache::Cache;
+use crate::cache::ReadCache;
 use crate::parsers::Dependency;
 use crate::providers::inlay_hints::{VersionStatus, compare_versions};
 
@@ -87,7 +87,7 @@ fn normalize_version(version: &str) -> String {
 /// Create code actions for dependencies in the given range
 pub fn create_code_actions(
     dependencies: &[Dependency],
-    cache: &impl Cache,
+    cache: &impl ReadCache,
     uri: &Url,
     range: Range,
     file_type: FileType,
@@ -111,7 +111,7 @@ pub fn create_code_actions(
 /// Create an "Update to X.Y.Z" code action for a dependency
 fn create_update_action(
     dep: &Dependency,
-    cache: &impl Cache,
+    cache: &impl ReadCache,
     uri: &Url,
     file_type: FileType,
     cache_key_fn: impl Fn(&str) -> String,
@@ -170,7 +170,7 @@ fn create_update_action(
 /// Create an "Update All Dependencies" code action when 2+ updates are available
 fn create_update_all_action(
     dependencies: &[Dependency],
-    cache: &impl Cache,
+    cache: &impl ReadCache,
     uri: &Url,
     file_type: FileType,
     cache_key_fn: impl Fn(&str) -> String,
@@ -272,7 +272,7 @@ fn format_version(version: &str, file_type: FileType) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::cache::MemoryCache;
+    use crate::cache::{MemoryCache, WriteCache};
     use crate::registries::VersionInfo;
 
     fn create_test_dependency(name: &str, version: &str, line: u32) -> Dependency {

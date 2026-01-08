@@ -7,7 +7,7 @@ use tower_lsp::jsonrpc::Result;
 use tower_lsp::lsp_types::*;
 use tower_lsp::{Client, LanguageServer};
 
-use crate::cache::HybridCache;
+use crate::cache::{HybridCache, ReadCache, WriteCache};
 use crate::config::Config;
 use crate::parsers::cargo::CargoParser;
 use crate::parsers::csharp::CsharpParser;

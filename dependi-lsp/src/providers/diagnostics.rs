@@ -2,7 +2,7 @@
 
 use tower_lsp::lsp_types::*;
 
-use crate::cache::Cache;
+use crate::cache::ReadCache;
 use crate::parsers::Dependency;
 use crate::providers::inlay_hints::{VersionStatus, compare_versions, is_local_dependency};
 use crate::registries::{VersionInfo, Vulnerability, VulnerabilitySeverity};
@@ -13,7 +13,7 @@ use crate::registries::{VersionInfo, Vulnerability, VulnerabilitySeverity};
 /// at or above the specified severity level.
 pub fn create_diagnostics(
     dependencies: &[Dependency],
-    cache: &impl Cache,
+    cache: &impl ReadCache,
     cache_key_fn: impl Fn(&str) -> String,
     min_severity: Option<VulnerabilitySeverity>,
 ) -> Vec<Diagnostic> {
@@ -83,7 +83,7 @@ fn meets_severity_threshold(severity: &VulnerabilitySeverity, min: &Vulnerabilit
 /// Create a diagnostic for an outdated dependency
 fn create_outdated_diagnostic(
     dep: &Dependency,
-    cache: &impl Cache,
+    cache: &impl ReadCache,
     cache_key_fn: impl Fn(&str) -> String,
 ) -> Option<Diagnostic> {
     let cache_key = cache_key_fn(&dep.name);
@@ -351,7 +351,7 @@ fn truncate_string(s: &str, max_len: usize) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::cache::MemoryCache;
+    use crate::cache::{MemoryCache, WriteCache};
     use crate::registries::VersionInfo;
 
     fn create_test_dependency(name: &str, version: &str, line: u32) -> Dependency {

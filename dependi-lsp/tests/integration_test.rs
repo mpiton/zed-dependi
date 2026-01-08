@@ -1,6 +1,6 @@
 //! Integration tests for dependi-lsp
 
-use dependi_lsp::cache::MemoryCache;
+use dependi_lsp::cache::{MemoryCache, ReadCache, WriteCache};
 use dependi_lsp::parsers::Parser;
 use dependi_lsp::parsers::cargo::CargoParser;
 use dependi_lsp::parsers::npm::NpmParser;

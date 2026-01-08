@@ -3,7 +3,7 @@
 use chrono::{DateTime, Utc};
 use tower_lsp::lsp_types::*;
 
-use crate::cache::Cache;
+use crate::cache::ReadCache;
 use crate::parsers::Dependency;
 
 /// Format a release date as a human-readable age string
@@ -54,7 +54,7 @@ pub fn format_release_age(released_at: DateTime<Utc>) -> String {
 pub fn get_completions(
     dependencies: &[Dependency],
     position: Position,
-    cache: &impl Cache,
+    cache: &impl ReadCache,
     cache_key_fn: impl Fn(&str) -> String,
 ) -> Option<Vec<CompletionItem>> {
     // Find if we're inside a version field
@@ -136,7 +136,7 @@ pub fn get_completions(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::cache::MemoryCache;
+    use crate::cache::{MemoryCache, WriteCache};
     use crate::registries::VersionInfo;
     use chrono::Duration;
     use std::collections::HashMap;
