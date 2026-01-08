@@ -209,6 +209,170 @@ Configure Dependi in your Zed `settings.json`:
 | `security.show_diagnostics` | bool | `true` | Show vulnerability diagnostics |
 | `security.min_severity` | string | `"low"` | Minimum severity to report (low/medium/high/critical) |
 
+## CI/CD Integration
+
+The dependi-lsp provides a standalone CLI scan command for integrating vulnerability scanning into your CI/CD pipelines.
+
+### CLI Scan Command
+
+```bash
+dependi-lsp scan --file <path> [options]
+```
+
+#### Options
+
+| Option | Short | Default | Description |
+|--------|-------|---------|-------------|
+| `--file <path>` | `-f` | required | Path to dependency file to scan |
+| `--output <format>` | `-o` | `summary` | Output format: `summary`, `json`, `markdown` |
+| `--min-severity <level>` | `-m` | `low` | Minimum severity to report: `low`, `medium`, `high`, `critical` |
+| `--fail-on-vulns` | | `true` | Exit with code 1 if vulnerabilities are found |
+
+#### Supported Files
+
+- Rust: `Cargo.toml`
+- JavaScript/TypeScript: `package.json`
+- Python: `requirements.txt`, `pyproject.toml`
+- Go: `go.mod`
+- PHP: `composer.json`
+- Dart/Flutter: `pubspec.yaml`
+- C#/.NET: `*.csproj`
+
+#### Exit Codes
+
+| Code | Meaning |
+|------|---------|
+| `0` | Success - no vulnerabilities found (or `--fail-on-vulns=false`) |
+| `1` | Failure - vulnerabilities found, file error, or network error |
+
+### Output Examples
+
+#### Summary Output (default)
+
+```bash
+dependi-lsp scan --file Cargo.toml
+```
+
+```
+Vulnerability Scan Results for Cargo.toml
+
+  ⚠ Critical: 0
+  ▲ High:     1
+  ● Medium:   2
+  ○ Low:      0
+  ─────────────
+  Total:      3
+
+⚠ 3 vulnerabilities found!
+```
+
+#### JSON Output
+
+```bash
+dependi-lsp scan --file Cargo.toml --output json
+```
+
+```json
+{
+  "file": "Cargo.toml",
+  "summary": {
+    "total": 3,
+    "critical": 0,
+    "high": 1,
+    "medium": 2,
+    "low": 0
+  },
+  "vulnerabilities": [
+    {
+      "package": "tokio",
+      "version": "1.35.0",
+      "id": "RUSTSEC-2024-0001",
+      "severity": "high",
+      "description": "Race condition in tokio::time",
+      "url": "https://rustsec.org/advisories/RUSTSEC-2024-0001"
+    }
+  ]
+}
+```
+
+#### Markdown Output
+
+```bash
+dependi-lsp scan --file Cargo.toml --output markdown
+```
+
+Generates a formatted report with severity table and detailed vulnerability listings.
+
+### CI/CD Pipeline Examples
+
+#### GitHub Actions
+
+Create `.github/workflows/security-scan.yml`:
+
+```yaml
+name: Security Scan
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+jobs:
+  scan:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Install dependi-lsp
+        run: cargo install --git https://github.com/mpiton/zed-dependi --bin dependi-lsp
+
+      - name: Scan dependencies
+        run: dependi-lsp scan --file Cargo.toml --min-severity high
+
+      - name: Generate report
+        if: always()
+        run: |
+          dependi-lsp scan --file Cargo.toml --output markdown > security-report.md
+
+      - name: Upload report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: security-report
+          path: security-report.md
+```
+
+#### GitLab CI
+
+Add to `.gitlab-ci.yml`:
+
+```yaml
+security-scan:
+  stage: test
+  image: rust:latest
+  script:
+    - cargo install --git https://github.com/mpiton/zed-dependi --bin dependi-lsp
+    - dependi-lsp scan --file Cargo.toml --min-severity high
+  artifacts:
+    when: always
+    paths:
+      - security-report.md
+    reports:
+      sast: security-report.json
+  allow_failure: false
+```
+
+### Best Practices
+
+1. **Block on High/Critical**: Use `--min-severity high` to fail builds only on serious vulnerabilities
+2. **Generate Reports**: Use `--output markdown` or `--output json` for audit trails
+3. **Scheduled Scans**: Run daily scans to catch newly disclosed vulnerabilities
+4. **Multiple Files**: Scan all dependency files in monorepos
+
 ## How It Works
 
 1. When you open a dependency file, the LSP parses it to extract dependencies
