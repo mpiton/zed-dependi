@@ -58,18 +58,24 @@ impl Default for DiagnosticsConfig {
     }
 }
 
+/// Default debounce delay for did_change notifications (200ms)
+const DEFAULT_DEBOUNCE_MS: u64 = 200;
+
 /// Cache configuration
 #[derive(Debug, Clone, Deserialize)]
 #[serde(default)]
 pub struct CacheConfig {
     /// Cache TTL in seconds
     pub ttl_secs: u64,
+    /// Debounce delay for did_change notifications in milliseconds
+    pub debounce_ms: u64,
 }
 
 impl Default for CacheConfig {
     fn default() -> Self {
         Self {
             ttl_secs: DEFAULT_CACHE_TTL_SECS,
+            debounce_ms: DEFAULT_DEBOUNCE_MS,
         }
     }
 }
@@ -250,6 +256,7 @@ mod tests {
     fn test_cache_config_defaults() {
         let config = CacheConfig::default();
         assert_eq!(config.ttl_secs, DEFAULT_CACHE_TTL_SECS);
+        assert_eq!(config.debounce_ms, DEFAULT_DEBOUNCE_MS);
     }
 
     #[test]
