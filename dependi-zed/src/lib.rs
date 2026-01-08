@@ -1,13 +1,23 @@
+//! Zed extension for Dependi - dependency management with version hints,
+//! updates, and vulnerability detection.
+
 use sha2::{Digest, Sha256};
 use zed_extension_api::{
     self as zed, LanguageServerId, Result,
     http_client::{HttpMethod, HttpRequest, RedirectPolicy},
 };
 
+/// The Dependi extension state.
 struct DependiExtension {
+    /// Cached path to the LSP binary to avoid repeated lookups.
     cached_binary_path: Option<String>,
 }
 
+/// Fetches the SHA256 checksum for a release asset from GitHub.
+///
+/// Returns `Ok(Some(checksum))` if found, `Ok(None)` if the checksum file
+/// doesn't exist (for backwards compatibility with old releases), or an
+/// error if the fetch fails.
 fn fetch_checksum(release_version: &str, asset_name: &str) -> Result<Option<String>> {
     let checksum_url = format!(
         "https://github.com/mpiton/zed-dependi/releases/download/{}/{}.binary.sha256",
@@ -37,6 +47,9 @@ fn fetch_checksum(release_version: &str, asset_name: &str) -> Result<Option<Stri
     }
 }
 
+/// Computes the SHA256 hash of a file at the given path.
+///
+/// Returns the lowercase hex-encoded hash string.
 fn compute_file_sha256(path: &str) -> Result<String> {
     let contents =
         std::fs::read(path).map_err(|e| format!("Failed to read file for checksum: {e}"))?;
@@ -46,6 +59,10 @@ fn compute_file_sha256(path: &str) -> Result<String> {
     Ok(hex::encode(hash))
 }
 
+/// Verifies that a binary's SHA256 checksum matches the expected value.
+///
+/// Returns an error with a detailed message if verification fails,
+/// indicating potential tampering.
 fn verify_checksum(binary_path: &str, expected: &str) -> Result<()> {
     let actual = compute_file_sha256(binary_path)?;
     if actual != expected {
@@ -58,6 +75,11 @@ fn verify_checksum(binary_path: &str, expected: &str) -> Result<()> {
 }
 
 impl DependiExtension {
+    /// Returns the path to the LSP binary, downloading it if necessary.
+    ///
+    /// Downloads the appropriate binary for the current platform from GitHub
+    /// releases, verifies its SHA256 checksum, and caches the path for
+    /// subsequent calls.
     fn language_server_binary_path(
         &mut self,
         language_server_id: &LanguageServerId,
