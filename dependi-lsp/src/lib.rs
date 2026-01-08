@@ -9,4 +9,5 @@ pub mod config;
 pub mod parsers;
 pub mod providers;
 pub mod registries;
+pub mod utils;
 pub mod vulnerabilities;
