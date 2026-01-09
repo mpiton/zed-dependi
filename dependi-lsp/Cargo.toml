@@ -39,3 +39,8 @@ taplo = "0.14"
 
 [dev-dependencies]
 serial_test = "3"
+criterion = { version = "0.5", features = ["html_reports"] }
+
+[[bench]]
+name = "benchmarks"
+harness = false
