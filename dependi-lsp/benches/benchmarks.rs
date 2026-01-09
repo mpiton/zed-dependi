@@ -3,7 +3,9 @@
 //! Run with: `cargo bench --bench benchmarks`
 //! View report: `open target/criterion/report/index.html`
 
-use criterion::{BenchmarkId, Criterion, black_box, criterion_group, criterion_main};
+use std::hint::black_box;
+
+use criterion::{BenchmarkId, Criterion, criterion_group, criterion_main};
 
 use dependi_lsp::cache::sqlite::SqliteCacheConfig;
 use dependi_lsp::cache::{MemoryCache, ReadCache, SqliteCache, WriteCache};
