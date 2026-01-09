@@ -35,9 +35,6 @@ pub trait ReadCache: Send + Sync {
     fn get(&self, key: &str) -> Option<VersionInfo>;
 
     /// Check if a key exists in the cache (without fetching the value)
-    ///
-    /// Note: Currently unused but part of the public trait API for future use.
-    #[allow(dead_code)]
     fn contains(&self, key: &str) -> bool {
         self.get(key).is_some()
     }
@@ -55,15 +52,9 @@ pub trait WriteCache: ReadCache {
     fn insert(&self, key: String, value: VersionInfo);
 
     /// Remove a value from the cache
-    ///
-    /// Note: Currently unused but part of the public trait API for future use.
-    #[allow(dead_code)]
     fn remove(&self, key: &str);
 
     /// Clear all entries from the cache
-    ///
-    /// Note: Currently unused but part of the public trait API for future use.
-    #[allow(dead_code)]
     fn clear(&self);
 }
 
@@ -454,5 +445,40 @@ mod tests {
         assert!(cache.is_empty());
         cache.insert("key".to_string(), create_test_version_info());
         assert!(!cache.is_empty());
+    }
+
+    #[test]
+    fn test_read_cache_contains() {
+        let cache = MemoryCache::new();
+        let cache_ref: &dyn ReadCache = &cache;
+
+        assert!(!cache_ref.contains("key"));
+        cache.insert("key".to_string(), create_test_version_info());
+        assert!(cache_ref.contains("key"));
+    }
+
+    #[test]
+    fn test_write_cache_remove() {
+        let cache = MemoryCache::new();
+        let cache_ref: &dyn WriteCache = &cache;
+
+        cache_ref.insert("key".to_string(), create_test_version_info());
+        assert!(cache.get("key").is_some());
+
+        cache_ref.remove("key");
+        assert!(cache.get("key").is_none());
+    }
+
+    #[test]
+    fn test_write_cache_clear() {
+        let cache = MemoryCache::new();
+        let cache_ref: &dyn WriteCache = &cache;
+
+        cache_ref.insert("key1".to_string(), create_test_version_info());
+        cache_ref.insert("key2".to_string(), create_test_version_info());
+        assert_eq!(cache.len(), 2);
+
+        cache_ref.clear();
+        assert!(cache.is_empty());
     }
 }

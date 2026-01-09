@@ -2,60 +2,12 @@
 //!
 //! Parses npm configuration to extract authentication tokens and registry URLs.
 //! Supports environment variable substitution (`${VAR}` syntax).
+//!
+//! Note: This module provides parsing utilities for .npmrc files.
+//! The parsing logic is tested; file I/O integration will be added when
+//! this is wired into the main auth flow.
 
-use std::path::Path;
-
-use tokio::fs;
-
-/// Parse `.npmrc` file for authentication token.
-///
-/// Looks for `_authToken=...` or `//registry:_authToken=...` patterns.
-/// Supports `${VAR}` syntax for environment variable substitution.
-///
-/// # Arguments
-/// * `project_root` - Path to the project root directory containing `.npmrc`
-///
-/// # Returns
-/// The token string if found and valid, `None` otherwise.
-///
-/// # Note
-/// This function is available for future integration with npm authentication.
-/// Currently tested but not yet wired into the main auth flow.
-#[allow(dead_code)]
-pub async fn parse_npmrc_token(project_root: &Path) -> Option<String> {
-    let npmrc_path = project_root.join(".npmrc");
-
-    if !npmrc_path.exists() {
-        return None;
-    }
-
-    let content = fs::read_to_string(&npmrc_path).await.ok()?;
-    parse_token_from_content(&content)
-}
-
-/// Parse `.npmrc` content for registry URL.
-///
-/// # Arguments
-/// * `project_root` - Path to the project root directory containing `.npmrc`
-///
-/// # Returns
-/// The registry URL if found, `None` otherwise.
-///
-/// # Note
-/// This function is available for future integration with npm registry configuration.
-/// Currently tested but not yet wired into the main auth flow.
-#[allow(dead_code)]
-pub async fn parse_npmrc_registry(project_root: &Path) -> Option<String> {
-    let npmrc_path = project_root.join(".npmrc");
-
-    if !npmrc_path.exists() {
-        return None;
-    }
-
-    let content = fs::read_to_string(&npmrc_path).await.ok()?;
-    parse_registry_from_content(&content)
-}
-
+#[cfg(test)]
 fn parse_token_from_content(content: &str) -> Option<String> {
     for line in content.lines() {
         let line = line.trim();
@@ -75,6 +27,7 @@ fn parse_token_from_content(content: &str) -> Option<String> {
     None
 }
 
+#[cfg(test)]
 fn parse_registry_from_content(content: &str) -> Option<String> {
     for line in content.lines() {
         let line = line.trim();
@@ -96,6 +49,7 @@ fn parse_registry_from_content(content: &str) -> Option<String> {
     None
 }
 
+#[cfg(test)]
 fn extract_auth_token(line: &str) -> Option<&str> {
     // Direct _authToken=...
     if let Some(token) = line.strip_prefix("_authToken=") {
@@ -112,6 +66,7 @@ fn extract_auth_token(line: &str) -> Option<&str> {
     None
 }
 
+#[cfg(test)]
 fn resolve_env_var(value: &str) -> Option<String> {
     // Handle ${VAR} syntax
     if let Some(inner) = value.strip_prefix("${").and_then(|v| v.strip_suffix('}')) {

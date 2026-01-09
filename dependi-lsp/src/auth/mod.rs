@@ -16,7 +16,6 @@
 //!
 //! - [`TokenProvider`]: Trait for getting auth headers for requests
 //! - [`EnvTokenProvider`]: Reads token from environment variable
-//! - [`NoAuthProvider`]: No-op provider for public registries
 //! - [`TokenProviderManager`]: Associates tokens with registry URL prefixes
 //!
 //! ## Submodules
@@ -37,11 +36,6 @@ use tokio::sync::RwLock;
 ///
 /// Implementations provide authorization headers for HTTP requests to registries.
 /// All implementations must be thread-safe (`Send + Sync`).
-///
-/// # Note
-/// This trait is part of the authentication abstraction layer. Individual methods
-/// may show as unused until all registry clients are migrated to use this system.
-#[allow(dead_code)]
 pub trait TokenProvider: Send + Sync {
     /// Get authorization headers for a request to the given URL.
     ///
@@ -54,15 +48,10 @@ pub trait TokenProvider: Send + Sync {
 ///
 /// Reads a token from an environment variable at construction time
 /// and provides Bearer authentication headers.
-///
-/// # Note
-/// This struct is part of the authentication abstraction layer.
-#[allow(dead_code)]
 pub struct EnvTokenProvider {
     token: String,
 }
 
-#[allow(dead_code)]
 impl EnvTokenProvider {
     /// Create a new provider with the given token.
     ///
@@ -70,16 +59,6 @@ impl EnvTokenProvider {
     /// The token is stored in memory. Ensure tokens are not logged.
     pub fn new(token: String) -> Self {
         Self { token }
-    }
-
-    /// Create a provider from an environment variable.
-    ///
-    /// Returns `None` if the variable is not set or empty.
-    pub fn from_env(variable: &str) -> Option<Self> {
-        std::env::var(variable)
-            .ok()
-            .filter(|t| !t.is_empty())
-            .map(Self::new)
     }
 }
 
@@ -99,12 +78,10 @@ impl TokenProvider for EnvTokenProvider {
 /// No-op provider for public registries.
 ///
 /// Always returns `None`, indicating no authentication is needed.
-///
-/// # Note
-/// This struct is part of the authentication abstraction layer.
-#[allow(dead_code)]
+#[cfg(test)]
 pub struct NoAuthProvider;
 
+#[cfg(test)]
 impl TokenProvider for NoAuthProvider {
     fn get_auth_headers(&self, _url: &str) -> Option<HeaderMap> {
         None
@@ -129,8 +106,9 @@ impl TokenProvider for NoAuthProvider {
 /// let manager = TokenProviderManager::new();
 ///
 /// // Register provider for GitHub npm
-/// if let Some(provider) = EnvTokenProvider::from_env("GITHUB_TOKEN") {
-///     manager.register("https://npm.pkg.github.com", Arc::new(provider)).await;
+/// if let Ok(token) = std::env::var("GITHUB_TOKEN") {
+///     let provider = EnvTokenProvider::new(token);
+///     manager.register("https://npm.pkg.github.com".to_string(), Arc::new(provider)).await;
 /// }
 ///
 /// // Get headers for a request
@@ -146,7 +124,6 @@ impl Default for TokenProviderManager {
     }
 }
 
-#[allow(dead_code)]
 impl TokenProviderManager {
     /// Create a new empty provider manager.
     pub fn new() -> Self {
@@ -183,6 +160,7 @@ impl TokenProviderManager {
     ///
     /// # Matching
     /// Uses longest-prefix matching to support nested registries.
+    #[cfg(test)]
     pub async fn get_auth_headers(&self, url: &str) -> HeaderMap {
         let providers = self.providers.read().await;
 
@@ -216,6 +194,7 @@ impl TokenProviderManager {
     }
 
     /// Check if a provider is registered for a URL prefix.
+    #[cfg(test)]
     pub async fn has_provider(&self, url_prefix: &str) -> bool {
         let providers = self.providers.read().await;
         providers.contains_key(url_prefix)
