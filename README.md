@@ -209,6 +209,42 @@ Configure Dependi in your Zed `settings.json`:
 | `security.show_diagnostics` | bool | `true` | Show vulnerability diagnostics |
 | `security.min_severity` | string | `"low"` | Minimum severity to report (low/medium/high/critical) |
 
+### Private Registries
+
+Dependi supports custom npm registries for enterprise environments. Configure scoped registries to use private packages alongside public ones:
+
+```json
+{
+  "lsp": {
+    "dependi": {
+      "initialization_options": {
+        "registries": {
+          "npm": {
+            "url": "https://registry.npmjs.org",
+            "scoped": {
+              "company": {
+                "url": "https://npm.company.com",
+                "auth": {
+                  "type": "env",
+                  "variable": "COMPANY_NPM_TOKEN"
+                }
+              }
+            }
+          }
+        }
+      }
+    }
+  }
+}
+```
+
+**Key points:**
+- Scope names don't include the `@` prefix (use `"company"` not `"@company"`)
+- Authentication tokens are read from environment variables (never hardcoded)
+- Auth headers are only sent over HTTPS
+
+For detailed configuration including supported registry types, authentication setup, and troubleshooting, see the [Private Registries Guide](docs/private-registries.md).
+
 ## CI/CD Integration
 
 The dependi-lsp provides a standalone CLI scan command for integrating vulnerability scanning into your CI/CD pipelines.
