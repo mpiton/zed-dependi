@@ -155,7 +155,7 @@ The token is sent as a Bearer token in the `Authorization` header for HTTPS requ
 
 1. **Never hardcode tokens** in configuration files
 2. **Use environment variables** for all tokens
-3. **HTTPS only** - authentication headers are only sent over HTTPS
+3. **HTTPS only** — authentication headers are sent over HTTPS
 4. **Least privilege** - use read-only tokens when possible
 5. **Rotate tokens regularly** - regenerate tokens periodically
 6. **Use secret managers** in CI/CD:
@@ -293,7 +293,7 @@ RUST_LOG=debug zed --foreground
 ```
 
 Look for log entries like:
-```
+```text
 [DEBUG] Querying registry: https://npm.company.com/@company/utils
 [DEBUG] Using auth header: Bearer npm_... (redacted)
 [DEBUG] Response status: 200 OK
