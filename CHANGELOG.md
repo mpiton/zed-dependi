@@ -100,7 +100,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - PHP (composer.json) via Packagist
   - Dart (pubspec.yaml) via pub.dev
   - .NET (*.csproj) via NuGet
-- YAML and XML language support for extension
+- YAML and XML support for extension
 
 ## [0.2.0] - 2024-12-13
 
