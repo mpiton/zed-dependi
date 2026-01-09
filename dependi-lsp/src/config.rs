@@ -1,5 +1,7 @@
 //! Configuration management for Dependi LSP
 
+use std::collections::HashMap;
+
 use serde::Deserialize;
 
 /// Default cache TTL (1 hour)
@@ -23,6 +25,9 @@ pub struct Config {
     /// Packages to ignore (glob patterns)
     #[serde(default)]
     pub ignore: Vec<String>,
+    /// Package registries configuration
+    #[serde(default)]
+    pub registries: RegistriesConfig,
 }
 
 /// Inlay hints configuration
@@ -94,6 +99,41 @@ pub struct SecurityConfig {
     pub min_severity: String,
     /// Vulnerability cache TTL in seconds (default: 6 hours)
     pub cache_ttl_secs: u64,
+}
+
+/// Configuration for a scoped npm registry
+#[derive(Debug, Clone, Deserialize, Default)]
+pub struct NpmScopedConfig {
+    /// Registry URL for this scope
+    pub url: String,
+}
+
+/// npm registry configuration
+#[derive(Debug, Clone, Deserialize)]
+#[serde(default)]
+pub struct NpmRegistryConfig {
+    /// Default registry URL
+    pub url: String,
+    /// Scope-specific registry configurations (scope name without @)
+    #[serde(default)]
+    pub scoped: HashMap<String, NpmScopedConfig>,
+}
+
+impl Default for NpmRegistryConfig {
+    fn default() -> Self {
+        Self {
+            url: "https://registry.npmjs.org".to_string(),
+            scoped: HashMap::new(),
+        }
+    }
+}
+
+/// Package registries configuration
+#[derive(Debug, Clone, Deserialize, Default)]
+#[serde(default)]
+pub struct RegistriesConfig {
+    /// npm registry configuration
+    pub npm: NpmRegistryConfig,
 }
 
 impl Default for SecurityConfig {
@@ -270,5 +310,72 @@ mod tests {
         let config = InlayHintsConfig::default();
         assert!(config.enabled);
         assert!(config.show_up_to_date);
+    }
+
+    #[test]
+    fn test_npm_registry_config_defaults() {
+        let config = NpmRegistryConfig::default();
+        assert_eq!(config.url, "https://registry.npmjs.org");
+        assert!(config.scoped.is_empty());
+    }
+
+    #[test]
+    fn test_registries_config_defaults() {
+        let config = RegistriesConfig::default();
+        assert_eq!(config.npm.url, "https://registry.npmjs.org");
+    }
+
+    #[test]
+    fn test_registries_config_from_json() {
+        let json = json!({
+            "registries": {
+                "npm": {
+                    "url": "https://npm.company.com",
+                    "scoped": {
+                        "@company": {
+                            "url": "https://npm.internal.company.com"
+                        },
+                        "@github": {
+                            "url": "https://npm.pkg.github.com"
+                        }
+                    }
+                }
+            }
+        });
+
+        let config = Config::from_init_options(Some(json));
+        assert_eq!(config.registries.npm.url, "https://npm.company.com");
+        assert_eq!(config.registries.npm.scoped.len(), 2);
+        assert_eq!(
+            config.registries.npm.scoped.get("@company").unwrap().url,
+            "https://npm.internal.company.com"
+        );
+        assert_eq!(
+            config.registries.npm.scoped.get("@github").unwrap().url,
+            "https://npm.pkg.github.com"
+        );
+    }
+
+    #[test]
+    fn test_registries_config_partial() {
+        let json = json!({
+            "registries": {
+                "npm": {
+                    "url": "https://custom.registry.com"
+                }
+            }
+        });
+
+        let config = Config::from_init_options(Some(json));
+        assert_eq!(config.registries.npm.url, "https://custom.registry.com");
+        assert!(config.registries.npm.scoped.is_empty());
+    }
+
+    #[test]
+    fn test_registries_config_empty() {
+        let json = json!({});
+
+        let config = Config::from_init_options(Some(json));
+        assert_eq!(config.registries.npm.url, "https://registry.npmjs.org");
     }
 }

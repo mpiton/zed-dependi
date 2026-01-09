@@ -70,33 +70,65 @@ use serde::Deserialize;
 use super::http_client::create_shared_client;
 use super::version_utils::is_prerelease_npm;
 use super::{Registry, VersionInfo};
+use crate::config::NpmRegistryConfig;
 
 /// Client for the npm registry
 pub struct NpmRegistry {
     client: Arc<Client>,
     base_url: String,
+    /// Scope to URL mapping for scoped packages (e.g., "company" -> "https://npm.company.com")
+    scoped_registries: HashMap<String, String>,
 }
 
 impl NpmRegistry {
-    /// Constructs an NpmRegistry that uses the provided shared HTTP client and the default npm registry base URL.
-    ///
-    /// The supplied `client` is used for all HTTP requests performed by the registry; the base URL is set to
-    /// `https://registry.npmjs.org`.
+    /// Constructs an NpmRegistry with custom configuration for registry URL and scoped packages.
     ///
     /// # Examples
     ///
     /// ```ignore
     /// use std::sync::Arc;
     /// use dependi_lsp::registries::npm::NpmRegistry;
+    /// use dependi_lsp::config::NpmRegistryConfig;
     ///
     /// let client = Arc::new(reqwest::Client::new());
-    /// let registry = NpmRegistry::with_client(client);
+    /// let config = NpmRegistryConfig::default();
+    /// let registry = NpmRegistry::with_client_and_config(client, &config);
     /// ```
-    pub fn with_client(client: Arc<Client>) -> Self {
+    pub fn with_client_and_config(client: Arc<Client>, config: &NpmRegistryConfig) -> Self {
+        let base_url = if config.url.is_empty() {
+            "https://registry.npmjs.org".to_string()
+        } else {
+            config.url.clone()
+        };
+
+        let scoped_registries: HashMap<String, String> = config
+            .scoped
+            .iter()
+            .filter(|(_, v)| !v.url.is_empty())
+            .map(|(scope, cfg)| (scope.clone(), cfg.url.clone()))
+            .collect();
+
         Self {
             client,
-            base_url: "https://registry.npmjs.org".to_string(),
+            base_url,
+            scoped_registries,
         }
+    }
+
+    /// Get the registry URL for a package, considering scoped package routing.
+    ///
+    /// For scoped packages (@scope/package), checks if a custom registry is configured
+    /// for that scope. Falls back to the default base URL.
+    fn get_registry_url(&self, package_name: &str) -> &str {
+        if let Some(scope) = package_name.strip_prefix('@')
+            && let Some(scope_end) = scope.find('/')
+        {
+            let scope_name = &scope[..scope_end];
+            if let Some(url) = self.scoped_registries.get(scope_name) {
+                return url;
+            }
+        }
+        &self.base_url
     }
 }
 
@@ -111,7 +143,11 @@ impl Default for NpmRegistry {
     /// let registry = NpmRegistry::default();
     /// ```
     fn default() -> Self {
-        Self::with_client(create_shared_client().expect("Failed to create HTTP client"))
+        Self {
+            client: create_shared_client().expect("Failed to create HTTP client"),
+            base_url: "https://registry.npmjs.org".to_string(),
+            scoped_registries: HashMap::new(),
+        }
     }
 }
 
@@ -200,7 +236,9 @@ impl Registry for NpmRegistry {
             package_name.to_string()
         };
 
-        let url = format!("{}/{}", self.base_url, encoded_name);
+        // Get the appropriate registry URL (may differ for scoped packages)
+        let registry_url = self.get_registry_url(package_name);
+        let url = format!("{}/{}", registry_url, encoded_name);
 
         let response = self.client.get(&url).send().await?;
 
@@ -375,5 +413,130 @@ mod tests {
             package_name.to_string()
         };
         assert_eq!(encoded, "lodash");
+    }
+
+    #[test]
+    fn test_with_client_and_config_default() {
+        use crate::config::NpmRegistryConfig;
+        use crate::registries::http_client::create_shared_client;
+
+        let client = create_shared_client().unwrap();
+        let config = NpmRegistryConfig::default();
+        let registry = NpmRegistry::with_client_and_config(client, &config);
+
+        assert_eq!(registry.base_url, "https://registry.npmjs.org");
+        assert!(registry.scoped_registries.is_empty());
+    }
+
+    #[test]
+    fn test_with_client_and_config_custom_url() {
+        use crate::config::NpmRegistryConfig;
+        use crate::registries::http_client::create_shared_client;
+
+        let client = create_shared_client().unwrap();
+        let config = NpmRegistryConfig {
+            url: "https://npm.company.com".to_string(),
+            scoped: HashMap::new(),
+        };
+        let registry = NpmRegistry::with_client_and_config(client, &config);
+
+        assert_eq!(registry.base_url, "https://npm.company.com");
+    }
+
+    #[test]
+    fn test_with_client_and_config_scoped() {
+        use crate::config::{NpmRegistryConfig, NpmScopedConfig};
+        use crate::registries::http_client::create_shared_client;
+
+        let client = create_shared_client().unwrap();
+        let mut scoped = HashMap::new();
+        scoped.insert(
+            "@company".to_string(),
+            NpmScopedConfig {
+                url: "https://npm.internal.company.com".to_string(),
+            },
+        );
+        scoped.insert(
+            "@github".to_string(),
+            NpmScopedConfig {
+                url: "https://npm.pkg.github.com".to_string(),
+            },
+        );
+        let config = NpmRegistryConfig {
+            url: "https://registry.npmjs.org".to_string(),
+            scoped,
+        };
+        let registry = NpmRegistry::with_client_and_config(client, &config);
+
+        assert_eq!(registry.base_url, "https://registry.npmjs.org");
+        assert_eq!(registry.scoped_registries.len(), 2);
+        assert_eq!(
+            registry.scoped_registries.get("@company"),
+            Some(&"https://npm.internal.company.com".to_string())
+        );
+        assert_eq!(
+            registry.scoped_registries.get("@github"),
+            Some(&"https://npm.pkg.github.com".to_string())
+        );
+    }
+
+    #[test]
+    fn test_get_registry_url_default() {
+        use crate::config::NpmRegistryConfig;
+        use crate::registries::http_client::create_shared_client;
+
+        let client = create_shared_client().unwrap();
+        let config = NpmRegistryConfig::default();
+        let registry = NpmRegistry::with_client_and_config(client, &config);
+
+        // Non-scoped package should use default
+        assert_eq!(
+            registry.get_registry_url("express"),
+            "https://registry.npmjs.org"
+        );
+
+        // Scoped package without specific config should use default
+        assert_eq!(
+            registry.get_registry_url("@types/node"),
+            "https://registry.npmjs.org"
+        );
+    }
+
+    #[test]
+    fn test_get_registry_url_scoped() {
+        use crate::config::{NpmRegistryConfig, NpmScopedConfig};
+        use crate::registries::http_client::create_shared_client;
+
+        let client = create_shared_client().unwrap();
+        let mut scoped = HashMap::new();
+        scoped.insert(
+            "company".to_string(),
+            NpmScopedConfig {
+                url: "https://npm.company.com".to_string(),
+            },
+        );
+        let config = NpmRegistryConfig {
+            url: "https://registry.npmjs.org".to_string(),
+            scoped,
+        };
+        let registry = NpmRegistry::with_client_and_config(client, &config);
+
+        // Scoped package with matching config should use scoped URL
+        assert_eq!(
+            registry.get_registry_url("@company/utils"),
+            "https://npm.company.com"
+        );
+
+        // Non-scoped package should use default
+        assert_eq!(
+            registry.get_registry_url("express"),
+            "https://registry.npmjs.org"
+        );
+
+        // Scoped package without specific config should use default
+        assert_eq!(
+            registry.get_registry_url("@types/node"),
+            "https://registry.npmjs.org"
+        );
     }
 }

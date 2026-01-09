@@ -56,7 +56,7 @@ struct ProcessingContext {
     csharp_parser: Arc<CsharpParser>,
     ruby_parser: Arc<RubyParser>,
     crates_io: Arc<CratesIoRegistry>,
-    npm_registry: Arc<NpmRegistry>,
+    npm_registry: Arc<tokio::sync::RwLock<NpmRegistry>>,
     pypi: Arc<PyPiRegistry>,
     go_proxy: Arc<GoProxyRegistry>,
     packagist: Arc<PackagistRegistry>,
@@ -128,7 +128,7 @@ impl ProcessingContext {
                     // Fetch from appropriate registry
                     let result = match file_type {
                         FileType::Cargo => crates_io.get_version_info(&name).await,
-                        FileType::Npm => npm_registry.get_version_info(&name).await,
+                        FileType::Npm => npm_registry.read().await.get_version_info(&name).await,
                         FileType::Python => pypi.get_version_info(&name).await,
                         FileType::Go => go_proxy.get_version_info(&name).await,
                         FileType::Php => packagist.get_version_info(&name).await,
@@ -254,13 +254,16 @@ pub struct DependiBackend {
     ruby_parser: Arc<RubyParser>,
     /// Registry clients
     crates_io: Arc<CratesIoRegistry>,
-    npm_registry: Arc<NpmRegistry>,
+    /// npm registry (tokio::sync::RwLock-wrapped to allow reconfiguration during initialize)
+    npm_registry: Arc<tokio::sync::RwLock<NpmRegistry>>,
     pypi: Arc<PyPiRegistry>,
     go_proxy: Arc<GoProxyRegistry>,
     packagist: Arc<PackagistRegistry>,
     pub_dev: Arc<PubDevRegistry>,
     nuget: Arc<NuGetRegistry>,
     rubygems: Arc<RubyGemsRegistry>,
+    /// Shared HTTP client for creating new registry instances
+    http_client: Arc<HttpClient>,
     /// Vulnerability scanning
     osv_client: Arc<OsvClient>,
     vuln_cache: Arc<VulnerabilityCache>,
@@ -296,9 +299,14 @@ impl DependiBackend {
             create_shared_client().expect("Failed to create shared HTTP client")
         });
 
+        let config = Config::default();
+        let npm_registry = Arc::new(tokio::sync::RwLock::new(
+            NpmRegistry::with_client_and_config(Arc::clone(&http_client), &config.registries.npm),
+        ));
+
         Self {
             client,
-            config: Arc::new(RwLock::new(Config::default())),
+            config: Arc::new(RwLock::new(config)),
             documents: Arc::new(DashMap::new()),
             version_cache: Arc::new(HybridCache::new()),
             cargo_parser: Arc::new(CargoParser::new()),
@@ -310,13 +318,14 @@ impl DependiBackend {
             csharp_parser: Arc::new(CsharpParser::new()),
             ruby_parser: Arc::new(RubyParser::new()),
             crates_io: Arc::new(CratesIoRegistry::with_client(Arc::clone(&http_client))),
-            npm_registry: Arc::new(NpmRegistry::with_client(Arc::clone(&http_client))),
+            npm_registry,
             pypi: Arc::new(PyPiRegistry::with_client(Arc::clone(&http_client))),
             go_proxy: Arc::new(GoProxyRegistry::with_client(Arc::clone(&http_client))),
             packagist: Arc::new(PackagistRegistry::with_client(Arc::clone(&http_client))),
             pub_dev: Arc::new(PubDevRegistry::with_client(Arc::clone(&http_client))),
             nuget: Arc::new(NuGetRegistry::with_client(Arc::clone(&http_client))),
-            rubygems: Arc::new(RubyGemsRegistry::with_client(http_client)),
+            rubygems: Arc::new(RubyGemsRegistry::with_client(Arc::clone(&http_client))),
+            http_client,
             osv_client: Arc::new(OsvClient::default()),
             vuln_cache: Arc::new(VulnerabilityCache::new()),
             debounce_tasks: Arc::new(DashMap::new()),
@@ -367,7 +376,13 @@ impl DependiBackend {
         // Fetch from appropriate registry
         let result = match file_type {
             FileType::Cargo => self.crates_io.get_version_info(package_name).await,
-            FileType::Npm => self.npm_registry.get_version_info(package_name).await,
+            FileType::Npm => {
+                self.npm_registry
+                    .read()
+                    .await
+                    .get_version_info(package_name)
+                    .await
+            }
             FileType::Python => self.pypi.get_version_info(package_name).await,
             FileType::Go => self.go_proxy.get_version_info(package_name).await,
             FileType::Php => self.packagist.get_version_info(package_name).await,
@@ -603,6 +618,20 @@ impl LanguageServer for DependiBackend {
         let config = Config::from_init_options(params.initialization_options);
         tracing::info!("Configuration: {:?}", config);
 
+        // Reconfigure npm registry with custom settings if provided
+        {
+            let new_npm_registry = NpmRegistry::with_client_and_config(
+                Arc::clone(&self.http_client),
+                &config.registries.npm,
+            );
+            let mut registry = self.npm_registry.write().await;
+            *registry = new_npm_registry;
+            tracing::info!(
+                "npm registry configured with base URL: {}",
+                config.registries.npm.url
+            );
+        }
+
         // Store the configuration
         if let Ok(mut cfg) = self.config.write() {
             *cfg = config;
@@ -640,7 +669,10 @@ impl LanguageServer for DependiBackend {
 
         // Verify all registries share the same HTTP client
         let base_client = self.crates_io.http_client();
-        debug_assert!(Arc::ptr_eq(&base_client, &self.npm_registry.http_client()));
+        debug_assert!(Arc::ptr_eq(
+            &base_client,
+            &self.npm_registry.read().await.http_client()
+        ));
         debug_assert!(Arc::ptr_eq(&base_client, &self.pypi.http_client()));
         debug_assert!(Arc::ptr_eq(&base_client, &self.go_proxy.http_client()));
         debug_assert!(Arc::ptr_eq(&base_client, &self.packagist.http_client()));
