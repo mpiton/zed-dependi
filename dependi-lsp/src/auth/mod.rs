@@ -37,6 +37,11 @@ use tokio::sync::RwLock;
 ///
 /// Implementations provide authorization headers for HTTP requests to registries.
 /// All implementations must be thread-safe (`Send + Sync`).
+///
+/// # Note
+/// This trait is part of the authentication abstraction layer. Individual methods
+/// may show as unused until all registry clients are migrated to use this system.
+#[allow(dead_code)]
 pub trait TokenProvider: Send + Sync {
     /// Get authorization headers for a request to the given URL.
     ///
@@ -49,10 +54,15 @@ pub trait TokenProvider: Send + Sync {
 ///
 /// Reads a token from an environment variable at construction time
 /// and provides Bearer authentication headers.
+///
+/// # Note
+/// This struct is part of the authentication abstraction layer.
+#[allow(dead_code)]
 pub struct EnvTokenProvider {
     token: String,
 }
 
+#[allow(dead_code)]
 impl EnvTokenProvider {
     /// Create a new provider with the given token.
     ///
@@ -89,6 +99,10 @@ impl TokenProvider for EnvTokenProvider {
 /// No-op provider for public registries.
 ///
 /// Always returns `None`, indicating no authentication is needed.
+///
+/// # Note
+/// This struct is part of the authentication abstraction layer.
+#[allow(dead_code)]
 pub struct NoAuthProvider;
 
 impl TokenProvider for NoAuthProvider {
@@ -132,6 +146,7 @@ impl Default for TokenProviderManager {
     }
 }
 
+#[allow(dead_code)]
 impl TokenProviderManager {
     /// Create a new empty provider manager.
     pub fn new() -> Self {
