@@ -1,3 +1,4 @@
+mod auth;
 mod backend;
 mod cache;
 mod config;

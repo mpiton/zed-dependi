@@ -101,11 +101,46 @@ pub struct SecurityConfig {
     pub cache_ttl_secs: u64,
 }
 
+/// Authentication configuration for a registry.
+///
+/// Currently supports reading tokens from environment variables.
+/// Tokens should NEVER be stored directly in LSP settings.
+#[derive(Debug, Clone, Deserialize, Default)]
+pub struct AuthConfig {
+    /// Authentication type: "env" for environment variable
+    #[serde(rename = "type", default)]
+    pub auth_type: String,
+    /// Environment variable name containing the token
+    #[serde(default)]
+    pub variable: String,
+}
+
+impl AuthConfig {
+    /// Read token from the configured source.
+    ///
+    /// Currently only supports environment variables.
+    /// Returns `None` if the auth type is unsupported or the variable is not set.
+    pub fn get_token(&self) -> Option<String> {
+        match self.auth_type.as_str() {
+            "env" => std::env::var(&self.variable).ok(),
+            _ => None,
+        }
+    }
+
+    /// Check if authentication is configured.
+    pub fn is_configured(&self) -> bool {
+        self.auth_type == "env" && !self.variable.is_empty()
+    }
+}
+
 /// Configuration for a scoped npm registry
 #[derive(Debug, Clone, Deserialize, Default)]
 pub struct NpmScopedConfig {
     /// Registry URL for this scope
     pub url: String,
+    /// Authentication configuration
+    #[serde(default)]
+    pub auth: Option<AuthConfig>,
 }
 
 /// npm registry configuration
@@ -169,6 +204,7 @@ impl Config {
 mod tests {
     use super::*;
     use serde_json::json;
+    use serial_test::serial;
 
     #[test]
     fn test_default_config() {
@@ -377,5 +413,106 @@ mod tests {
 
         let config = Config::from_init_options(Some(json));
         assert_eq!(config.registries.npm.url, "https://registry.npmjs.org");
+    }
+
+    #[test]
+    fn test_auth_config_defaults() {
+        let config = AuthConfig::default();
+        assert_eq!(config.auth_type, "");
+        assert_eq!(config.variable, "");
+        assert!(!config.is_configured());
+        assert!(config.get_token().is_none());
+    }
+
+    #[test]
+    #[serial]
+    fn test_auth_config_env_type() {
+        // SAFETY: serial_test ensures this test runs exclusively, preventing race conditions
+        unsafe {
+            std::env::set_var("TEST_AUTH_TOKEN", "secret123");
+        }
+
+        let json = json!({
+            "registries": {
+                "npm": {
+                    "scoped": {
+                        "company": {
+                            "url": "https://npm.company.com",
+                            "auth": {
+                                "type": "env",
+                                "variable": "TEST_AUTH_TOKEN"
+                            }
+                        }
+                    }
+                }
+            }
+        });
+
+        let config = Config::from_init_options(Some(json));
+        let scoped = config.registries.npm.scoped.get("company").unwrap();
+        assert_eq!(scoped.url, "https://npm.company.com");
+
+        let auth = scoped.auth.as_ref().unwrap();
+        assert_eq!(auth.auth_type, "env");
+        assert_eq!(auth.variable, "TEST_AUTH_TOKEN");
+        assert!(auth.is_configured());
+        assert_eq!(auth.get_token(), Some("secret123".to_string()));
+
+        // SAFETY: serial_test ensures this test runs exclusively, preventing race conditions
+        unsafe {
+            std::env::remove_var("TEST_AUTH_TOKEN");
+        }
+    }
+
+    #[test]
+    fn test_auth_config_missing_env_var() {
+        let json = json!({
+            "registries": {
+                "npm": {
+                    "scoped": {
+                        "company": {
+                            "url": "https://npm.company.com",
+                            "auth": {
+                                "type": "env",
+                                "variable": "NONEXISTENT_TOKEN_12345"
+                            }
+                        }
+                    }
+                }
+            }
+        });
+
+        let config = Config::from_init_options(Some(json));
+        let scoped = config.registries.npm.scoped.get("company").unwrap();
+        let auth = scoped.auth.as_ref().unwrap();
+
+        assert!(auth.is_configured());
+        assert!(auth.get_token().is_none());
+    }
+
+    #[test]
+    fn test_auth_config_unsupported_type() {
+        let json = json!({
+            "registries": {
+                "npm": {
+                    "scoped": {
+                        "company": {
+                            "url": "https://npm.company.com",
+                            "auth": {
+                                "type": "unknown",
+                                "variable": "SOME_VAR"
+                            }
+                        }
+                    }
+                }
+            }
+        });
+
+        let config = Config::from_init_options(Some(json));
+        let scoped = config.registries.npm.scoped.get("company").unwrap();
+        let auth = scoped.auth.as_ref().unwrap();
+
+        assert!(!auth.is_configured());
+        assert!(auth.get_token().is_none());
     }
 }

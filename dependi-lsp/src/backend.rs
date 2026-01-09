@@ -7,6 +7,7 @@ use tower_lsp::jsonrpc::Result;
 use tower_lsp::lsp_types::*;
 use tower_lsp::{Client, LanguageServer};
 
+use crate::auth::{EnvTokenProvider, TokenProviderManager, redact_token};
 use crate::cache::{HybridCache, ReadCache, WriteCache};
 use crate::config::Config;
 use crate::document::DocumentState;
@@ -264,6 +265,8 @@ pub struct DependiBackend {
     rubygems: Arc<RubyGemsRegistry>,
     /// Shared HTTP client for creating new registry instances
     http_client: Arc<HttpClient>,
+    /// Token provider manager for authentication across all ecosystems
+    token_manager: Arc<TokenProviderManager>,
     /// Vulnerability scanning
     osv_client: Arc<OsvClient>,
     vuln_cache: Arc<VulnerabilityCache>,
@@ -304,6 +307,9 @@ impl DependiBackend {
             NpmRegistry::with_client_and_config(Arc::clone(&http_client), &config.registries.npm),
         ));
 
+        // Create token provider manager for centralized auth management
+        let token_manager = Arc::new(TokenProviderManager::new());
+
         Self {
             client,
             config: Arc::new(RwLock::new(config)),
@@ -326,6 +332,7 @@ impl DependiBackend {
             nuget: Arc::new(NuGetRegistry::with_client(Arc::clone(&http_client))),
             rubygems: Arc::new(RubyGemsRegistry::with_client(Arc::clone(&http_client))),
             http_client,
+            token_manager,
             osv_client: Arc::new(OsvClient::default()),
             vuln_cache: Arc::new(VulnerabilityCache::new()),
             debounce_tasks: Arc::new(DashMap::new()),
@@ -617,6 +624,37 @@ impl LanguageServer for DependiBackend {
         // Parse configuration from initialization options
         let config = Config::from_init_options(params.initialization_options);
         tracing::info!("Configuration: {:?}", config);
+
+        // Register token providers from npm scoped registry config
+        for (scope, scoped_config) in &config.registries.npm.scoped {
+            if let Some(auth) = &scoped_config.auth
+                && auth.is_configured()
+            {
+                if let Some(token) = auth.get_token() {
+                    let provider = Arc::new(EnvTokenProvider::new(token.clone()));
+                    self.token_manager
+                        .register(scoped_config.url.clone(), provider)
+                        .await;
+                    tracing::info!(
+                        "Registered auth provider for npm scope @{} -> {} (token: {})",
+                        scope,
+                        scoped_config.url,
+                        redact_token(&token)
+                    );
+                } else {
+                    tracing::warn!(
+                        "Auth configured for npm scope @{} but token not found in env var {}",
+                        scope,
+                        auth.variable
+                    );
+                }
+            }
+        }
+
+        tracing::info!(
+            "Token manager initialized with {} providers",
+            self.token_manager.provider_count().await
+        );
 
         // Reconfigure npm registry with custom settings if provided
         {
