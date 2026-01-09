@@ -232,11 +232,15 @@ impl TokenProviderManager {
 ///
 /// Shows only the first few characters to help identify which token is in use
 /// without exposing the full secret.
+///
+/// # Safety
+/// This function is UTF-8 safe and operates on characters, not bytes.
 pub fn redact_token(token: &str) -> String {
-    if token.len() <= 4 {
+    if token.chars().count() <= 4 {
         "****".to_string()
     } else {
-        format!("{}...", &token[..4])
+        let prefix: String = token.chars().take(4).collect();
+        format!("{}...", prefix)
     }
 }
 
@@ -249,6 +253,17 @@ mod tests {
         assert_eq!(redact_token("abc"), "****");
         assert_eq!(redact_token("abcdefgh"), "abcd...");
         assert_eq!(redact_token("npm_1234567890"), "npm_...");
+    }
+
+    #[test]
+    fn test_redact_token_utf8_safe() {
+        // Multi-byte UTF-8 characters should not panic
+        assert_eq!(redact_token("日本語テスト"), "日本語テ...");
+        assert_eq!(redact_token("🔑🔒🔓🔐secret"), "🔑🔒🔓🔐...");
+        assert_eq!(redact_token("émojis"), "émoj...");
+        // Short multi-byte tokens should be fully redacted
+        assert_eq!(redact_token("日本"), "****");
+        assert_eq!(redact_token("🔑🔒"), "****");
     }
 
     #[test]
