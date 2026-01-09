@@ -88,7 +88,7 @@ Use different registries for different package scopes:
 | **Artifactory** | Enterprise artifact management | `https://artifactory.company.com/api/npm/npm-local` |
 | **npm Enterprise** | Scalable private npm | `https://npm.company.com` |
 | **GitHub Packages** | GitHub-integrated CI/CD | `https://npm.pkg.github.com` |
-| **GitLab Packages** | GitLab-integrated CI/CD | `https://gitlab.company.com/api/v4/packages/npm` |
+| **GitLab Packages** | GitLab-integrated CI/CD (instance, group, or project-level) | `https://gitlab.company.com/api/v4/packages/npm/` |
 | **AWS CodeArtifact** | AWS-native artifact management | `https://domain-123456789012.d.codeartifact.region.amazonaws.com/npm/repo/` |
 
 ## Authentication
