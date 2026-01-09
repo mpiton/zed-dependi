@@ -68,11 +68,16 @@ mod tests {
 
     #[test]
     fn test_registries_share_client_instance() {
+        use crate::config::NpmRegistryConfig;
+
         let shared_client = create_shared_client().expect("Failed to create client");
         let client_ptr = Arc::as_ptr(&shared_client);
 
         let crates_io = CratesIoRegistry::with_client(Arc::clone(&shared_client));
-        let npm = NpmRegistry::with_client(Arc::clone(&shared_client));
+        let npm = NpmRegistry::with_client_and_config(
+            Arc::clone(&shared_client),
+            &NpmRegistryConfig::default(),
+        );
         let pypi = PyPiRegistry::with_client(Arc::clone(&shared_client));
         let go_proxy = GoProxyRegistry::with_client(Arc::clone(&shared_client));
         let packagist = PackagistRegistry::with_client(Arc::clone(&shared_client));

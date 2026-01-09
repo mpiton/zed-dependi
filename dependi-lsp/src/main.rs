@@ -212,7 +212,10 @@ async fn run_scan(
                 },
                 "vulnerabilities": vuln_details
             });
-            println!("{}", serde_json::to_string_pretty(&report).unwrap());
+            match serde_json::to_string_pretty(&report) {
+                Ok(json) => println!("{}", json),
+                Err(e) => eprintln!("Failed to serialize report: {}", e),
+            }
         }
         "markdown" => {
             println!("# Vulnerability Report\n");

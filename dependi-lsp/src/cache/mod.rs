@@ -35,6 +35,8 @@ pub trait ReadCache: Send + Sync {
     fn get(&self, key: &str) -> Option<VersionInfo>;
 
     /// Check if a key exists in the cache (without fetching the value)
+    ///
+    /// Note: Currently unused but part of the public trait API for future use.
     #[allow(dead_code)]
     fn contains(&self, key: &str) -> bool {
         self.get(key).is_some()
@@ -53,10 +55,14 @@ pub trait WriteCache: ReadCache {
     fn insert(&self, key: String, value: VersionInfo);
 
     /// Remove a value from the cache
+    ///
+    /// Note: Currently unused but part of the public trait API for future use.
     #[allow(dead_code)]
     fn remove(&self, key: &str);
 
     /// Clear all entries from the cache
+    ///
+    /// Note: Currently unused but part of the public trait API for future use.
     #[allow(dead_code)]
     fn clear(&self);
 }
