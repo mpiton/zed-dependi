@@ -3,6 +3,7 @@
 //! This crate provides a Language Server Protocol implementation for
 //! managing dependencies in various package managers (Cargo, npm, etc.)
 
+pub mod auth;
 pub mod backend;
 pub mod cache;
 pub mod config;

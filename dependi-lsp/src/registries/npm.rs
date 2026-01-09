@@ -67,9 +67,12 @@ use chrono::{DateTime, Utc};
 use reqwest::Client;
 use serde::Deserialize;
 
+use reqwest::header::{AUTHORIZATION, HeaderMap, HeaderValue};
+
 use super::http_client::create_shared_client;
 use super::version_utils::is_prerelease_npm;
 use super::{Registry, VersionInfo};
+use crate::auth::redact_token;
 use crate::config::NpmRegistryConfig;
 
 /// Client for the npm registry
@@ -78,6 +81,8 @@ pub struct NpmRegistry {
     base_url: String,
     /// Scope to URL mapping for scoped packages (e.g., "company" -> "https://npm.company.com")
     scoped_registries: HashMap<String, String>,
+    /// Authentication headers per registry URL (URL prefix -> headers)
+    auth_headers: HashMap<String, HeaderMap>,
 }
 
 impl NpmRegistry {
@@ -101,22 +106,48 @@ impl NpmRegistry {
             config.url.clone()
         };
 
-        let scoped_registries: HashMap<String, String> = config
-            .scoped
-            .iter()
-            .filter(|(_, v)| !v.url.is_empty())
-            .map(|(scope, cfg)| {
-                // Normalize scope name: remove leading '@' and trim whitespace
-                // This ensures lookups in get_registry_url will match
-                let normalized_scope = scope.trim().strip_prefix('@').unwrap_or(scope.trim());
-                (normalized_scope.to_string(), cfg.url.clone())
-            })
-            .collect();
+        let mut scoped_registries: HashMap<String, String> = HashMap::new();
+        let mut auth_headers: HashMap<String, HeaderMap> = HashMap::new();
+
+        for (scope, cfg) in &config.scoped {
+            if cfg.url.is_empty() {
+                continue;
+            }
+
+            // Normalize scope name: remove leading '@' and trim whitespace
+            let normalized_scope = scope.trim().strip_prefix('@').unwrap_or(scope.trim());
+            scoped_registries.insert(normalized_scope.to_string(), cfg.url.clone());
+
+            // Set up authentication if configured
+            if let Some(auth) = &cfg.auth {
+                if let Some(token) = auth.get_token() {
+                    let mut headers = HeaderMap::new();
+                    let auth_value = format!("Bearer {}", token);
+                    if let Ok(value) = HeaderValue::from_str(&auth_value) {
+                        headers.insert(AUTHORIZATION, value);
+                        auth_headers.insert(cfg.url.clone(), headers);
+                        tracing::info!(
+                            "Configured auth for npm scope @{} -> {} (token: {})",
+                            normalized_scope,
+                            cfg.url,
+                            redact_token(&token)
+                        );
+                    }
+                } else if auth.is_configured() {
+                    tracing::warn!(
+                        "Auth configured for npm scope @{} but token not found in env var {}",
+                        normalized_scope,
+                        auth.variable
+                    );
+                }
+            }
+        }
 
         Self {
             client,
             base_url,
             scoped_registries,
+            auth_headers,
         }
     }
 
@@ -135,6 +166,11 @@ impl NpmRegistry {
         }
         &self.base_url
     }
+
+    /// Get authentication headers for a registry URL.
+    fn get_auth_headers(&self, registry_url: &str) -> Option<&HeaderMap> {
+        self.auth_headers.get(registry_url)
+    }
 }
 
 impl Default for NpmRegistry {
@@ -152,6 +188,7 @@ impl Default for NpmRegistry {
             client: create_shared_client().expect("Failed to create HTTP client"),
             base_url: "https://registry.npmjs.org".to_string(),
             scoped_registries: HashMap::new(),
+            auth_headers: HashMap::new(),
         }
     }
 }
@@ -245,7 +282,15 @@ impl Registry for NpmRegistry {
         let registry_url = self.get_registry_url(package_name);
         let url = format!("{}/{}", registry_url, encoded_name);
 
-        let response = self.client.get(&url).send().await?;
+        // Build request with optional authentication
+        let mut request = self.client.get(&url);
+        if let Some(headers) = self.get_auth_headers(registry_url) {
+            for (key, value) in headers.iter() {
+                request = request.header(key, value);
+            }
+        }
+
+        let response = request.send().await?;
 
         if !response.status().is_success() {
             anyhow::bail!(
@@ -459,12 +504,14 @@ mod tests {
             "company".to_string(),
             NpmScopedConfig {
                 url: "https://npm.internal.company.com".to_string(),
+                auth: None,
             },
         );
         scoped.insert(
             "github".to_string(),
             NpmScopedConfig {
                 url: "https://npm.pkg.github.com".to_string(),
+                auth: None,
             },
         );
         let config = NpmRegistryConfig {
@@ -528,6 +575,7 @@ mod tests {
             "company".to_string(),
             NpmScopedConfig {
                 url: "https://npm.company.com".to_string(),
+                auth: None,
             },
         );
         let config = NpmRegistryConfig {
