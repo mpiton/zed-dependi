@@ -30,7 +30,7 @@ Dependi integrates with Zed's diagnostic system to show warnings and hints direc
 
 Dependencies with available updates are marked with a hint-level diagnostic:
 
-```
+```text
 tokio = "1.35.0"
 ~~~~~~~         HINT: Update available -> 1.36.0
 ```
@@ -49,7 +49,7 @@ Dependencies with known vulnerabilities are marked based on severity:
 | Low | Hint | `○ LOW` |
 
 Example:
-```
+```text
 ring = "0.16.20"
 ~~~~            ERROR: 2 vulnerabilities (1 high, 1 medium)
 ```

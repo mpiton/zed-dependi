@@ -7,7 +7,7 @@ description: >-
 url: "https://mpiton.github.io"
 baseurl: "/zed-dependi"
 
-remote_theme: just-the-docs/just-the-docs@v0.10.1
+theme: just-the-docs
 
 color_scheme: dark
 
@@ -46,7 +46,7 @@ gh_edit_link_text: "Edit this page on GitHub"
 gh_edit_repository: "https://github.com/mpiton/zed-dependi"
 gh_edit_branch: "main"
 gh_edit_source: docs
-gh_edit_view_mode: "tree"
+gh_edit_view_mode: "edit"
 
 callouts:
   warning:

@@ -28,7 +28,7 @@ Inlay hints appear at the end of each dependency line, showing the current versi
 
 ### Up to Date
 
-```
+```text
 serde = "1.0.210"     ✓
 ```
 
@@ -36,7 +36,7 @@ The `✓` symbol indicates your version matches the latest available version.
 
 ### Update Available
 
-```
+```text
 tokio = "1.35.0"      -> 1.36.0
 ```
 
@@ -44,7 +44,7 @@ The `-> X.Y.Z` format shows the latest version available. Click the code action 
 
 ### Vulnerabilities Detected
 
-```
+```text
 ring = "0.16.20"      ⚠ 2 vulns
 ```
 
@@ -52,7 +52,7 @@ The `⚠ N vulns` indicator shows the number of known vulnerabilities. Hover for
 
 ### Deprecated Package
 
-```
+```text
 old-package = "1.0.0"  ⚠ Deprecated
 ```
 
@@ -60,7 +60,7 @@ The package maintainer has marked this package as deprecated. Consider finding a
 
 ### Yanked Version
 
-```
+```text
 problematic = "0.5.0"  ⊘ Yanked
 ```
 
@@ -68,7 +68,7 @@ The specific version has been yanked/withdrawn from the registry. Update immedia
 
 ### Local/Path Dependency
 
-```
+```text
 my-lib = { path = "../my-lib" }  → Local
 ```
 
@@ -76,7 +76,7 @@ Local path dependencies don't have registry versions to check.
 
 ### Unknown Package
 
-```
+```text
 typo-package = "1.0.0"  ? Unknown
 ```
 

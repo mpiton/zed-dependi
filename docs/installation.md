@@ -96,15 +96,15 @@ Dependi needs network access to package registries and the vulnerability databas
 
 | Service | URL | Purpose |
 |---------|-----|---------|
-| crates.io | https://crates.io | Rust packages |
-| npm | https://registry.npmjs.org | Node.js packages |
-| PyPI | https://pypi.org | Python packages |
-| Go Proxy | https://proxy.golang.org | Go modules |
-| Packagist | https://packagist.org | PHP packages |
-| pub.dev | https://pub.dev | Dart packages |
-| NuGet | https://api.nuget.org | .NET packages |
-| RubyGems | https://rubygems.org | Ruby gems |
-| OSV.dev | https://api.osv.dev | Vulnerability data |
+| crates.io | `https://crates.io` | Rust packages |
+| npm | `https://registry.npmjs.org` | Node.js packages |
+| PyPI | `https://pypi.org` | Python packages |
+| Go Proxy | `https://proxy.golang.org` | Go modules |
+| Packagist | `https://packagist.org` | PHP packages |
+| pub.dev | `https://pub.dev` | Dart packages |
+| NuGet | `https://api.nuget.org` | .NET packages |
+| RubyGems | `https://rubygems.org` | Ruby gems |
+| OSV.dev | `https://api.osv.dev` | Vulnerability data |
 
 If you're behind a corporate firewall, ensure these URLs are allowed.
 

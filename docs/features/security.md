@@ -54,7 +54,7 @@ Vulnerabilities are categorized by severity:
 
 Vulnerable packages show the count in hints:
 
-```
+```text
 ring = "0.16.20"      ⚠ 2 vulns
 ```
 

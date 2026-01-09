@@ -39,7 +39,7 @@ Support for Python projects using requirements.txt and pyproject.toml.
 
 ### Basic Syntax
 
-```
+```text
 requests==2.31.0
 flask>=2.0.0
 django>=4.0,<5.0
@@ -47,7 +47,7 @@ django>=4.0,<5.0
 
 ### With Comments
 
-```
+```text
 # Web framework
 flask>=2.0.0
 
@@ -57,14 +57,14 @@ requests==2.31.0  # pinned for compatibility
 
 ### With Extras
 
-```
+```text
 requests[security]==2.31.0
 celery[redis,auth]>=5.0.0
 ```
 
 ### Editable Installs
 
-```
+```text
 -e git+https://github.com/user/repo.git#egg=package
 ```
 
@@ -135,7 +135,7 @@ Dependi handles normalization automatically.
 
 ### Pre-release Versions
 
-```
+```text
 flask>=2.0.0a1
 requests>=2.31.0rc1
 ```
@@ -161,7 +161,7 @@ Python vulnerabilities are sourced from:
 
 ### requirements.txt
 
-```
+```text
 # Production dependencies
 requests==2.31.0                 # ✓
 flask>=2.0.0                     # -> 3.0.0

@@ -33,6 +33,9 @@ Information about supported package registries and their APIs.
 | NuGet | .NET | `https://api.nuget.org/v3` | Fair use |
 | RubyGems | Ruby | `https://rubygems.org/api/v1` | ~10 req/s |
 
+{: .note }
+Rate limits are approximate and may change. Verify with each registry before relying on them.
+
 ## Common Data Model
 
 All registries return a unified structure:
@@ -41,14 +44,16 @@ All registries return a unified structure:
 VersionInfo {
     latest: Option<String>,           // Latest stable version
     latest_prerelease: Option<String>, // Latest prerelease
-    versions: Vec<String>,            // All versions
+    versions: Vec<String>,            // All available versions
     description: Option<String>,      // Package description
     homepage: Option<String>,         // Homepage URL
     repository: Option<String>,       // Repository URL
     license: Option<String>,          // SPDX license
-    vulnerabilities: Vec<Vulnerability>,
-    deprecated: bool,
-    yanked: bool,
+    vulnerabilities: Vec<Vulnerability>, // Known vulnerabilities (via OSV)
+    deprecated: bool,                 // Deprecation status
+    yanked: bool,                     // Whether latest is yanked
+    yanked_versions: Vec<String>,     // List of yanked versions
+    release_dates: HashMap<String, DateTime<Utc>>, // Version timestamps
 }
 ```
 
@@ -134,7 +139,7 @@ VersionInfo {
 
 ## Vulnerability Detection
 
-Vulnerabilities are **not** from package registries. Dependi uses [OSV.dev](https://osv.dev) (Google's Open Source Vulnerabilities database) for all ecosystems.
+Vulnerabilities are **not** from package registries. Dependi uses [OSV.dev](https://osv.dev) (Google's Open-Source Vulnerabilities database) for all ecosystems.
 
 OSV aggregates from:
 - GitHub Security Advisories
@@ -147,7 +152,7 @@ OSV aggregates from:
 
 Ensure these URLs are accessible through your firewall:
 
-```
+```text
 https://crates.io
 https://registry.npmjs.org
 https://pypi.org

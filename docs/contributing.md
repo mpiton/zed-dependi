@@ -104,7 +104,7 @@ Use conventional commit format:
 - `chore:` Maintenance
 
 Examples:
-```
+```text
 feat: add support for Ruby gems
 fix: handle scoped npm packages correctly
 docs: improve installation instructions

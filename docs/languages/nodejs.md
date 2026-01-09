@@ -164,13 +164,13 @@ Dependi checks against `latest` by default.
 
 ## Vulnerability Database
 
-npm vulnerabilities are sourced from:
+npm vulnerabilities are sourced via the [OSV.dev](https://osv.dev) API, which aggregates:
 - [npm Advisories](https://www.npmjs.com/advisories)
 - GitHub Security Advisories
 
 ## Example package.json
 
-```json
+```jsonc
 {
   "name": "my-project",
   "version": "1.0.0",

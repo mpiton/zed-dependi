@@ -65,7 +65,7 @@ dependi-lsp scan --file <path> [options]
 dependi-lsp scan --file Cargo.toml
 ```
 
-```
+```text
 Vulnerability Scan Results for Cargo.toml
 
   ⚠ Critical: 0
