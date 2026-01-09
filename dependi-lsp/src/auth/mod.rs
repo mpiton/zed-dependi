@@ -106,8 +106,9 @@ impl TokenProvider for NoAuthProvider {
 /// let manager = TokenProviderManager::new();
 ///
 /// // Register provider for GitHub npm
-/// if let Some(provider) = EnvTokenProvider::from_env("GITHUB_TOKEN") {
-///     manager.register("https://npm.pkg.github.com", Arc::new(provider)).await;
+/// if let Ok(token) = std::env::var("GITHUB_TOKEN") {
+///     let provider = EnvTokenProvider::new(token);
+///     manager.register("https://npm.pkg.github.com".to_string(), Arc::new(provider)).await;
 /// }
 ///
 /// // Get headers for a request
