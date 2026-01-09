@@ -9,6 +9,7 @@ use std::path::PathBuf;
 use serde::Deserialize;
 use tokio::fs;
 
+// These types are used only via deserialization in parse_credentials_content
 #[derive(Debug, Deserialize)]
 struct CargoCredentials {
     #[serde(default)]
@@ -26,6 +27,11 @@ struct RegistryCredential {
 ///
 /// # Returns
 /// A map of registry name to token string.
+///
+/// # Note
+/// This function is available for future integration with private Cargo registries.
+/// Currently tested but not yet wired into the main auth flow.
+#[allow(dead_code)]
 pub async fn parse_cargo_credentials() -> HashMap<String, String> {
     let credentials_path = get_credentials_path();
 

@@ -120,6 +120,19 @@ impl NpmRegistry {
 
             // Set up authentication if configured
             if let Some(auth) = &cfg.auth {
+                // Security: Only attach auth tokens to HTTPS URLs to prevent credential leakage
+                if !cfg.url.starts_with("https://") {
+                    if auth.is_configured() {
+                        tracing::error!(
+                            "SECURITY: Refusing to attach auth token for npm scope @{} - \
+                             registry URL '{}' is not HTTPS. Tokens must only be sent over secure connections.",
+                            normalized_scope,
+                            cfg.url
+                        );
+                    }
+                    continue;
+                }
+
                 if let Some(token) = auth.get_token() {
                     let mut headers = HeaderMap::new();
                     let auth_value = format!("Bearer {}", token);
@@ -600,6 +613,57 @@ mod tests {
         assert_eq!(
             registry.get_registry_url("@types/node"),
             "https://registry.npmjs.org"
+        );
+    }
+
+    #[test]
+    fn test_auth_not_attached_for_http_urls() {
+        use crate::config::{AuthConfig, NpmRegistryConfig, NpmScopedConfig};
+        use crate::registries::http_client::create_shared_client;
+
+        let client = create_shared_client().unwrap();
+        let mut scoped = HashMap::new();
+
+        // Configure a scope with HTTP (insecure) URL and auth
+        scoped.insert(
+            "insecure".to_string(),
+            NpmScopedConfig {
+                url: "http://insecure.registry.com".to_string(), // HTTP, not HTTPS
+                auth: Some(AuthConfig {
+                    auth_type: "env".to_string(),
+                    variable: "SOME_TOKEN".to_string(),
+                }),
+            },
+        );
+
+        // Configure a scope with HTTPS (secure) URL - no auth for this test
+        scoped.insert(
+            "secure".to_string(),
+            NpmScopedConfig {
+                url: "https://secure.registry.com".to_string(),
+                auth: None,
+            },
+        );
+
+        let config = NpmRegistryConfig {
+            url: "https://registry.npmjs.org".to_string(),
+            scoped,
+        };
+        let registry = NpmRegistry::with_client_and_config(client, &config);
+
+        // Scoped registries should still be populated
+        assert_eq!(registry.scoped_registries.len(), 2);
+        assert_eq!(
+            registry.scoped_registries.get("insecure"),
+            Some(&"http://insecure.registry.com".to_string())
+        );
+
+        // But auth headers should NOT be attached for the HTTP URL
+        assert!(
+            !registry
+                .auth_headers
+                .contains_key("http://insecure.registry.com"),
+            "Auth headers should not be attached to HTTP URLs"
         );
     }
 }

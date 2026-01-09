@@ -17,6 +17,11 @@ use tokio::fs;
 ///
 /// # Returns
 /// The token string if found and valid, `None` otherwise.
+///
+/// # Note
+/// This function is available for future integration with npm authentication.
+/// Currently tested but not yet wired into the main auth flow.
+#[allow(dead_code)]
 pub async fn parse_npmrc_token(project_root: &Path) -> Option<String> {
     let npmrc_path = project_root.join(".npmrc");
 
@@ -35,6 +40,11 @@ pub async fn parse_npmrc_token(project_root: &Path) -> Option<String> {
 ///
 /// # Returns
 /// The registry URL if found, `None` otherwise.
+///
+/// # Note
+/// This function is available for future integration with npm registry configuration.
+/// Currently tested but not yet wired into the main auth flow.
+#[allow(dead_code)]
 pub async fn parse_npmrc_registry(project_root: &Path) -> Option<String> {
     let npmrc_path = project_root.join(".npmrc");
 
@@ -126,6 +136,7 @@ fn resolve_env_var(value: &str) -> Option<String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use serial_test::serial;
 
     #[test]
     fn test_parse_direct_token() {
@@ -146,8 +157,9 @@ mod tests {
     }
 
     #[test]
+    #[serial]
     fn test_parse_env_var_token() {
-        // SAFETY: Test runs in single-threaded context
+        // SAFETY: serial_test ensures this test runs exclusively, preventing race conditions
         unsafe {
             std::env::set_var("TEST_NPM_TOKEN", "env_token_value");
         }
@@ -156,15 +168,16 @@ mod tests {
             parse_token_from_content(content),
             Some("env_token_value".to_string())
         );
-        // SAFETY: Test runs in single-threaded context
+        // SAFETY: serial_test ensures this test runs exclusively, preventing race conditions
         unsafe {
             std::env::remove_var("TEST_NPM_TOKEN");
         }
     }
 
     #[test]
+    #[serial]
     fn test_parse_env_var_without_braces() {
-        // SAFETY: Test runs in single-threaded context
+        // SAFETY: serial_test ensures this test runs exclusively, preventing race conditions
         unsafe {
             std::env::set_var("TEST_NPM_TOKEN2", "env_value2");
         }
@@ -173,7 +186,7 @@ mod tests {
             parse_token_from_content(content),
             Some("env_value2".to_string())
         );
-        // SAFETY: Test runs in single-threaded context
+        // SAFETY: serial_test ensures this test runs exclusively, preventing race conditions
         unsafe {
             std::env::remove_var("TEST_NPM_TOKEN2");
         }

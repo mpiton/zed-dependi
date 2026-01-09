@@ -9,10 +9,13 @@
 //! - Tokens are NEVER logged in any circumstances
 //! - All authenticated requests use HTTPS only
 //! - Sensitive data is redacted in error messages
+//!
+//! ## Submodules
+//!
+//! - [`cargo_credentials`]: Parser for Cargo credentials files (`~/.cargo/credentials.toml`)
+//! - [`npmrc`]: Parser for npm configuration files (`.npmrc`)
 
-#[allow(dead_code)]
 pub mod cargo_credentials;
-#[allow(dead_code)]
 pub mod npmrc;
 
 /// Redact a token for safe logging.

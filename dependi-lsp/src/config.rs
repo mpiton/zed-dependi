@@ -204,6 +204,7 @@ impl Config {
 mod tests {
     use super::*;
     use serde_json::json;
+    use serial_test::serial;
 
     #[test]
     fn test_default_config() {
@@ -424,8 +425,9 @@ mod tests {
     }
 
     #[test]
+    #[serial]
     fn test_auth_config_env_type() {
-        // SAFETY: Test runs in single-threaded context
+        // SAFETY: serial_test ensures this test runs exclusively, preventing race conditions
         unsafe {
             std::env::set_var("TEST_AUTH_TOKEN", "secret123");
         }
@@ -456,7 +458,7 @@ mod tests {
         assert!(auth.is_configured());
         assert_eq!(auth.get_token(), Some("secret123".to_string()));
 
-        // SAFETY: Test runs in single-threaded context
+        // SAFETY: serial_test ensures this test runs exclusively, preventing race conditions
         unsafe {
             std::env::remove_var("TEST_AUTH_TOKEN");
         }
