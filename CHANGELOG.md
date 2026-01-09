@@ -70,7 +70,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Update Rust dependencies and add registry compliance
 - Update dependencies and fix breaking changes
 
-## [0.3.1] - 2024-12-13
+## [0.3.1] - 2025-12-13
 
 ### Added
 
@@ -90,7 +90,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Dead code clippy warnings
 - Clippy warnings (collapsible_if, bool_comparison)
 
-## [0.3.0] - 2024-12-13
+## [0.3.0] - 2025-12-13
 
 ### Added
 
@@ -102,7 +102,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - .NET (*.csproj) via NuGet
 - YAML and XML support for extension
 
-## [0.2.0] - 2024-12-13
+## [0.2.0] - 2025-12-13
 
 ### Added
 
@@ -113,13 +113,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Inlay hints enable/disable option
 - Diagnostics enable/disable option
 
-## [0.1.1] - 2024-12-13
+## [0.1.1] - 2025-12-13
 
 ### Fixed
 
 - Use 'Go Mod' language type for go.mod files in Zed
 
-## [0.1.0] - 2024-12-13
+## [0.1.0] - 2025-12-13
 
 ### Added
 
