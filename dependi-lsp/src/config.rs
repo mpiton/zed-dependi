@@ -332,10 +332,10 @@ mod tests {
                 "npm": {
                     "url": "https://npm.company.com",
                     "scoped": {
-                        "@company": {
+                        "company": {
                             "url": "https://npm.internal.company.com"
                         },
-                        "@github": {
+                        "github": {
                             "url": "https://npm.pkg.github.com"
                         }
                     }
@@ -347,11 +347,11 @@ mod tests {
         assert_eq!(config.registries.npm.url, "https://npm.company.com");
         assert_eq!(config.registries.npm.scoped.len(), 2);
         assert_eq!(
-            config.registries.npm.scoped.get("@company").unwrap().url,
+            config.registries.npm.scoped.get("company").unwrap().url,
             "https://npm.internal.company.com"
         );
         assert_eq!(
-            config.registries.npm.scoped.get("@github").unwrap().url,
+            config.registries.npm.scoped.get("github").unwrap().url,
             "https://npm.pkg.github.com"
         );
     }

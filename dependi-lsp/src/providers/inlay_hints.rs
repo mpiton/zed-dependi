@@ -122,14 +122,17 @@ fn create_hint_label_and_tooltip(
         };
     }
 
-    // Handle vulnerabilities
+    // Handle vulnerabilities (vuln_count > 0 implies version_info is Some)
     if vuln_count > 0 {
         let vuln_label = format!(
             "⚠ {} {}",
             vuln_count,
             if vuln_count == 1 { "vuln" } else { "vulns" }
         );
-        let vuln_tooltip = format_vulnerability_tooltip(version_info.unwrap());
+        let Some(info) = version_info else {
+            return (vuln_label, None);
+        };
+        let vuln_tooltip = format_vulnerability_tooltip(info);
 
         // Combine with update info if available
         return match status {

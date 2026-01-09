@@ -793,8 +793,9 @@ impl LanguageServer for DependiBackend {
     }
 
     async fn inlay_hint(&self, params: InlayHintParams) -> Result<Option<Vec<InlayHint>>> {
-        // Check if inlay hints are enabled
-        let config = self.config.read().unwrap();
+        let Ok(config) = self.config.read() else {
+            return Ok(Some(vec![]));
+        };
         if !config.inlay_hints.enabled {
             return Ok(Some(vec![]));
         }

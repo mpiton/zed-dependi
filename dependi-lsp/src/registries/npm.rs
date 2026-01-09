@@ -105,7 +105,12 @@ impl NpmRegistry {
             .scoped
             .iter()
             .filter(|(_, v)| !v.url.is_empty())
-            .map(|(scope, cfg)| (scope.clone(), cfg.url.clone()))
+            .map(|(scope, cfg)| {
+                // Normalize scope name: remove leading '@' and trim whitespace
+                // This ensures lookups in get_registry_url will match
+                let normalized_scope = scope.trim().strip_prefix('@').unwrap_or(scope.trim());
+                (normalized_scope.to_string(), cfg.url.clone())
+            })
             .collect();
 
         Self {
@@ -451,13 +456,13 @@ mod tests {
         let client = create_shared_client().unwrap();
         let mut scoped = HashMap::new();
         scoped.insert(
-            "@company".to_string(),
+            "company".to_string(),
             NpmScopedConfig {
                 url: "https://npm.internal.company.com".to_string(),
             },
         );
         scoped.insert(
-            "@github".to_string(),
+            "github".to_string(),
             NpmScopedConfig {
                 url: "https://npm.pkg.github.com".to_string(),
             },
@@ -471,12 +476,22 @@ mod tests {
         assert_eq!(registry.base_url, "https://registry.npmjs.org");
         assert_eq!(registry.scoped_registries.len(), 2);
         assert_eq!(
-            registry.scoped_registries.get("@company"),
+            registry.scoped_registries.get("company"),
             Some(&"https://npm.internal.company.com".to_string())
         );
         assert_eq!(
-            registry.scoped_registries.get("@github"),
+            registry.scoped_registries.get("github"),
             Some(&"https://npm.pkg.github.com".to_string())
+        );
+
+        // End-to-end: verify routing works for scoped packages
+        assert_eq!(
+            registry.get_registry_url("@company/utils"),
+            "https://npm.internal.company.com"
+        );
+        assert_eq!(
+            registry.get_registry_url("@github/actions"),
+            "https://npm.pkg.github.com"
         );
     }
 
