@@ -1,16 +1,3 @@
-mod auth;
-mod backend;
-mod cache;
-mod config;
-mod document;
-mod file_types;
-mod parsers;
-mod providers;
-mod registries;
-mod reports;
-mod utils;
-mod vulnerabilities;
-
 use std::path::PathBuf;
 use std::process::ExitCode;
 
@@ -18,7 +5,7 @@ use clap::{Parser, Subcommand};
 use tower_lsp::{LspService, Server};
 use tracing_subscriber::{EnvFilter, layer::SubscriberExt, util::SubscriberInitExt};
 
-use crate::backend::DependiBackend;
+use dependi_lsp::backend::DependiBackend;
 
 #[derive(Parser)]
 #[command(name = "dependi-lsp")]
@@ -93,12 +80,12 @@ async fn run_scan(
     min_severity: String,
     fail_on_vulns: bool,
 ) -> ExitCode {
-    use crate::parsers::{
+    use dependi_lsp::parsers::{
         Parser, cargo::CargoParser, csharp::CsharpParser, dart::DartParser, go::GoParser,
         npm::NpmParser, php::PhpParser, python::PythonParser,
     };
-    use crate::registries::VulnerabilitySeverity;
-    use crate::vulnerabilities::{Ecosystem, VulnerabilityQuery, osv::OsvClient};
+    use dependi_lsp::registries::VulnerabilitySeverity;
+    use dependi_lsp::vulnerabilities::{Ecosystem, VulnerabilityQuery, osv::OsvClient};
 
     // Read file (using async I/O)
     let content = match tokio::fs::read_to_string(&file).await {

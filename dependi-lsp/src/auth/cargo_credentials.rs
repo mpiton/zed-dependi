@@ -2,87 +2,32 @@
 //!
 //! Parses `~/.cargo/credentials.toml` or `$CARGO_HOME/credentials.toml`
 //! to extract authentication tokens for alternative Cargo registries.
+//!
+//! Note: This module provides parsing utilities for Cargo credential files.
+//! The parsing logic is tested; file I/O integration will be added when
+//! this is wired into the main auth flow.
 
+#[cfg(test)]
 use std::collections::HashMap;
-use std::path::PathBuf;
 
+#[cfg(test)]
 use serde::Deserialize;
-use tokio::fs;
 
 // These types are used only via deserialization in parse_credentials_content
+#[cfg(test)]
 #[derive(Debug, Deserialize)]
 struct CargoCredentials {
     #[serde(default)]
     registries: HashMap<String, RegistryCredential>,
 }
 
+#[cfg(test)]
 #[derive(Debug, Deserialize)]
 struct RegistryCredential {
     token: Option<String>,
 }
 
-/// Parse `.cargo/credentials.toml` file for registry tokens.
-///
-/// Looks in `$CARGO_HOME/credentials.toml` or `~/.cargo/credentials.toml`.
-///
-/// # Returns
-/// A map of registry name to token string.
-///
-/// # Note
-/// This function is available for future integration with private Cargo registries.
-/// Currently tested but not yet wired into the main auth flow.
-#[allow(dead_code)]
-pub async fn parse_cargo_credentials() -> HashMap<String, String> {
-    let credentials_path = get_credentials_path();
-
-    let Some(path) = credentials_path else {
-        return HashMap::new();
-    };
-
-    if !path.exists() {
-        return HashMap::new();
-    }
-
-    let content = match fs::read_to_string(&path).await {
-        Ok(c) => c,
-        Err(_) => return HashMap::new(),
-    };
-
-    parse_credentials_content(&content)
-}
-
-fn get_credentials_path() -> Option<PathBuf> {
-    // Try CARGO_HOME first
-    if let Ok(cargo_home) = std::env::var("CARGO_HOME") {
-        let cargo_home_path = PathBuf::from(&cargo_home);
-        let path = cargo_home_path.join("credentials.toml");
-        if path.exists() {
-            return Some(path);
-        }
-        // Also try without .toml extension (older format)
-        let path = cargo_home_path.join("credentials");
-        if path.exists() {
-            return Some(path);
-        }
-    }
-
-    // Fall back to ~/.cargo
-    if let Some(home) = dirs::home_dir() {
-        let cargo_dir = home.join(".cargo");
-        let path = cargo_dir.join("credentials.toml");
-        if path.exists() {
-            return Some(path);
-        }
-        // Also try without .toml extension
-        let path = cargo_dir.join("credentials");
-        if path.exists() {
-            return Some(path);
-        }
-    }
-
-    None
-}
-
+#[cfg(test)]
 fn parse_credentials_content(content: &str) -> HashMap<String, String> {
     let credentials: CargoCredentials = match toml::from_str(content) {
         Ok(c) => c,
