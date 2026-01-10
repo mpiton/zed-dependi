@@ -81,14 +81,14 @@ jobs:
 
       - name: Upload crash artifacts
         if: failure()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v6
         with:
           name: fuzz-crashes-${{ matrix.target }}
           path: dependi-lsp/fuzz/artifacts/
           retention-days: 30
 
       - name: Upload corpus
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v6
         with:
           name: fuzz-corpus-${{ matrix.target }}
           path: dependi-lsp/fuzz/corpus/fuzz_${{ matrix.target }}/
