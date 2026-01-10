@@ -1,6 +1,9 @@
 //! Parser for package.json files
+//!
+//! Uses serde_json for fast parsing with position tracking via byte offset calculation.
 
 use super::{Dependency, Parser};
+use serde_json::Value;
 
 /// Parser for npm package.json dependency files
 #[derive(Debug, Default)]
@@ -14,223 +17,175 @@ impl NpmParser {
 
 impl Parser for NpmParser {
     fn parse(&self, content: &str) -> Vec<Dependency> {
-        let mut dependencies = Vec::new();
+        let Ok(value) = serde_json::from_str::<Value>(content) else {
+            return Vec::new();
+        };
 
-        // Track which section we're in
-        let mut current_section: Option<DependencyType> = None;
-        let mut section_brace_depth = 0;
-        let mut in_section_object = false;
+        // Pre-compute line start offsets for position calculation
+        let line_offsets = compute_line_offsets(content);
 
-        for (line_idx, line) in content.lines().enumerate() {
-            let line_num = line_idx as u32;
-            let trimmed = line.trim();
+        let mut dependencies = Vec::with_capacity(64);
 
-            // Check for section headers first
-            if let Some(section) = detect_section(trimmed) {
-                current_section = Some(section);
-                // Count braces after the section name to determine if we're in the object
-                let section_start = if trimmed.contains("devDependencies") {
-                    trimmed.find("devDependencies").unwrap() + "devDependencies".len()
-                } else if trimmed.contains("peerDependencies") {
-                    trimmed.find("peerDependencies").unwrap() + "peerDependencies".len()
-                } else if trimmed.contains("optionalDependencies") {
-                    trimmed.find("optionalDependencies").unwrap() + "optionalDependencies".len()
-                } else if trimmed.contains("dependencies") {
-                    trimmed.find("dependencies").unwrap() + "dependencies".len()
-                } else {
-                    0
-                };
-
-                let after_section = &trimmed[section_start..];
-                if after_section.contains('{') {
-                    in_section_object = true;
-                    section_brace_depth = 1;
-
-                    // Handle inline dependencies on the same line as section header
-                    // e.g., {"dependencies": {"pkg": "1.0.0"}}
-                    if let Some(brace_pos) = after_section.find('{') {
-                        let deps_content = &after_section[brace_pos + 1..];
-                        // Try to parse dependencies from this content
-                        for dep in parse_inline_dependencies(deps_content, line_num, section) {
-                            dependencies.push(dep);
-                        }
-                    }
-                }
-                continue;
-            }
-
-            // If we're looking for the opening brace of a section
-            if current_section.is_some()
-                && !in_section_object
-                && (trimmed.starts_with('{') || trimmed == "{")
-            {
-                in_section_object = true;
-                section_brace_depth = 1;
-                continue;
-            }
-
-            // Track brace depth within section
-            if in_section_object {
-                for ch in trimmed.chars() {
-                    match ch {
-                        '{' => section_brace_depth += 1,
-                        '}' => {
-                            section_brace_depth -= 1;
-                            if section_brace_depth == 0 {
-                                current_section = None;
-                                in_section_object = false;
-                            }
-                        }
-                        _ => {}
-                    }
-                }
-            }
-
-            // Parse dependency lines within sections
-            if let Some(section) = current_section
-                && in_section_object
-                && let Some(dep) = parse_dependency_line(line, line_num, section)
-            {
-                dependencies.push(dep);
-            }
-        }
+        // Parse all dependency sections
+        parse_dependency_section(
+            &value,
+            "dependencies",
+            content,
+            &line_offsets,
+            false,
+            false,
+            &mut dependencies,
+        );
+        parse_dependency_section(
+            &value,
+            "devDependencies",
+            content,
+            &line_offsets,
+            true,
+            false,
+            &mut dependencies,
+        );
+        parse_dependency_section(
+            &value,
+            "peerDependencies",
+            content,
+            &line_offsets,
+            false,
+            true,
+            &mut dependencies,
+        );
+        parse_dependency_section(
+            &value,
+            "optionalDependencies",
+            content,
+            &line_offsets,
+            false,
+            true,
+            &mut dependencies,
+        );
 
         dependencies
     }
 }
 
-#[derive(Debug, Clone, Copy, PartialEq)]
-enum DependencyType {
-    Normal,
-    Dev,
-    Peer,
-    Optional,
+/// Compute byte offsets for each line start (for position calculation)
+fn compute_line_offsets(content: &str) -> Vec<usize> {
+    let mut offsets = vec![0];
+    for (i, byte) in content.bytes().enumerate() {
+        if byte == b'\n' {
+            offsets.push(i + 1);
+        }
+    }
+    offsets
 }
 
-/// Parse inline dependencies from a single line content
-/// e.g., "pkg": "1.0.0", "pkg2": "2.0.0"}}
-fn parse_inline_dependencies(
+/// Convert byte offset to (line, column) - both 0-indexed
+fn offset_to_position(offset: usize, line_offsets: &[usize]) -> (u32, u32) {
+    let line = line_offsets
+        .iter()
+        .rposition(|&start| start <= offset)
+        .unwrap_or(0);
+    let col = offset - line_offsets[line];
+    (line as u32, col as u32)
+}
+
+/// Parse a dependency section (dependencies, devDependencies, etc.)
+fn parse_dependency_section(
+    root: &Value,
+    section_name: &str,
     content: &str,
-    line_num: u32,
-    dep_type: DependencyType,
-) -> Vec<Dependency> {
-    let mut deps = Vec::new();
-    let mut remaining = content;
+    line_offsets: &[usize],
+    dev: bool,
+    optional: bool,
+    dependencies: &mut Vec<Dependency>,
+) {
+    let Some(section) = root.get(section_name) else {
+        return;
+    };
+    let Some(deps_obj) = section.as_object() else {
+        return;
+    };
 
-    while let Some(first_quote) = remaining.find('"') {
-        let after_first = &remaining[first_quote + 1..];
-        let Some(name_end) = after_first.find('"') else {
-            break;
-        };
-        let name = &after_first[..name_end];
-
-        // Skip if it looks like a section header or closing
-        if name.ends_with("ependencies") || name.is_empty() {
-            remaining = &after_first[name_end + 1..];
+    for (name, version_val) in deps_obj {
+        let Some(version) = extract_version(version_val) else {
             continue;
+        };
+
+        // Find the dependency in the original content for position tracking
+        if let Some(dep) =
+            find_dependency_position(content, line_offsets, name, &version, dev, optional)
+        {
+            dependencies.push(dep);
+        }
+    }
+}
+
+/// Extract version string from various npm formats
+fn extract_version(value: &Value) -> Option<String> {
+    match value {
+        Value::String(s) => Some(s.clone()),
+        Value::Object(obj) => {
+            // Handle: { "version": "1.0.0" } or complex specs
+            obj.get("version")
+                .and_then(|v| v.as_str())
+                .map(|v| v.to_string())
+        }
+        _ => None,
+    }
+}
+
+/// Find the position of a dependency in the content
+fn find_dependency_position(
+    content: &str,
+    line_offsets: &[usize],
+    name: &str,
+    version: &str,
+    dev: bool,
+    optional: bool,
+) -> Option<Dependency> {
+    // Search for the quoted name pattern: "name": "version"
+    let search_pattern = format!("\"{}\"", name);
+
+    // Find all occurrences and pick the one followed by a colon and the version
+    let mut search_start = 0;
+    while let Some(name_offset) = content[search_start..].find(&search_pattern) {
+        let abs_offset = search_start + name_offset;
+        let after_name = abs_offset + search_pattern.len();
+
+        // Check if this looks like a key (followed by colon)
+        let rest = &content[after_name..];
+        let trimmed = rest.trim_start();
+
+        if trimmed.starts_with(':') {
+            // This is a key, now find the version
+            if let Some(version_offset) = rest.find(&format!("\"{}\"", version)) {
+                let version_abs = after_name + version_offset;
+
+                // Calculate positions
+                let (line, name_start_col) = offset_to_position(abs_offset + 1, line_offsets); // +1 to skip opening quote
+                let name_end_col = name_start_col + name.len() as u32;
+
+                let (_, version_start_col) = offset_to_position(version_abs + 1, line_offsets); // +1 to skip opening quote
+                let version_end_col = version_start_col + version.len() as u32;
+
+                return Some(Dependency {
+                    name: name.to_string(),
+                    version: version.to_string(),
+                    line,
+                    name_start: name_start_col,
+                    name_end: name_end_col,
+                    version_start: version_start_col,
+                    version_end: version_end_col,
+                    dev,
+                    optional,
+                });
+            }
         }
 
-        // Find colon and version
-        let after_name = &after_first[name_end + 1..];
-        let Some(colon_pos) = after_name.find(':') else {
-            remaining = after_name;
-            continue;
-        };
-
-        let after_colon = &after_name[colon_pos + 1..];
-        let Some(version_quote_start) = after_colon.find('"') else {
-            remaining = after_colon;
-            continue;
-        };
-
-        let version_content = &after_colon[version_quote_start + 1..];
-        let Some(version_end) = version_content.find('"') else {
-            remaining = version_content;
-            continue;
-        };
-
-        let version = &version_content[..version_end];
-
-        deps.push(Dependency {
-            name: name.to_string(),
-            version: version.to_string(),
-            line: line_num,
-            name_start: 0, // Approximate for inline
-            name_end: 0,
-            version_start: 0,
-            version_end: 0,
-            dev: dep_type == DependencyType::Dev,
-            optional: dep_type == DependencyType::Optional || dep_type == DependencyType::Peer,
-        });
-
-        remaining = &version_content[version_end + 1..];
+        search_start = abs_offset + 1;
     }
 
-    deps
-}
-
-fn detect_section(line: &str) -> Option<DependencyType> {
-    let line = line.trim();
-
-    if line.contains("\"dependencies\"") && !line.contains("\"devDependencies\"") {
-        Some(DependencyType::Normal)
-    } else if line.contains("\"devDependencies\"") {
-        Some(DependencyType::Dev)
-    } else if line.contains("\"peerDependencies\"") {
-        Some(DependencyType::Peer)
-    } else if line.contains("\"optionalDependencies\"") {
-        Some(DependencyType::Optional)
-    } else {
-        None
-    }
-}
-
-fn parse_dependency_line(
-    line: &str,
-    line_num: u32,
-    dep_type: DependencyType,
-) -> Option<Dependency> {
-    // Match pattern: "package-name": "version"
-    // Find the first quoted string (package name)
-    let first_quote = line.find('"')?;
-    let after_first = &line[first_quote + 1..];
-    let name_end = after_first.find('"')?;
-    let name = &after_first[..name_end];
-
-    // Skip if it looks like a section header
-    if name.ends_with("ependencies") {
-        return None;
-    }
-
-    // Find the colon
-    let colon_pos = line.find(':')?;
-
-    // Find the version string (after the colon)
-    let after_colon = &line[colon_pos + 1..];
-    let version_first_quote = after_colon.find('"')?;
-    let version_start_in_after = version_first_quote + 1;
-    let after_version_quote = &after_colon[version_start_in_after..];
-    let version_end_in_after = after_version_quote.find('"')?;
-    let version = &after_version_quote[..version_end_in_after];
-
-    // Calculate absolute positions
-    let name_start = (first_quote + 1) as u32;
-    let name_end_pos = name_start + name.len() as u32;
-
-    let version_abs_start = (colon_pos + 1 + version_start_in_after) as u32;
-    let version_abs_end = version_abs_start + version.len() as u32;
-
-    Some(Dependency {
-        name: name.to_string(),
-        version: version.to_string(),
-        line: line_num,
-        name_start,
-        name_end: name_end_pos,
-        version_start: version_abs_start,
-        version_end: version_abs_end,
-        dev: dep_type == DependencyType::Dev,
-        optional: dep_type == DependencyType::Optional || dep_type == DependencyType::Peer,
-    })
+    None
 }
 
 #[cfg(test)]
@@ -357,5 +312,74 @@ mod tests {
         assert_eq!(deps.len(), 1);
         assert_eq!(deps[0].name, "pkg");
         assert_eq!(deps[0].version, "1.0.0");
+    }
+
+    #[test]
+    fn test_position_tracking() {
+        let parser = NpmParser::new();
+        let content = r#"{
+  "dependencies": {
+    "react": "^18.0.0"
+  }
+}"#;
+        let deps = parser.parse(content);
+        assert_eq!(deps.len(), 1);
+
+        let react = &deps[0];
+        assert_eq!(react.name, "react");
+        assert_eq!(react.line, 2); // 0-indexed, so line 3 is index 2
+        // Verify positions are within reasonable bounds
+        assert!(react.name_start < react.name_end);
+        assert!(react.version_start < react.version_end);
+    }
+
+    #[test]
+    fn test_optional_dependencies() {
+        let parser = NpmParser::new();
+        let content = r#"{
+  "optionalDependencies": {
+    "fsevents": "^2.3.0"
+  }
+}"#;
+        let deps = parser.parse(content);
+        assert_eq!(deps.len(), 1);
+        assert!(deps[0].optional);
+        assert!(!deps[0].dev);
+    }
+
+    #[test]
+    fn test_complex_version_object() {
+        let parser = NpmParser::new();
+        let content = r#"{
+  "dependencies": {
+    "simple": "1.0.0",
+    "complex": { "version": "2.0.0" }
+  }
+}"#;
+        let deps = parser.parse(content);
+        // Only the simple string version should be parsed
+        // Complex objects with version field are also supported
+        assert!(!deps.is_empty());
+        let simple = deps.iter().find(|d| d.name == "simple").unwrap();
+        assert_eq!(simple.version, "1.0.0");
+    }
+
+    #[test]
+    fn test_empty_dependencies() {
+        let parser = NpmParser::new();
+        let content = r#"{
+  "name": "my-app",
+  "dependencies": {}
+}"#;
+        let deps = parser.parse(content);
+        assert_eq!(deps.len(), 0);
+    }
+
+    #[test]
+    fn test_invalid_json() {
+        let parser = NpmParser::new();
+        let content = "not valid json";
+        let deps = parser.parse(content);
+        assert_eq!(deps.len(), 0);
     }
 }

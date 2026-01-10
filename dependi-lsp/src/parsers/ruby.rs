@@ -1,5 +1,7 @@
 //! Parser for Ruby Gemfile files
 //!
+//! Optimized for performance with reduced allocations.
+//!
 //! Supports:
 //! - Gemfile format (Bundler)
 //! - gem declarations with version constraints
@@ -19,7 +21,8 @@ impl RubyParser {
 
 impl Parser for RubyParser {
     fn parse(&self, content: &str) -> Vec<Dependency> {
-        let mut dependencies = Vec::new();
+        // Pre-allocate with reasonable capacity
+        let mut dependencies = Vec::with_capacity(32);
         let mut in_dev_group = false;
         let mut group_depth = 0;
 
@@ -76,57 +79,20 @@ fn parse_gem_declaration(line: &str, line_num: u32, dev: bool) -> Option<Depende
     let trimmed = line.trim();
 
     // Must start with 'gem'
-    if !trimmed.starts_with("gem ") && !trimmed.starts_with("gem(") {
-        return None;
-    }
-
-    // Extract the part after 'gem'
-    let after_gem = if trimmed.starts_with("gem(") {
-        trimmed.strip_prefix("gem(")?.trim_end_matches(')')
+    let after_gem = if let Some(rest) = trimmed.strip_prefix("gem(") {
+        rest.trim_end_matches(')')
+    } else if let Some(rest) = trimmed.strip_prefix("gem ") {
+        rest
     } else {
-        trimmed.strip_prefix("gem ")?
+        return None;
     };
 
-    // Split by comma to get arguments
-    let args: Vec<&str> = split_gem_args(after_gem);
-
-    if args.is_empty() {
-        return None;
-    }
-
-    // First argument is the gem name (quoted)
-    let name = args[0].trim().trim_matches(|c| c == '\'' || c == '"');
-
-    // Second argument (if present) is the version constraint
-    let version = if args.len() > 1 {
-        let version_arg = args[1].trim();
-        // Skip if it's a hash option (like require: false, git: ...)
-        if version_arg.contains(':')
-            && !version_arg.starts_with('\'')
-            && !version_arg.starts_with('"')
-        {
-            return None; // No version, has options like git: or path:
-        }
-        version_arg
-            .trim_matches(|c| c == '\'' || c == '"')
-            .to_string()
-    } else {
-        return None; // No version specified
-    };
-
-    // Skip if version looks like a hash key (path, git, etc.)
-    if version.is_empty() || version.contains(':') {
-        return None;
-    }
-
-    // Calculate positions in the original line
-    let name_start = find_string_position(line, name)? as u32;
-    let name_end = name_start + name.len() as u32;
-    let version_start = find_string_position(line, &version)? as u32;
-    let version_end = version_start + version.len() as u32;
+    // Parse the arguments
+    let (name, version, name_start, name_end, version_start, version_end) =
+        parse_gem_args(line, after_gem)?;
 
     Some(Dependency {
-        name: name.to_string(),
+        name,
         version,
         line: line_num,
         name_start,
@@ -138,63 +104,111 @@ fn parse_gem_declaration(line: &str, line_num: u32, dev: bool) -> Option<Depende
     })
 }
 
-/// Split gem arguments respecting quotes
-fn split_gem_args(s: &str) -> Vec<&str> {
-    let mut args = Vec::new();
-    let mut start = 0;
-    let mut in_quotes = false;
-    let mut quote_char = ' ';
+/// Parse gem arguments and return (name, version, positions)
+fn parse_gem_args(line: &str, args_str: &str) -> Option<(String, String, u32, u32, u32, u32)> {
+    let bytes = args_str.as_bytes();
+    let len = bytes.len();
 
-    for (i, c) in s.char_indices() {
-        match c {
-            '\'' | '"' if !in_quotes => {
-                in_quotes = true;
-                quote_char = c;
-            }
-            c if c == quote_char && in_quotes => {
-                in_quotes = false;
-            }
-            ',' if !in_quotes => {
-                let arg = s[start..i].trim();
-                if !arg.is_empty() {
-                    args.push(arg);
-                }
-                start = i + 1;
-            }
-            _ => {}
-        }
+    // Parse first argument (name)
+    let (name, name_end_idx) = parse_quoted_string(bytes, 0)?;
+
+    // Find comma after name
+    let mut idx = name_end_idx;
+    while idx < len && bytes[idx] != b',' {
+        idx += 1;
+    }
+    if idx >= len {
+        return None; // No version
+    }
+    idx += 1; // Skip comma
+
+    // Skip whitespace
+    while idx < len && (bytes[idx] == b' ' || bytes[idx] == b'\t') {
+        idx += 1;
+    }
+    if idx >= len {
+        return None;
     }
 
-    // Don't forget the last argument
-    let last_arg = s[start..].trim();
-    if !last_arg.is_empty() {
-        // Stop at hash options
-        if let Some(hash_start) = last_arg.find([':', '{']) {
-            let before_hash = last_arg[..hash_start].trim();
-            if !before_hash.is_empty()
-                && (before_hash.starts_with('\'') || before_hash.starts_with('"'))
-            {
-                args.push(before_hash);
-            }
-        } else {
-            args.push(last_arg);
-        }
+    // Check if this looks like a hash option (contains : but not quoted)
+    let next_byte = bytes[idx];
+    if next_byte != b'\'' && next_byte != b'"' {
+        // Not a quoted string, likely a hash option like git:
+        return None;
     }
 
-    args
+    // Parse second argument (version)
+    let (version, _) = parse_quoted_string(bytes, idx)?;
+
+    // Skip if version looks like a hash key
+    if version.is_empty() || version.contains(':') {
+        return None;
+    }
+
+    // Find positions in the original line
+    let (name_start, name_end) = find_quoted_position(line, &name)?;
+    let (version_start, version_end) = find_quoted_position(line, &version)?;
+
+    Some((
+        name,
+        version,
+        name_start,
+        name_end,
+        version_start,
+        version_end,
+    ))
 }
 
-/// Find the position of a string in a line (accounting for quotes)
-fn find_string_position(line: &str, needle: &str) -> Option<usize> {
-    // Look for the string within quotes
-    for quote in &['\'', '"'] {
-        let quoted = format!("{}{}{}", quote, needle, quote);
-        if let Some(pos) = line.find(&quoted) {
-            return Some(pos + 1); // Skip the opening quote
-        }
+/// Parse a quoted string starting at index, return (string, end_index)
+fn parse_quoted_string(bytes: &[u8], start: usize) -> Option<(String, usize)> {
+    let len = bytes.len();
+    let mut idx = start;
+
+    // Skip whitespace
+    while idx < len && (bytes[idx] == b' ' || bytes[idx] == b'\t') {
+        idx += 1;
     }
+    if idx >= len {
+        return None;
+    }
+
+    let quote = bytes[idx];
+    if quote != b'\'' && quote != b'"' {
+        return None;
+    }
+    idx += 1;
+
+    let string_start = idx;
+    while idx < len && bytes[idx] != quote {
+        idx += 1;
+    }
+    if idx >= len {
+        return None;
+    }
+
+    let s = std::str::from_utf8(&bytes[string_start..idx]).ok()?;
+    Some((s.to_string(), idx + 1))
+}
+
+/// Find the position of a quoted string in a line
+fn find_quoted_position(line: &str, needle: &str) -> Option<(u32, u32)> {
+    // Look for the string within single quotes first (more common in Ruby)
+    let single_quoted = format!("'{}'", needle);
+    if let Some(pos) = line.find(&single_quoted) {
+        let start = (pos + 1) as u32;
+        return Some((start, start + needle.len() as u32));
+    }
+
+    // Try double quotes
+    let double_quoted = format!("\"{}\"", needle);
+    if let Some(pos) = line.find(&double_quoted) {
+        let start = (pos + 1) as u32;
+        return Some((start, start + needle.len() as u32));
+    }
+
     // Fallback to direct search
-    line.find(needle)
+    let pos = line.find(needle)? as u32;
+    Some((pos, pos + needle.len() as u32))
 }
 
 #[cfg(test)]
@@ -386,5 +400,23 @@ end
 
         let rspec = deps.iter().find(|d| d.name == "rspec").unwrap();
         assert!(rspec.dev);
+    }
+
+    #[test]
+    fn test_empty_file() {
+        let parser = RubyParser::new();
+        let content = "";
+        let deps = parser.parse(content);
+        assert_eq!(deps.len(), 0);
+    }
+
+    #[test]
+    fn test_parenthesized_gem() {
+        let parser = RubyParser::new();
+        let content = "gem('rails', '~> 7.0')";
+        let deps = parser.parse(content);
+        assert_eq!(deps.len(), 1);
+        assert_eq!(deps[0].name, "rails");
+        assert_eq!(deps[0].version, "~> 7.0");
     }
 }

@@ -1,4 +1,6 @@
 //! Parser for Go module files (go.mod)
+//!
+//! Optimized for performance with pre-allocation and reduced string searches.
 
 use super::{Dependency, Parser};
 
@@ -14,7 +16,8 @@ impl GoParser {
 
 impl Parser for GoParser {
     fn parse(&self, content: &str) -> Vec<Dependency> {
-        let mut dependencies = Vec::new();
+        // Pre-allocate with reasonable capacity
+        let mut dependencies = Vec::with_capacity(32);
         let mut in_require_block = false;
 
         for (line_idx, line) in content.lines().enumerate() {
@@ -39,9 +42,10 @@ impl Parser for GoParser {
             }
 
             // Parse single-line require: require github.com/pkg/errors v0.9.1
-            if trimmed.starts_with("require ") && !trimmed.contains("(") {
-                let rest = &trimmed[8..]; // Skip "require "
-                if let Some(dep) = parse_require_line(line, rest, line_num) {
+            if let Some(rest) = trimmed.strip_prefix("require ") {
+                if !rest.starts_with('(')
+                    && let Some(dep) = parse_require_line(line, rest, line_num)
+                {
                     dependencies.push(dep);
                 }
                 continue;
@@ -60,39 +64,66 @@ impl Parser for GoParser {
 /// Parse a require line (either standalone or inside a block)
 /// Format: module/path v1.2.3 [// indirect]
 fn parse_require_line(line: &str, content: &str, line_num: u32) -> Option<Dependency> {
-    let trimmed = content.trim();
-
     // Skip empty lines, comments, and replace directives
-    if trimmed.is_empty() || trimmed.starts_with("//") || trimmed.starts_with("replace") {
+    if content.is_empty() || content.starts_with("//") || content.starts_with("replace") {
         return None;
     }
+
+    // Check for indirect comment
+    let is_indirect = content.contains("// indirect");
 
     // Remove inline comment (// indirect or other comments)
-    let is_indirect = trimmed.contains("// indirect");
-    let without_comment = if let Some(pos) = trimmed.find("//") {
-        trimmed[..pos].trim()
-    } else {
-        trimmed
+    let without_comment = match content.find("//") {
+        Some(pos) => content[..pos].trim_end(),
+        None => content,
     };
 
-    // Split into module path and version
-    let parts: Vec<&str> = without_comment.split_whitespace().collect();
-    if parts.len() < 2 {
-        return None;
+    // Split into module path and version using byte positions
+    let bytes = without_comment.as_bytes();
+    let mut space_pos = None;
+
+    for (i, &b) in bytes.iter().enumerate() {
+        if b == b' ' || b == b'\t' {
+            space_pos = Some(i);
+            break;
+        }
     }
 
-    let module_path = parts[0];
-    let version = parts[1];
+    let space_pos = space_pos?;
 
-    // Version must start with 'v'
-    if !version.starts_with('v') {
-        return None;
+    let module_path = &without_comment[..space_pos];
+    let version = without_comment[space_pos..].trim_start();
+
+    // Validate version format (must start with 'v')
+    if !version.starts_with('v') || version.contains(' ') {
+        // If version contains spaces, it's not a valid single version
+        let version = version.split_whitespace().next()?;
+        if !version.starts_with('v') {
+            return None;
+        }
+        // Use the first whitespace-delimited token as version
+        return parse_require_with_positions(line, module_path, version, line_num, is_indirect);
     }
 
-    // Calculate positions in the original line
+    parse_require_with_positions(line, module_path, version, line_num, is_indirect)
+}
+
+/// Calculate positions and create Dependency
+fn parse_require_with_positions(
+    line: &str,
+    module_path: &str,
+    version: &str,
+    line_num: u32,
+    is_indirect: bool,
+) -> Option<Dependency> {
+    // Find module path position (only need one search)
     let name_start = line.find(module_path)? as u32;
     let name_end = name_start + module_path.len() as u32;
-    let version_start = line.find(version)? as u32;
+
+    // Version follows the module path, search from after it
+    let search_start = name_end as usize;
+    let version_rel_start = line[search_start..].find(version)?;
+    let version_start = (search_start + version_rel_start) as u32;
     let version_end = version_start + version.len() as u32;
 
     Some(Dependency {
@@ -104,7 +135,7 @@ fn parse_require_line(line: &str, content: &str, line_num: u32) -> Option<Depend
         version_start,
         version_end,
         dev: false,
-        optional: is_indirect, // Mark indirect dependencies as optional
+        optional: is_indirect,
     })
 }
 
@@ -197,10 +228,6 @@ require github.com/pkg/c v3.0.0
         assert_eq!(deps.len(), 1);
 
         let dep = &deps[0];
-        // "require " is 8 chars (0-7)
-        // "github.com/pkg/errors" is 21 chars (8-28), so name_end = 29
-        // " " is at position 29
-        // "v0.9.1" is 6 chars (30-35), so version_end = 36
         assert_eq!(dep.name_start, 8);
         assert_eq!(dep.name_end, 29);
         assert_eq!(dep.version_start, 30);
@@ -218,5 +245,26 @@ replace github.com/old/pkg => github.com/new/pkg v2.0.0
         let deps = parser.parse(content);
         assert_eq!(deps.len(), 1);
         assert_eq!(deps[0].name, "github.com/old/pkg");
+    }
+
+    #[test]
+    fn test_empty_file() {
+        let parser = GoParser::new();
+        let content = "";
+        let deps = parser.parse(content);
+        assert_eq!(deps.len(), 0);
+    }
+
+    #[test]
+    fn test_require_block_with_comments() {
+        let parser = GoParser::new();
+        let content = r#"
+require (
+    // this is a comment
+    github.com/pkg/errors v0.9.1
+)
+"#;
+        let deps = parser.parse(content);
+        assert_eq!(deps.len(), 1);
     }
 }
