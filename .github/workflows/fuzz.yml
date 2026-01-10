@@ -1,0 +1,95 @@
+name: Fuzz Testing
+
+on:
+  schedule:
+    # Run weekly on Sunday at midnight UTC
+    - cron: '0 0 * * 0'
+  workflow_dispatch:
+    inputs:
+      target:
+        description: 'Specific fuzz target (leave empty for all)'
+        required: false
+        default: ''
+      duration:
+        description: 'Duration per target in seconds'
+        required: false
+        default: '300'
+
+permissions:
+  contents: read
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  fuzz:
+    name: Fuzz parsers
+    runs-on: ubuntu-latest
+    timeout-minutes: 120
+
+    strategy:
+      fail-fast: false
+      matrix:
+        target: [cargo, npm, python, go, ruby, php, dart, csharp]
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Rust nightly
+        uses: dtolnay/rust-toolchain@nightly
+
+      - name: Cache cargo registry
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            dependi-lsp/fuzz/target
+          key: ${{ runner.os }}-fuzz-${{ hashFiles('**/Cargo.lock') }}
+          restore-keys: |
+            ${{ runner.os }}-fuzz-
+
+      - name: Install cargo-fuzz
+        run: cargo install cargo-fuzz
+
+      - name: Build fuzz targets
+        working-directory: dependi-lsp/fuzz
+        run: cargo +nightly fuzz build
+
+      - name: Run fuzz target
+        if: ${{ github.event.inputs.target == '' || github.event.inputs.target == null || github.event.inputs.target == matrix.target }}
+        working-directory: dependi-lsp/fuzz
+        run: |
+          DURATION="${{ github.event.inputs.duration || '300' }}"
+          echo "Fuzzing fuzz_${{ matrix.target }} for ${DURATION}s..."
+          cargo +nightly fuzz run fuzz_${{ matrix.target }} \
+            -- \
+            -max_total_time=$DURATION \
+            -timeout=30 \
+            || true
+
+      - name: Check for crashes
+        working-directory: dependi-lsp/fuzz
+        run: |
+          if [ -d "artifacts/fuzz_${{ matrix.target }}" ]; then
+            echo "::error::Crashes found in fuzz_${{ matrix.target }}!"
+            ls -la artifacts/fuzz_${{ matrix.target }}/
+            exit 1
+          else
+            echo "No crashes found for fuzz_${{ matrix.target }}"
+          fi
+
+      - name: Upload crash artifacts
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: fuzz-crashes-${{ matrix.target }}
+          path: dependi-lsp/fuzz/artifacts/
+          retention-days: 30
+
+      - name: Upload corpus
+        uses: actions/upload-artifact@v4
+        with:
+          name: fuzz-corpus-${{ matrix.target }}
+          path: dependi-lsp/fuzz/corpus/fuzz_${{ matrix.target }}/
+          retention-days: 7

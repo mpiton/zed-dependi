@@ -1,0 +1,15 @@
+[project]
+name = "my-project"
+version = "1.0.0"
+dependencies = [
+    "requests>=2.28.0",
+    "pydantic>=2.0.0",
+    "fastapi>=0.100.0",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=7.0.0",
+    "black>=23.0.0",
+    "mypy>=1.0.0",
+]

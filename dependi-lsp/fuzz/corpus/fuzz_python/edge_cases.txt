@@ -1,0 +1,5 @@
+# Comment line
+pkg[extra1,extra2]>=1.0,!=1.5,<2.0
+-e git+https://github.com/user/repo.git#egg=pkg
+--index-url https://pypi.org/simple
+pkg @ https://example.com/pkg.tar.gz

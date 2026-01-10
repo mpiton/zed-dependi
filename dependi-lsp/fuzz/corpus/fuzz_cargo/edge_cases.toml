@@ -1,0 +1,6 @@
+[dependencies]
+a = "0"
+b = "*"
+c = { version = "1.0.0-alpha.1+build.123" }
+"d-e_f" = ">=1.0, <2.0"
+empty = ""

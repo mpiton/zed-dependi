@@ -205,6 +205,75 @@ cargo test --test integration_test
 cargo test -- --nocapture
 ```
 
+### Fuzz Testing
+
+We use [cargo-fuzz](https://github.com/rust-fuzz/cargo-fuzz) to find edge cases and potential crashes in parsers.
+
+#### Prerequisites
+
+```bash
+# Install Rust nightly
+rustup toolchain install nightly
+
+# Install cargo-fuzz
+cargo install cargo-fuzz
+```
+
+#### Running Fuzz Tests
+
+```bash
+# Run all targets (30 seconds each)
+./scripts/fuzz.sh
+
+# Run specific target
+./scripts/fuzz.sh cargo
+
+# Run with custom duration (seconds)
+./scripts/fuzz.sh npm 300
+
+# List available targets
+./scripts/fuzz.sh --list
+```
+
+Or manually with cargo-fuzz:
+
+```bash
+cd dependi-lsp/fuzz
+
+# Build all fuzz targets
+cargo +nightly fuzz build
+
+# Run a specific target
+cargo +nightly fuzz run fuzz_cargo -- -max_total_time=60
+```
+
+#### Available Fuzz Targets
+
+| Target | Parser | File Format |
+|--------|--------|-------------|
+| `fuzz_cargo` | CargoParser | Cargo.toml |
+| `fuzz_npm` | NpmParser | package.json |
+| `fuzz_python` | PythonParser | requirements.txt, pyproject.toml |
+| `fuzz_go` | GoParser | go.mod |
+| `fuzz_ruby` | RubyParser | Gemfile |
+| `fuzz_php` | PhpParser | composer.json |
+| `fuzz_dart` | DartParser | pubspec.yaml |
+| `fuzz_csharp` | CsharpParser | *.csproj |
+
+#### Analyzing Crashes
+
+If fuzzing finds a crash, the input is saved to `fuzz/artifacts/`.
+
+From the `dependi-lsp/fuzz` directory:
+
+```bash
+# View crash inputs
+ls artifacts/fuzz_cargo/
+
+# Reproduce a crash
+cargo +nightly fuzz run fuzz_cargo artifacts/fuzz_cargo/crash-*
+```
+
 ### Writing Tests
 
 - Place unit tests in the same file as the code
