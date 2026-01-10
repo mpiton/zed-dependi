@@ -1,0 +1,114 @@
+name: Performance Profiling
+
+on:
+  workflow_dispatch:
+    inputs:
+      profile_type:
+        description: 'Type of profiling to run'
+        required: true
+        default: 'all'
+        type: choice
+        options:
+          - all
+          - parse
+          - registry
+          - full
+      iterations_parse:
+        description: 'Iterations for parse profiling'
+        required: false
+        default: '1000'
+      iterations_registry:
+        description: 'Iterations for registry profiling'
+        required: false
+        default: '3'
+      iterations_full:
+        description: 'Iterations for full workflow profiling'
+        required: false
+        default: '3'
+
+permissions:
+  contents: read
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  profile:
+    name: Generate Flame Graphs
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v6
+
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Cache cargo
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            target
+          key: ${{ runner.os }}-cargo-profile-${{ hashFiles('**/Cargo.lock') }}
+          restore-keys: |
+            ${{ runner.os }}-cargo-profile-
+
+      - name: Install perf (required for flamegraph)
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y linux-tools-common linux-tools-generic
+
+      - name: Install flamegraph
+        run: cargo install flamegraph
+
+      - name: Build release binary
+        run: cargo build --release --package dependi-lsp
+
+      - name: Profile parse operations
+        if: ${{ inputs.profile_type == 'all' || inputs.profile_type == 'parse' }}
+        run: |
+          echo "Profiling parse operations..."
+          # Run without flamegraph in CI (perf may not work in containers)
+          ./target/release/dependi-lsp profile-parse \
+            --file tests/fixtures/cargo_50_deps.toml \
+            --iterations ${{ inputs.iterations_parse }}
+          ./target/release/dependi-lsp profile-parse \
+            --file tests/fixtures/package_100_deps.json \
+            --iterations ${{ inputs.iterations_parse }}
+
+      - name: Profile registry operations
+        if: ${{ inputs.profile_type == 'all' || inputs.profile_type == 'registry' }}
+        run: |
+          echo "Profiling registry requests..."
+          ./target/release/dependi-lsp profile-registry \
+            --registry npm \
+            --packages "lodash,express,react" \
+            --iterations ${{ inputs.iterations_registry }}
+
+      - name: Profile full workflow
+        if: ${{ inputs.profile_type == 'all' || inputs.profile_type == 'full' }}
+        run: |
+          echo "Profiling full workflow..."
+          ./target/release/dependi-lsp profile-full \
+            --file tests/fixtures/package_100_deps.json \
+            --iterations ${{ inputs.iterations_full }}
+
+      - name: Generate summary
+        run: |
+          echo "## Profiling Results" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "Profile type: ${{ inputs.profile_type }}" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "### Configuration" >> $GITHUB_STEP_SUMMARY
+          echo "- Parse iterations: ${{ inputs.iterations_parse }}" >> $GITHUB_STEP_SUMMARY
+          echo "- Registry iterations: ${{ inputs.iterations_registry }}" >> $GITHUB_STEP_SUMMARY
+          echo "- Full workflow iterations: ${{ inputs.iterations_full }}" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "### Notes" >> $GITHUB_STEP_SUMMARY
+          echo "To generate flame graphs locally, install \`cargo install flamegraph\` and run:" >> $GITHUB_STEP_SUMMARY
+          echo "\`\`\`bash" >> $GITHUB_STEP_SUMMARY
+          echo "./scripts/profile-parse.sh tests/fixtures/cargo_50_deps.toml 1000" >> $GITHUB_STEP_SUMMARY
+          echo "./scripts/profile-registry.sh npm \"lodash,express\" 5" >> $GITHUB_STEP_SUMMARY
+          echo "./scripts/profile-full.sh tests/fixtures/package_100_deps.json 5" >> $GITHUB_STEP_SUMMARY
+          echo "\`\`\`" >> $GITHUB_STEP_SUMMARY
