@@ -1,6 +1,9 @@
 //! Parser for PHP Composer files (composer.json)
+//!
+//! Uses serde_json for fast parsing with position tracking via byte offset calculation.
 
 use super::{Dependency, Parser};
+use serde_json::Value;
 
 /// Parser for PHP composer.json dependency files
 #[derive(Debug, Default)]
@@ -14,178 +17,144 @@ impl PhpParser {
 
 impl Parser for PhpParser {
     fn parse(&self, content: &str) -> Vec<Dependency> {
-        let mut dependencies = Vec::new();
-        let mut current_section: Option<DependencyType> = None;
-        let mut section_brace_depth = 0;
-        let mut in_section_object = false;
+        let Ok(value) = serde_json::from_str::<Value>(content) else {
+            return Vec::new();
+        };
 
-        for (line_idx, line) in content.lines().enumerate() {
-            let line_num = line_idx as u32;
-            let trimmed = line.trim();
+        // Pre-compute line start offsets for position calculation
+        let line_offsets = compute_line_offsets(content);
 
-            // Detect section start
-            if let Some(section) = detect_section(trimmed) {
-                current_section = Some(section);
-                // Check if the object starts on the same line
-                if trimmed.contains('{') {
-                    in_section_object = true;
-                    section_brace_depth = 1;
+        let mut dependencies = Vec::with_capacity(32);
 
-                    // Try to parse inline dependencies on the same line
-                    if let Some(brace_pos) = trimmed.find('{') {
-                        let after_brace = &trimmed[brace_pos + 1..];
-                        if let Some(deps) =
-                            parse_inline_dependencies(after_brace, line_num, section, line)
-                        {
-                            dependencies.extend(deps);
-                        }
-                    }
-                }
-                continue;
-            }
+        // Parse require section
+        parse_dependency_section(
+            &value,
+            "require",
+            content,
+            &line_offsets,
+            false,
+            &mut dependencies,
+        );
 
-            // Track brace depth for current section
-            if in_section_object {
-                for ch in trimmed.chars() {
-                    match ch {
-                        '{' => section_brace_depth += 1,
-                        '}' => {
-                            section_brace_depth -= 1;
-                            if section_brace_depth == 0 {
-                                current_section = None;
-                                in_section_object = false;
-                            }
-                        }
-                        _ => {}
-                    }
-                }
-            }
-
-            // Skip if not in a dependency section
-            let dep_type = match current_section {
-                Some(dt) => dt,
-                None => continue,
-            };
-
-            // Parse dependency line
-            if let Some(dep) = parse_dependency_line(line, line_num, dep_type) {
-                dependencies.push(dep);
-            }
-        }
+        // Parse require-dev section
+        parse_dependency_section(
+            &value,
+            "require-dev",
+            content,
+            &line_offsets,
+            true,
+            &mut dependencies,
+        );
 
         dependencies
     }
 }
 
-#[derive(Debug, Clone, Copy, PartialEq)]
-enum DependencyType {
-    Normal,
-    Dev,
-}
-
-/// Detect which section we're entering
-fn detect_section(line: &str) -> Option<DependencyType> {
-    if line.contains("\"require\"") && !line.contains("\"require-dev\"") {
-        Some(DependencyType::Normal)
-    } else if line.contains("\"require-dev\"") {
-        Some(DependencyType::Dev)
-    } else {
-        None
-    }
-}
-
-/// Parse inline dependencies (multiple on same line)
-fn parse_inline_dependencies(
-    content: &str,
-    line_num: u32,
-    dep_type: DependencyType,
-    full_line: &str,
-) -> Option<Vec<Dependency>> {
-    let mut deps = Vec::new();
-
-    // Simple parsing for inline format: "pkg": "^1.0", "pkg2": "^2.0"
-    let parts: Vec<&str> = content.split(',').collect();
-
-    for part in parts {
-        if let Some(dep) = parse_dependency_from_pair(part.trim(), line_num, dep_type, full_line) {
-            deps.push(dep);
+/// Compute byte offsets for each line start (for position calculation)
+fn compute_line_offsets(content: &str) -> Vec<usize> {
+    let mut offsets = vec![0];
+    for (i, byte) in content.bytes().enumerate() {
+        if byte == b'\n' {
+            offsets.push(i + 1);
         }
     }
-
-    if deps.is_empty() { None } else { Some(deps) }
+    offsets
 }
 
-/// Parse a single dependency line: "vendor/package": "^1.0.0"
-fn parse_dependency_line(
-    line: &str,
-    line_num: u32,
-    dep_type: DependencyType,
-) -> Option<Dependency> {
-    let trimmed = line.trim();
+/// Convert byte offset to (line, column) - both 0-indexed
+fn offset_to_position(offset: usize, line_offsets: &[usize]) -> (u32, u32) {
+    let line = line_offsets
+        .iter()
+        .rposition(|&start| start <= offset)
+        .unwrap_or(0);
+    let col = offset - line_offsets[line];
+    (line as u32, col as u32)
+}
 
-    // Must contain a colon (key: value)
-    if !trimmed.contains(':') {
-        return None;
+/// Parse a dependency section (require or require-dev)
+fn parse_dependency_section(
+    root: &Value,
+    section_name: &str,
+    content: &str,
+    line_offsets: &[usize],
+    dev: bool,
+    dependencies: &mut Vec<Dependency>,
+) {
+    let Some(section) = root.get(section_name) else {
+        return;
+    };
+    let Some(deps_obj) = section.as_object() else {
+        return;
+    };
+
+    for (name, version_val) in deps_obj {
+        // Skip PHP and extensions
+        if name == "php" || name.starts_with("ext-") {
+            continue;
+        }
+
+        let Some(version) = version_val.as_str() else {
+            continue;
+        };
+
+        // Find the dependency in the original content for position tracking
+        if let Some(dep) = find_dependency_position(content, line_offsets, name, version, dev) {
+            dependencies.push(dep);
+        }
+    }
+}
+
+/// Find the position of a dependency in the content
+fn find_dependency_position(
+    content: &str,
+    line_offsets: &[usize],
+    name: &str,
+    version: &str,
+    dev: bool,
+) -> Option<Dependency> {
+    // Search for the quoted name pattern: "name": "version"
+    let search_pattern = format!("\"{}\"", name);
+
+    // Find all occurrences and pick the one followed by a colon and the version
+    let mut search_start = 0;
+    while let Some(name_offset) = content[search_start..].find(&search_pattern) {
+        let abs_offset = search_start + name_offset;
+        let after_name = abs_offset + search_pattern.len();
+
+        // Check if this looks like a key (followed by colon)
+        let rest = &content[after_name..];
+        let trimmed = rest.trim_start();
+
+        if trimmed.starts_with(':') {
+            // This is a key, now find the version
+            if let Some(version_offset) = rest.find(&format!("\"{}\"", version)) {
+                let version_abs = after_name + version_offset;
+
+                // Calculate positions
+                let (line, name_start_col) = offset_to_position(abs_offset + 1, line_offsets); // +1 to skip opening quote
+                let name_end_col = name_start_col + name.len() as u32;
+
+                let (_, version_start_col) = offset_to_position(version_abs + 1, line_offsets); // +1 to skip opening quote
+                let version_end_col = version_start_col + version.len() as u32;
+
+                return Some(Dependency {
+                    name: name.to_string(),
+                    version: version.to_string(),
+                    line,
+                    name_start: name_start_col,
+                    name_end: name_end_col,
+                    version_start: version_start_col,
+                    version_end: version_end_col,
+                    dev,
+                    optional: false,
+                });
+            }
+        }
+
+        search_start = abs_offset + 1;
     }
 
-    parse_dependency_from_pair(trimmed, line_num, dep_type, line)
-}
-
-/// Parse a "name": "version" pair
-fn parse_dependency_from_pair(
-    pair: &str,
-    line_num: u32,
-    dep_type: DependencyType,
-    full_line: &str,
-) -> Option<Dependency> {
-    // Find the colon separator
-    let colon_pos = pair.find(':')?;
-
-    let name_part = &pair[..colon_pos];
-    let version_part = &pair[colon_pos + 1..];
-
-    // Extract name from quotes
-    let name = extract_quoted_string(name_part)?;
-
-    // Skip PHP extensions and PHP itself
-    if name == "php" || name.starts_with("ext-") {
-        return None;
-    }
-
-    // Extract version from quotes
-    let version = extract_quoted_string(version_part)?;
-
-    // Calculate positions in the original line
-    let name_start = full_line.find(&name)? as u32;
-    let name_end = name_start + name.len() as u32;
-    let version_start = full_line.rfind(&version)? as u32;
-    let version_end = version_start + version.len() as u32;
-
-    Some(Dependency {
-        name,
-        version,
-        line: line_num,
-        name_start,
-        name_end,
-        version_start,
-        version_end,
-        dev: dep_type == DependencyType::Dev,
-        optional: false,
-    })
-}
-
-/// Extract a string value from a quoted string
-fn extract_quoted_string(s: &str) -> Option<String> {
-    let trimmed = s.trim();
-
-    // Find the first quote
-    let start_quote = trimmed.find('"')?;
-    let after_quote = &trimmed[start_quote + 1..];
-
-    // Find the closing quote
-    let end_quote = after_quote.find('"')?;
-
-    Some(after_quote[..end_quote].to_string())
+    None
 }
 
 #[cfg(test)]
@@ -296,5 +265,33 @@ mod tests {
         let dep = &deps[0];
         assert_eq!(dep.name, "vendor/pkg");
         assert_eq!(dep.version, "^1.0.0");
+    }
+
+    #[test]
+    fn test_empty_require() {
+        let parser = PhpParser::new();
+        let content = r#"{
+    "require": {}
+}"#;
+        let deps = parser.parse(content);
+        assert_eq!(deps.len(), 0);
+    }
+
+    #[test]
+    fn test_invalid_json() {
+        let parser = PhpParser::new();
+        let content = "not valid json";
+        let deps = parser.parse(content);
+        assert_eq!(deps.len(), 0);
+    }
+
+    #[test]
+    fn test_inline_format() {
+        let parser = PhpParser::new();
+        let content = r#"{"require": {"vendor/pkg": "1.0.0"}}"#;
+        let deps = parser.parse(content);
+        assert_eq!(deps.len(), 1);
+        assert_eq!(deps[0].name, "vendor/pkg");
+        assert_eq!(deps[0].version, "1.0.0");
     }
 }
