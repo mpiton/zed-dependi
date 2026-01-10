@@ -71,12 +71,12 @@ enum Commands {
         #[arg(short, long)]
         packages: String,
 
-        /// Number of iterations (for meaningful profiling, must be >= 1)
-        #[arg(short, long, default_value = "10", value_parser = clap::value_parser!(u32).range(1..))]
+        /// Number of iterations (1-100, to prevent excessive network requests)
+        #[arg(short, long, default_value = "10", value_parser = clap::value_parser!(u32).range(1..=100))]
         iterations: u32,
 
         /// Enable verbose output (may affect timing accuracy)
-        #[arg(short, long, default_value = "false")]
+        #[arg(short, long)]
         verbose: bool,
     },
     /// Profile full document processing workflow (for use with cargo-flamegraph)
@@ -85,12 +85,12 @@ enum Commands {
         #[arg(short, long)]
         file: PathBuf,
 
-        /// Number of iterations (for meaningful profiling, must be >= 1)
-        #[arg(short, long, default_value = "10", value_parser = clap::value_parser!(u32).range(1..))]
+        /// Number of iterations (1-100, to prevent excessive network requests)
+        #[arg(short, long, default_value = "10", value_parser = clap::value_parser!(u32).range(1..=100))]
         iterations: u32,
 
         /// Enable verbose output (may affect timing accuracy)
-        #[arg(short, long, default_value = "false")]
+        #[arg(short, long)]
         verbose: bool,
     },
 }
@@ -530,8 +530,15 @@ async fn run_profile_registry(
     }
 
     let elapsed = start.elapsed();
-    let total_fetches = iterations * package_list.len() as u32;
-    let avg = elapsed.checked_div(total_fetches).unwrap_or_default();
+    let total_fetches: u128 = iterations as u128 * package_list.len() as u128;
+
+    if total_fetches == 0 {
+        eprintln!("Error: No fetches performed (zero iterations or empty package list).");
+        return ExitCode::FAILURE;
+    }
+
+    let avg_nanos = elapsed.as_nanos() / total_fetches;
+    let avg = std::time::Duration::from_nanos(avg_nanos as u64);
 
     eprintln!("\nProfiling complete!");
     eprintln!("Total time: {:?}", elapsed);
