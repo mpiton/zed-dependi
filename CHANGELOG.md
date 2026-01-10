@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.2.0] - 2026-01-10
+
 ### Added
 
 - Comprehensive private registry configuration documentation
@@ -19,6 +21,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Troubleshooting guide and FAQ section
 - Comprehensive registry API documentation
 - CI/CD integration documentation for CLI scan command
+- Benchmark suite with criterion for performance testing
+- Fuzz testing for parsers with cargo-fuzz
+- GitHub Pages documentation site
 
 ### Changed
 
@@ -32,10 +37,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Share single HTTP client across all registry clients
 - Rewrite CargoParser with taplo for structured TOML parsing
 - Remove #[allow(dead_code)] directives and fix warnings
+- Optimize parsing performance for Go, npm, PHP, and Ruby dependency files
 
 ### Fixed
 
 - Remove broken discussions links and Zed Discord reference
+- Fix YAML syntax error in contributor-experience workflow
+- Fix CI paths for dependi-lsp build and binary
+- Prevent overflow in profiling and cap network iterations
+- Improve profiling command safety and accuracy
+- Improve test accuracy and prevent over-stripping in parsers
 
 ### Security
 
@@ -135,7 +146,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - In-memory caching for version data
 - Parallel registry requests (5 concurrent)
 
-[Unreleased]: https://github.com/mpiton/zed-dependi/compare/v1.1.0...HEAD
+[Unreleased]: https://github.com/mpiton/zed-dependi/compare/v1.2.0...HEAD
+[1.2.0]: https://github.com/mpiton/zed-dependi/compare/v1.1.0...v1.2.0
 [1.1.0]: https://github.com/mpiton/zed-dependi/compare/v1.0.0...v1.1.0
 [1.0.0]: https://github.com/mpiton/zed-dependi/compare/v0.3.1...v1.0.0
 [0.3.1]: https://github.com/mpiton/zed-dependi/compare/v0.3.0...v0.3.1
