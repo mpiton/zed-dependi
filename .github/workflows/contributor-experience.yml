@@ -55,18 +55,7 @@ jobs:
               owner: context.repo.owner,
               repo: context.repo.repo,
               issue_number: context.payload.pull_request.number,
-              body: `Welcome to Dependi, @${creator}! 🎉
-
-Thank you for your first contribution to this project! We really appreciate you taking the time to help improve Dependi.
-
-A maintainer will review your PR soon. In the meantime, please make sure:
-- All CI checks pass (formatting, clippy, tests)
-- Your changes are documented if needed
-- You've filled out the PR template
-
-If you have any questions, feel free to ask here.
-
-Happy coding! 🚀`
+              body: 'Welcome to Dependi, @' + creator + '! 🎉\n\nThank you for your first contribution to this project! We really appreciate you taking the time to help improve Dependi.\n\nA maintainer will review your PR soon. In the meantime, please make sure:\n- All CI checks pass (formatting, clippy, tests)\n- Your changes are documented if needed\n- You\'ve filled out the PR template\n\nIf you have any questions, feel free to ask here.\n\nHappy coding! 🚀'
             });
 
   thank-merged-contributor:
@@ -103,11 +92,7 @@ Happy coding! 🚀`
               owner: context.repo.owner,
               repo: context.repo.repo,
               issue_number: context.payload.pull_request.number,
-              body: `Congratulations on your first merged PR, @${creator}! 🎊
-
-Your contribution is now part of Dependi. Thank you for helping make dependency management better for Zed users!
-
-You're now officially a Dependi contributor. We hope to see you again! 💜`
+              body: 'Congratulations on your first merged PR, @' + creator + '! 🎊\n\nYour contribution is now part of Dependi. Thank you for helping make dependency management better for Zed users!\n\nYou\'re now officially a Dependi contributor. We hope to see you again! 💜'
             });
 
   welcome-first-issue:
@@ -142,14 +127,7 @@ You're now officially a Dependi contributor. We hope to see you again! 💜`
               owner: context.repo.owner,
               repo: context.repo.repo,
               issue_number: context.payload.issue.number,
-              body: `Thanks for opening your first issue, @${creator}! 👋
-
-A maintainer will take a look as soon as possible.
-
-While you wait, you might find helpful information in:
-- [README](https://github.com/mpiton/zed-dependi#readme) - Features and configuration
-- [CONTRIBUTING.md](https://github.com/mpiton/zed-dependi/blob/main/CONTRIBUTING.md) - How to contribute
-- [Issues](https://github.com/mpiton/zed-dependi/issues) - Questions and bug reports`
+              body: 'Thanks for opening your first issue, @' + creator + '! 👋\n\nA maintainer will take a look as soon as possible.\n\nWhile you wait, you might find helpful information in:\n- [README](https://github.com/mpiton/zed-dependi#readme) - Features and configuration\n- [CONTRIBUTING.md](https://github.com/mpiton/zed-dependi/blob/main/CONTRIBUTING.md) - How to contribute\n- [Issues](https://github.com/mpiton/zed-dependi/issues) - Questions and bug reports'
             });
 
   auto-label-pr:
