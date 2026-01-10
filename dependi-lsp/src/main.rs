@@ -57,9 +57,9 @@ enum Commands {
         #[arg(short, long)]
         file: PathBuf,
 
-        /// Number of iterations (for meaningful profiling)
-        #[arg(short, long, default_value = "1000")]
-        iterations: usize,
+        /// Number of iterations (for meaningful profiling, must be >= 1)
+        #[arg(short, long, default_value = "1000", value_parser = clap::value_parser!(u32).range(1..))]
+        iterations: u32,
     },
     /// Profile registry requests (for use with cargo-flamegraph)
     ProfileRegistry {
@@ -71,9 +71,13 @@ enum Commands {
         #[arg(short, long)]
         packages: String,
 
-        /// Number of iterations (for meaningful profiling)
-        #[arg(short, long, default_value = "10")]
-        iterations: usize,
+        /// Number of iterations (for meaningful profiling, must be >= 1)
+        #[arg(short, long, default_value = "10", value_parser = clap::value_parser!(u32).range(1..))]
+        iterations: u32,
+
+        /// Enable verbose output (may affect timing accuracy)
+        #[arg(short, long, default_value = "false")]
+        verbose: bool,
     },
     /// Profile full document processing workflow (for use with cargo-flamegraph)
     ProfileFull {
@@ -81,9 +85,13 @@ enum Commands {
         #[arg(short, long)]
         file: PathBuf,
 
-        /// Number of iterations (for meaningful profiling)
-        #[arg(short, long, default_value = "10")]
-        iterations: usize,
+        /// Number of iterations (for meaningful profiling, must be >= 1)
+        #[arg(short, long, default_value = "10", value_parser = clap::value_parser!(u32).range(1..))]
+        iterations: u32,
+
+        /// Enable verbose output (may affect timing accuracy)
+        #[arg(short, long, default_value = "false")]
+        verbose: bool,
     },
 }
 
@@ -111,10 +119,13 @@ async fn main() -> ExitCode {
             registry,
             packages,
             iterations,
-        }) => run_profile_registry(registry, packages, iterations).await,
-        Some(Commands::ProfileFull { file, iterations }) => {
-            run_profile_full(file, iterations).await
-        }
+            verbose,
+        }) => run_profile_registry(registry, packages, iterations, verbose).await,
+        Some(Commands::ProfileFull {
+            file,
+            iterations,
+            verbose,
+        }) => run_profile_full(file, iterations, verbose).await,
         Some(Commands::Lsp) | None => {
             run_lsp().await;
             ExitCode::SUCCESS
@@ -338,7 +349,7 @@ async fn run_scan(
     }
 }
 
-async fn run_profile_parse(file: PathBuf, iterations: usize) -> ExitCode {
+async fn run_profile_parse(file: PathBuf, iterations: u32) -> ExitCode {
     use dependi_lsp::parsers::{
         Parser, cargo::CargoParser, csharp::CsharpParser, dart::DartParser, go::GoParser,
         npm::NpmParser, php::PhpParser, python::PythonParser, ruby::RubyParser,
@@ -358,47 +369,63 @@ async fn run_profile_parse(file: PathBuf, iterations: usize) -> ExitCode {
     eprintln!("Iterations: {}", iterations);
     eprintln!("File size: {} bytes", content.len());
 
+    enum ParserKind {
+        Cargo(CargoParser),
+        Npm(NpmParser),
+        Python(PythonParser),
+        Go(GoParser),
+        Php(PhpParser),
+        Dart(DartParser),
+        Csharp(CsharpParser),
+        Ruby(RubyParser),
+    }
+
+    let parser = if file_name.ends_with("Cargo.toml")
+        || (file_name.ends_with(".toml") && file_name.contains("cargo"))
+    {
+        ParserKind::Cargo(CargoParser::new())
+    } else if file_name.ends_with("package.json")
+        || (file_name.ends_with(".json") && file_name.contains("package"))
+    {
+        ParserKind::Npm(NpmParser::new())
+    } else if file_name.ends_with("requirements.txt") || file_name.ends_with("pyproject.toml") {
+        ParserKind::Python(PythonParser::new())
+    } else if file_name.ends_with("go.mod") {
+        ParserKind::Go(GoParser::new())
+    } else if file_name.ends_with("composer.json") {
+        ParserKind::Php(PhpParser::new())
+    } else if file_name.ends_with("pubspec.yaml") {
+        ParserKind::Dart(DartParser::new())
+    } else if file_name.ends_with(".csproj") {
+        ParserKind::Csharp(CsharpParser::new())
+    } else if file_name.ends_with("Gemfile") {
+        ParserKind::Ruby(RubyParser::new())
+    } else {
+        eprintln!("Unsupported file type: {}", file_name);
+        return ExitCode::FAILURE;
+    };
+
     let start = Instant::now();
 
     for _ in 0..iterations {
-        if file_name.ends_with("Cargo.toml")
-            || (file_name.ends_with(".toml") && file_name.contains("cargo"))
-        {
-            let parser = CargoParser::new();
-            std::hint::black_box(parser.parse(&content));
-        } else if file_name.ends_with("package.json")
-            || (file_name.ends_with(".json") && file_name.contains("package"))
-        {
-            let parser = NpmParser::new();
-            std::hint::black_box(parser.parse(&content));
-        } else if file_name.ends_with("requirements.txt") || file_name.ends_with("pyproject.toml") {
-            let parser = PythonParser::new();
-            std::hint::black_box(parser.parse(&content));
-        } else if file_name.ends_with("go.mod") {
-            let parser = GoParser::new();
-            std::hint::black_box(parser.parse(&content));
-        } else if file_name.ends_with("composer.json") {
-            let parser = PhpParser::new();
-            std::hint::black_box(parser.parse(&content));
-        } else if file_name.ends_with("pubspec.yaml") {
-            let parser = DartParser::new();
-            std::hint::black_box(parser.parse(&content));
-        } else if file_name.ends_with(".csproj") {
-            let parser = CsharpParser::new();
-            std::hint::black_box(parser.parse(&content));
-        } else if file_name.ends_with("Gemfile") {
-            let parser = RubyParser::new();
-            std::hint::black_box(parser.parse(&content));
-        } else {
-            eprintln!("Unsupported file type: {}", file_name);
-            return ExitCode::FAILURE;
-        }
+        match &parser {
+            ParserKind::Cargo(p) => std::hint::black_box(p.parse(&content)),
+            ParserKind::Npm(p) => std::hint::black_box(p.parse(&content)),
+            ParserKind::Python(p) => std::hint::black_box(p.parse(&content)),
+            ParserKind::Go(p) => std::hint::black_box(p.parse(&content)),
+            ParserKind::Php(p) => std::hint::black_box(p.parse(&content)),
+            ParserKind::Dart(p) => std::hint::black_box(p.parse(&content)),
+            ParserKind::Csharp(p) => std::hint::black_box(p.parse(&content)),
+            ParserKind::Ruby(p) => std::hint::black_box(p.parse(&content)),
+        };
     }
 
     let elapsed = start.elapsed();
+    let avg = elapsed.checked_div(iterations).unwrap_or_default();
+
     eprintln!("\nProfiling complete!");
     eprintln!("Total time: {:?}", elapsed);
-    eprintln!("Average per iteration: {:?}", elapsed / iterations as u32);
+    eprintln!("Average per iteration: {:?}", avg);
 
     ExitCode::SUCCESS
 }
@@ -406,7 +433,8 @@ async fn run_profile_parse(file: PathBuf, iterations: usize) -> ExitCode {
 async fn run_profile_registry(
     registry: RegistryType,
     packages: String,
-    iterations: usize,
+    iterations: u32,
+    verbose: bool,
 ) -> ExitCode {
     use dependi_lsp::config::NpmRegistryConfig;
     use dependi_lsp::registries::{
@@ -429,74 +457,91 @@ async fn run_profile_registry(
     eprintln!("Profiling registry requests for: {:?}", registry);
     eprintln!("Packages: {:?}", package_list);
     eprintln!("Iterations: {}", iterations);
+    if verbose {
+        eprintln!("Verbose mode enabled (may affect timing accuracy)");
+    }
+
+    let http_client = match dependi_lsp::registries::http_client::create_shared_client() {
+        Ok(client) => client,
+        Err(e) => {
+            eprintln!("Error creating HTTP client: {}", e);
+            return ExitCode::FAILURE;
+        }
+    };
+
+    enum RegistryKind {
+        Crates(CratesIoRegistry),
+        Npm(NpmRegistry),
+        Pypi(PyPiRegistry),
+        Go(GoProxyRegistry),
+        Packagist(PackagistRegistry),
+        PubDev(PubDevRegistry),
+        Nuget(NuGetRegistry),
+        Rubygems(RubyGemsRegistry),
+    }
+
+    let reg = match registry {
+        RegistryType::Crates => RegistryKind::Crates(CratesIoRegistry::with_client(http_client)),
+        RegistryType::Npm => RegistryKind::Npm(NpmRegistry::with_client_and_config(
+            http_client,
+            &NpmRegistryConfig::default(),
+        )),
+        RegistryType::Pypi => RegistryKind::Pypi(PyPiRegistry::with_client(http_client)),
+        RegistryType::Go => RegistryKind::Go(GoProxyRegistry::with_client(http_client)),
+        RegistryType::Packagist => {
+            RegistryKind::Packagist(PackagistRegistry::with_client(http_client))
+        }
+        RegistryType::PubDev => RegistryKind::PubDev(PubDevRegistry::with_client(http_client)),
+        RegistryType::Nuget => RegistryKind::Nuget(NuGetRegistry::with_client(http_client)),
+        RegistryType::Rubygems => {
+            RegistryKind::Rubygems(RubyGemsRegistry::with_client(http_client))
+        }
+    };
 
     let start = Instant::now();
 
     for i in 0..iterations {
-        eprintln!("Iteration {}/{}", i + 1, iterations);
+        if verbose {
+            eprintln!("Iteration {}/{}", i + 1, iterations);
+        }
         for pkg in &package_list {
-            let result = match registry {
-                RegistryType::Crates => {
-                    let reg = CratesIoRegistry::default();
-                    reg.get_version_info(pkg).await
-                }
-                RegistryType::Npm => {
-                    let reg = NpmRegistry::with_client_and_config(
-                        dependi_lsp::registries::http_client::create_shared_client()
-                            .expect("Failed to create HTTP client"),
-                        &NpmRegistryConfig::default(),
-                    );
-                    reg.get_version_info(pkg).await
-                }
-                RegistryType::Pypi => {
-                    let reg = PyPiRegistry::default();
-                    reg.get_version_info(pkg).await
-                }
-                RegistryType::Go => {
-                    let reg = GoProxyRegistry::default();
-                    reg.get_version_info(pkg).await
-                }
-                RegistryType::Packagist => {
-                    let reg = PackagistRegistry::default();
-                    reg.get_version_info(pkg).await
-                }
-                RegistryType::PubDev => {
-                    let reg = PubDevRegistry::default();
-                    reg.get_version_info(pkg).await
-                }
-                RegistryType::Nuget => {
-                    let reg = NuGetRegistry::default();
-                    reg.get_version_info(pkg).await
-                }
-                RegistryType::Rubygems => {
-                    let reg = RubyGemsRegistry::default();
-                    reg.get_version_info(pkg).await
-                }
+            let result = match &reg {
+                RegistryKind::Crates(r) => r.get_version_info(pkg).await,
+                RegistryKind::Npm(r) => r.get_version_info(pkg).await,
+                RegistryKind::Pypi(r) => r.get_version_info(pkg).await,
+                RegistryKind::Go(r) => r.get_version_info(pkg).await,
+                RegistryKind::Packagist(r) => r.get_version_info(pkg).await,
+                RegistryKind::PubDev(r) => r.get_version_info(pkg).await,
+                RegistryKind::Nuget(r) => r.get_version_info(pkg).await,
+                RegistryKind::Rubygems(r) => r.get_version_info(pkg).await,
             };
 
-            match result {
-                Ok(info) => eprintln!(
-                    "  {} -> latest: {:?}",
-                    pkg,
-                    info.latest.as_deref().unwrap_or("N/A")
-                ),
-                Err(e) => eprintln!("  {} -> error: {}", pkg, e),
+            if verbose {
+                match result {
+                    Ok(info) => eprintln!(
+                        "  {} -> latest: {:?}",
+                        pkg,
+                        info.latest.as_deref().unwrap_or("N/A")
+                    ),
+                    Err(e) => eprintln!("  {} -> error: {}", pkg, e),
+                }
             }
         }
     }
 
     let elapsed = start.elapsed();
+    let total_fetches = iterations * package_list.len() as u32;
+    let avg = elapsed.checked_div(total_fetches).unwrap_or_default();
+
     eprintln!("\nProfiling complete!");
     eprintln!("Total time: {:?}", elapsed);
-    eprintln!(
-        "Average per package fetch: {:?}",
-        elapsed / (iterations * package_list.len()) as u32
-    );
+    eprintln!("Total fetches: {}", total_fetches);
+    eprintln!("Average per package fetch: {:?}", avg);
 
     ExitCode::SUCCESS
 }
 
-async fn run_profile_full(file: PathBuf, iterations: usize) -> ExitCode {
+async fn run_profile_full(file: PathBuf, iterations: u32, verbose: bool) -> ExitCode {
     use dependi_lsp::config::NpmRegistryConfig;
     use dependi_lsp::parsers::{
         Parser, cargo::CargoParser, csharp::CsharpParser, dart::DartParser, go::GoParser,
@@ -522,52 +567,78 @@ async fn run_profile_full(file: PathBuf, iterations: usize) -> ExitCode {
 
     eprintln!("Profiling full workflow for: {}", file.display());
     eprintln!("Iterations: {}", iterations);
+    if verbose {
+        eprintln!("Verbose mode enabled (may affect timing accuracy)");
+    }
+
+    let http_client = match dependi_lsp::registries::http_client::create_shared_client() {
+        Ok(client) => client,
+        Err(e) => {
+            eprintln!("Error creating HTTP client: {}", e);
+            return ExitCode::FAILURE;
+        }
+    };
+
+    let ecosystem = if file_name.ends_with("Cargo.toml")
+        || (file_name.ends_with(".toml") && file_name.contains("cargo"))
+    {
+        Ecosystem::CratesIo
+    } else if file_name.ends_with("package.json")
+        || (file_name.ends_with(".json") && file_name.contains("package"))
+    {
+        Ecosystem::Npm
+    } else if file_name.ends_with("requirements.txt") || file_name.ends_with("pyproject.toml") {
+        Ecosystem::PyPI
+    } else if file_name.ends_with("go.mod") {
+        Ecosystem::Go
+    } else if file_name.ends_with("composer.json") {
+        Ecosystem::Packagist
+    } else if file_name.ends_with("pubspec.yaml") {
+        Ecosystem::Pub
+    } else if file_name.ends_with(".csproj") {
+        Ecosystem::NuGet
+    } else if file_name.ends_with("Gemfile") {
+        Ecosystem::RubyGems
+    } else {
+        eprintln!("Unsupported file type: {}", file_name);
+        return ExitCode::FAILURE;
+    };
 
     let start = Instant::now();
 
     for i in 0..iterations {
-        eprintln!("Iteration {}/{}", i + 1, iterations);
+        if verbose {
+            eprintln!("Iteration {}/{}", i + 1, iterations);
+        }
 
         // Step 1: Parse
         let parse_start = Instant::now();
-        let (dependencies, ecosystem) = if file_name.ends_with("Cargo.toml")
-            || (file_name.ends_with(".toml") && file_name.contains("cargo"))
-        {
-            (CargoParser::new().parse(&content), Ecosystem::CratesIo)
-        } else if file_name.ends_with("package.json")
-            || (file_name.ends_with(".json") && file_name.contains("package"))
-        {
-            (NpmParser::new().parse(&content), Ecosystem::Npm)
-        } else if file_name.ends_with("requirements.txt") || file_name.ends_with("pyproject.toml") {
-            (PythonParser::new().parse(&content), Ecosystem::PyPI)
-        } else if file_name.ends_with("go.mod") {
-            (GoParser::new().parse(&content), Ecosystem::Go)
-        } else if file_name.ends_with("composer.json") {
-            (PhpParser::new().parse(&content), Ecosystem::Packagist)
-        } else if file_name.ends_with("pubspec.yaml") {
-            (DartParser::new().parse(&content), Ecosystem::Pub)
-        } else if file_name.ends_with(".csproj") {
-            (CsharpParser::new().parse(&content), Ecosystem::NuGet)
-        } else if file_name.ends_with("Gemfile") {
-            (RubyParser::new().parse(&content), Ecosystem::RubyGems)
-        } else {
-            eprintln!("Unsupported file type: {}", file_name);
-            return ExitCode::FAILURE;
+        let dependencies = match ecosystem {
+            Ecosystem::CratesIo => CargoParser::new().parse(&content),
+            Ecosystem::Npm => NpmParser::new().parse(&content),
+            Ecosystem::PyPI => PythonParser::new().parse(&content),
+            Ecosystem::Go => GoParser::new().parse(&content),
+            Ecosystem::Packagist => PhpParser::new().parse(&content),
+            Ecosystem::Pub => DartParser::new().parse(&content),
+            Ecosystem::NuGet => CsharpParser::new().parse(&content),
+            Ecosystem::RubyGems => RubyParser::new().parse(&content),
         };
         let parse_elapsed = parse_start.elapsed();
 
         if dependencies.is_empty() {
-            eprintln!("No dependencies found");
+            if verbose {
+                eprintln!("No dependencies found");
+            }
             continue;
         }
 
-        eprintln!("  Parse: {:?} ({} deps)", parse_elapsed, dependencies.len());
+        if verbose {
+            eprintln!("  Parse: {:?} ({} deps)", parse_elapsed, dependencies.len());
+        }
 
         // Step 2: Fetch registry info (parallel, limited to first 10 for profiling)
         let registry_start = Instant::now();
         let deps_to_fetch: Vec<_> = dependencies.iter().take(10).collect();
-        let http_client = dependi_lsp::registries::http_client::create_shared_client()
-            .expect("Failed to create HTTP client");
 
         let futures: Vec<_> = deps_to_fetch
             .iter()
@@ -618,7 +689,9 @@ async fn run_profile_full(file: PathBuf, iterations: usize) -> ExitCode {
 
         let _results = join_all(futures).await;
         let registry_elapsed = registry_start.elapsed();
-        eprintln!("  Registry: {:?}", registry_elapsed);
+        if verbose {
+            eprintln!("  Registry: {:?}", registry_elapsed);
+        }
 
         // Step 3: Vulnerability check
         let vuln_start = Instant::now();
@@ -634,13 +707,17 @@ async fn run_profile_full(file: PathBuf, iterations: usize) -> ExitCode {
         let osv_client = OsvClient::default();
         let _ = osv_client.query_batch(&queries).await;
         let vuln_elapsed = vuln_start.elapsed();
-        eprintln!("  Vulns: {:?}", vuln_elapsed);
+        if verbose {
+            eprintln!("  Vulns: {:?}", vuln_elapsed);
+        }
     }
 
     let elapsed = start.elapsed();
+    let avg = elapsed.checked_div(iterations).unwrap_or_default();
+
     eprintln!("\nProfiling complete!");
     eprintln!("Total time: {:?}", elapsed);
-    eprintln!("Average per iteration: {:?}", elapsed / iterations as u32);
+    eprintln!("Average per iteration: {:?}", avg);
 
     ExitCode::SUCCESS
 }
