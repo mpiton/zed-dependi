@@ -1,10 +1,20 @@
 # Dependi for Zed
 
+[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
+[![Documentation](https://img.shields.io/badge/docs-latest-blue.svg)](https://mpiton.github.io/zed-dependi/)
+[![GitHub CI](https://github.com/mpiton/zed-dependi/actions/workflows/ci.yml/badge.svg)](https://github.com/mpiton/zed-dependi/actions/workflows/ci.yml)
+[![GitHub release](https://img.shields.io/github/v/release/mpiton/zed-dependi)](https://github.com/mpiton/zed-dependi/releases)
+[![Issues](https://img.shields.io/github/issues-raw/mpiton/zed-dependi)](https://github.com/mpiton/zed-dependi/issues)
+[![Pull Requests](https://img.shields.io/github/issues-pr-raw/mpiton/zed-dependi)](https://github.com/mpiton/zed-dependi/pulls)
+[![Contributor Covenant](https://img.shields.io/badge/Contributor%20Covenant-2.1-4baaaa.svg)](CODE_OF_CONDUCT.md)
+
 Dependency management extension for the [Zed](https://zed.dev) editor.
 
 **Version:** 1.1.0
 
 ![Demo](docs/demo.gif)
+
+📚 **Documentation**: [Full documentation available here](https://mpiton.github.io/zed-dependi/)
 
 ## Features
 
