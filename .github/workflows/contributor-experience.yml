@@ -18,7 +18,7 @@ jobs:
     steps:
       - name: Check if first PR
         id: check
-        uses: actions/github-script@v7
+        uses: actions/github-script@v8
         with:
           script: |
             const creator = context.payload.pull_request.user.login;
@@ -35,7 +35,7 @@ jobs:
 
       - name: Add first-contribution label
         if: steps.check.outputs.is_first_pr == 'true'
-        uses: actions/github-script@v7
+        uses: actions/github-script@v8
         with:
           script: |
             await github.rest.issues.addLabels({
@@ -47,7 +47,7 @@ jobs:
 
       - name: Welcome message
         if: steps.check.outputs.is_first_pr == 'true'
-        uses: actions/github-script@v7
+        uses: actions/github-script@v8
         with:
           script: |
             const creator = context.payload.pull_request.user.login;
@@ -65,7 +65,7 @@ jobs:
     steps:
       - name: Check if first merged PR
         id: check
-        uses: actions/github-script@v7
+        uses: actions/github-script@v8
         with:
           script: |
             const creator = context.payload.pull_request.user.login;
@@ -84,7 +84,7 @@ jobs:
 
       - name: Thank first-time contributor
         if: steps.check.outputs.is_first_merged == 'true'
-        uses: actions/github-script@v7
+        uses: actions/github-script@v8
         with:
           script: |
             const creator = context.payload.pull_request.user.login;
@@ -102,7 +102,7 @@ jobs:
     steps:
       - name: Check if first issue
         id: check
-        uses: actions/github-script@v7
+        uses: actions/github-script@v8
         with:
           script: |
             const creator = context.payload.issue.user.login;
@@ -119,7 +119,7 @@ jobs:
 
       - name: Welcome message for first issue
         if: steps.check.outputs.is_first_issue == 'true'
-        uses: actions/github-script@v7
+        uses: actions/github-script@v8
         with:
           script: |
             const creator = context.payload.issue.user.login;
@@ -136,7 +136,7 @@ jobs:
     if: github.event_name == 'pull_request_target' && github.event.action == 'opened'
     steps:
       - name: Label based on files changed
-        uses: actions/github-script@v7
+        uses: actions/github-script@v8
         with:
           script: |
             const { data: files } = await github.rest.pulls.listFiles({
