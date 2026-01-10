@@ -80,7 +80,8 @@ fn parse_gem_declaration(line: &str, line_num: u32, dev: bool) -> Option<Depende
 
     // Must start with 'gem'
     let after_gem = if let Some(rest) = trimmed.strip_prefix("gem(") {
-        rest.trim_end_matches(')')
+        // Use strip_suffix to remove at most one trailing ')'
+        rest.strip_suffix(')').unwrap_or(rest)
     } else if let Some(rest) = trimmed.strip_prefix("gem ") {
         rest
     } else {
