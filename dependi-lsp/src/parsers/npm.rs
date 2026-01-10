@@ -357,11 +357,14 @@ mod tests {
   }
 }"#;
         let deps = parser.parse(content);
-        // Only the simple string version should be parsed
-        // Complex objects with version field are also supported
-        assert!(!deps.is_empty());
+        // Both string versions and object versions with a "version" field are supported
+        assert_eq!(deps.len(), 2);
+
         let simple = deps.iter().find(|d| d.name == "simple").unwrap();
         assert_eq!(simple.version, "1.0.0");
+
+        let complex = deps.iter().find(|d| d.name == "complex").unwrap();
+        assert_eq!(complex.version, "2.0.0");
     }
 
     #[test]
