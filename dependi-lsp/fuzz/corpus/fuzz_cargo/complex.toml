@@ -1,0 +1,18 @@
+[package]
+name = "complex-crate"
+version = "1.2.3"
+
+[dependencies]
+anyhow = "1.0.100"
+thiserror = { version = "2.0", optional = true }
+
+[dependencies.reqwest]
+version = "0.12"
+features = ["json", "rustls-tls"]
+default-features = false
+
+[dev-dependencies]
+tokio-test = "0.4"
+
+[target.'cfg(unix)'.dependencies]
+nix = "0.27"
