@@ -415,7 +415,16 @@ async fn run_profile_registry(
         pypi::PyPiRegistry, rubygems::RubyGemsRegistry,
     };
 
-    let package_list: Vec<&str> = packages.split(',').map(|s| s.trim()).collect();
+    let package_list: Vec<&str> = packages
+        .split(',')
+        .map(|s| s.trim())
+        .filter(|s| !s.is_empty())
+        .collect();
+
+    if package_list.is_empty() {
+        eprintln!("Error: No packages specified. Provide comma-separated package names.");
+        return ExitCode::FAILURE;
+    }
 
     eprintln!("Profiling registry requests for: {:?}", registry);
     eprintln!("Packages: {:?}", package_list);
