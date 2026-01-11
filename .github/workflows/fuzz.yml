@@ -33,7 +33,7 @@ jobs:
         target: [cargo, npm, python, go, ruby, php, dart, csharp]
 
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
 
       - name: Install Rust nightly
         uses: dtolnay/rust-toolchain@nightly
