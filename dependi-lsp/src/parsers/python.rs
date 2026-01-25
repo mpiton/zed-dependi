@@ -195,60 +195,78 @@ fn parse_requirement_line(line: &str, line_num: u32, dev: bool) -> Option<Depend
 fn parse_pyproject_toml(content: &str) -> Vec<Dependency> {
     let mut dependencies = Vec::new();
 
-    // Parse using toml crate for structure, but we need line positions
-    // So we'll do a hybrid approach: parse TOML for structure, then find positions manually
-    let table: toml::Table = match content.parse() {
-        Ok(t) => t,
-        Err(_) => return dependencies,
-    };
+    // Use taplo for parsing as it's more lenient and doesn't panic on malformed input
+    let parsed = taplo::parser::parse(content);
+
+    // If there are errors, skip this file
+    if !parsed.errors.is_empty() {
+        return dependencies;
+    }
+
+    let dom = parsed.into_dom();
 
     // PEP 621: [project.dependencies] array of strings
-    if let Some(project) = table.get("project").and_then(|v| v.as_table()) {
+    let project = dom.get("project");
+    if let Some(project_table) = project.as_table() {
         // [project.dependencies]
-        if let Some(deps) = project.get("dependencies").and_then(|v| v.as_array()) {
-            for dep_str in deps.iter().filter_map(|v| v.as_str()) {
-                if let Some((name, version)) = parse_pep508_dependency(dep_str)
-                    && let Some(dep) = find_dependency_position(content, &name, &version, false)
-                {
-                    dependencies.push(dep);
+        let deps_node = project.get("dependencies");
+        if let Some(deps_array) = deps_node.as_array() {
+            let items = deps_array.items().read();
+            for item in items.iter() {
+                if let Some(dep_str) = item.as_str() {
+                    let dep_str = dep_str.value();
+                    if let Some((name, version)) = parse_pep508_dependency(dep_str)
+                        && let Some(dep) = find_dependency_position(content, &name, &version, false)
+                    {
+                        dependencies.push(dep);
+                    }
                 }
             }
         }
 
         // [project.optional-dependencies]
-        if let Some(optional_deps) = project
-            .get("optional-dependencies")
-            .and_then(|v| v.as_table())
-        {
-            for (_group, deps) in optional_deps {
-                if let Some(deps_array) = deps.as_array() {
-                    for dep_str in deps_array.iter().filter_map(|v| v.as_str()) {
-                        if let Some((name, version)) = parse_pep508_dependency(dep_str)
-                            && let Some(dep) =
-                                find_dependency_position(content, &name, &version, true)
-                        {
-                            dependencies.push(dep);
+        let optional_node = project.get("optional-dependencies");
+        if let Some(optional_deps) = optional_node.as_table() {
+            let entries = optional_deps.entries().read();
+            for (_group, deps_node) in entries.iter() {
+                if let Some(deps_array) = deps_node.as_array() {
+                    let items = deps_array.items().read();
+                    for item in items.iter() {
+                        if let Some(dep_str) = item.as_str() {
+                            let dep_str = dep_str.value();
+                            if let Some((name, version)) = parse_pep508_dependency(dep_str)
+                                && let Some(dep) =
+                                    find_dependency_position(content, &name, &version, true)
+                            {
+                                dependencies.push(dep);
+                            }
                         }
                     }
                 }
             }
         }
+
+        // Suppress unused variable warning
+        let _ = project_table;
     }
 
     // Poetry: [tool.poetry.dependencies] table
-    if let Some(tool) = table.get("tool").and_then(|v| v.as_table())
-        && let Some(poetry) = tool.get("poetry").and_then(|v| v.as_table())
-    {
+    let tool = dom.get("tool");
+    let poetry = tool.get("poetry");
+    if let Some(poetry_table) = poetry.as_table() {
         // [tool.poetry.dependencies]
-        if let Some(deps) = poetry.get("dependencies").and_then(|v| v.as_table()) {
-            for (name, value) in deps {
+        let deps_node = poetry.get("dependencies");
+        if let Some(deps_table) = deps_node.as_table() {
+            let entries = deps_table.entries().read();
+            for (key, value) in entries.iter() {
+                let name = key.value().to_string();
                 // Skip python itself
                 if name == "python" {
                     continue;
                 }
-                if let Some(version) = extract_poetry_version(value)
+                if let Some(version) = extract_poetry_version_taplo(value)
                     && let Some(dep) =
-                        find_poetry_dependency_position(content, name, &version, false)
+                        find_poetry_dependency_position(content, &name, &version, false)
                 {
                     dependencies.push(dep);
                 }
@@ -256,11 +274,14 @@ fn parse_pyproject_toml(content: &str) -> Vec<Dependency> {
         }
 
         // [tool.poetry.dev-dependencies] (Poetry < 1.2)
-        if let Some(deps) = poetry.get("dev-dependencies").and_then(|v| v.as_table()) {
-            for (name, value) in deps {
-                if let Some(version) = extract_poetry_version(value)
+        let dev_deps_node = poetry.get("dev-dependencies");
+        if let Some(deps_table) = dev_deps_node.as_table() {
+            let entries = deps_table.entries().read();
+            for (key, value) in entries.iter() {
+                let name = key.value().to_string();
+                if let Some(version) = extract_poetry_version_taplo(value)
                     && let Some(dep) =
-                        find_poetry_dependency_position(content, name, &version, true)
+                        find_poetry_dependency_position(content, &name, &version, true)
                 {
                     dependencies.push(dep);
                 }
@@ -268,23 +289,35 @@ fn parse_pyproject_toml(content: &str) -> Vec<Dependency> {
         }
 
         // [tool.poetry.group.dev.dependencies] (Poetry >= 1.2)
-        if let Some(groups) = poetry.get("group").and_then(|v| v.as_table()) {
-            for (group_name, group_value) in groups {
+        let groups_node = poetry.get("group");
+        if let Some(groups) = groups_node.as_table() {
+            let group_entries = groups.entries().read();
+            for (group_key, group_value) in group_entries.iter() {
+                let group_name = group_key.value();
                 let is_dev = group_name == "dev" || group_name == "test";
-                if let Some(group_table) = group_value.as_table()
-                    && let Some(deps) = group_table.get("dependencies").and_then(|v| v.as_table())
-                {
-                    for (name, value) in deps {
-                        if let Some(version) = extract_poetry_version(value)
-                            && let Some(dep) =
-                                find_poetry_dependency_position(content, name, &version, is_dev)
-                        {
-                            dependencies.push(dep);
+                if let Some(group_table) = group_value.as_table() {
+                    let deps_node = group_value.get("dependencies");
+                    if let Some(deps_table) = deps_node.as_table() {
+                        let entries = deps_table.entries().read();
+                        for (key, value) in entries.iter() {
+                            let name = key.value().to_string();
+                            if let Some(version) = extract_poetry_version_taplo(value)
+                                && let Some(dep) = find_poetry_dependency_position(
+                                    content, &name, &version, is_dev,
+                                )
+                            {
+                                dependencies.push(dep);
+                            }
                         }
                     }
+                    // Suppress unused variable warning
+                    let _ = group_table;
                 }
             }
         }
+
+        // Suppress unused variable warning
+        let _ = poetry_table;
     }
 
     dependencies
@@ -343,16 +376,22 @@ fn parse_pep508_dependency(dep_str: &str) -> Option<(String, String)> {
     Some((name.to_string(), version.to_string()))
 }
 
-/// Extract version from Poetry dependency value
-fn extract_poetry_version(value: &toml::Value) -> Option<String> {
-    match value {
-        toml::Value::String(s) => Some(s.clone()),
-        toml::Value::Table(t) => t
-            .get("version")
-            .and_then(|v| v.as_str())
-            .map(|s| s.to_string()),
-        _ => None,
+/// Extract version from Poetry dependency value (using taplo Node)
+fn extract_poetry_version_taplo(value: &taplo::dom::Node) -> Option<String> {
+    // Simple string value: flask = "^2.0.0"
+    if let Some(s) = value.as_str() {
+        return Some(s.value().to_string());
     }
+
+    // Table value: flask = { version = "^2.0.0", ... }
+    if let Some(t) = value.as_table()
+        && let Some(version_node) = t.get("version")
+        && let Some(version_str) = version_node.as_str()
+    {
+        return Some(version_str.value().to_string());
+    }
+
+    None
 }
 
 /// Find position of a dependency in PEP 621 format (array of strings)
