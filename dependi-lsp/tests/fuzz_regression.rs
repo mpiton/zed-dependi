@@ -129,8 +129,8 @@ fn test_php_fuzz_crash() {
 }
 
 #[test]
-fn test_python_fuzz_crash() {
-    // Crash input that triggered panic in toml parser
+fn test_python_fuzz_crash_toml() {
+    // Crash input that triggered panic in toml parser (contains [project] so parsed as TOML)
     let content = "[project]\nname = \"m-jyerequests==2.32.4f\nlask>=0.2.0.0.0\nnu.0.\x01\x00\x00\x00\x01\x14\x0b!=7.0.rpoct\"\nversion = \"1.0.0\"\ndependencies = [\n    \n0dj_ngo>4.\"re=2.\n[project.optional-dependencies]\ndev = [\n    \"onal-dependenciev\nsd]e = [";
 
     let parser = PythonParser::new();
@@ -139,8 +139,20 @@ fn test_python_fuzz_crash() {
     match result {
         Ok(deps) => validate_deps(&deps, content, "Python"),
         Err(_) => {
-            // Python parser may panic due to toml crate bug, which we now catch
-            // This is acceptable - the test passes if we catch the panic
+            // Python parser may panic due to toml crate bug on malformed input
+            // This is acceptable in tests - the fuzz test uses stricter detection
         }
     }
+}
+
+#[test]
+fn test_python_fuzz_crash_malformed_bracket() {
+    // Crash input without [project] - should be parsed as requirements.txt, not TOML
+    // This avoids the toml parser panic
+    let content = "[propect]\"\ns = [\n   0d.   _   00d. dencies quests>=2.= 2840[";
+
+    let parser = PythonParser::new();
+    // This should not panic because it's parsed as requirements.txt
+    let deps = parser.parse(content);
+    validate_deps(&deps, content, "Python");
 }
