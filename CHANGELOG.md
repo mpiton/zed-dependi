@@ -7,6 +7,23 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.3.0] - 2026-01-25
+
+### Added
+
+- Workspace dependencies parsing for Cargo.toml (#114)
+
+### Fixed
+
+- Python pyproject.toml parser panics by switching to taplo for TOML parsing
+- Python pyproject.toml detection for `[project.*]` subsections and inline comments
+- Fuzz testing crashes in parsers (#115)
+
+### Changed
+
+- Updated chrono from 0.4.42 to 0.4.43
+- Updated thiserror from 2.0.17 to 2.0.18
+
 ## [1.2.0] - 2026-01-10
 
 ### Added
@@ -146,7 +163,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - In-memory caching for version data
 - Parallel registry requests (5 concurrent)
 
-[Unreleased]: https://github.com/mpiton/zed-dependi/compare/v1.2.0...HEAD
+[Unreleased]: https://github.com/mpiton/zed-dependi/compare/v1.3.0...HEAD
+[1.3.0]: https://github.com/mpiton/zed-dependi/compare/v1.2.0...v1.3.0
 [1.2.0]: https://github.com/mpiton/zed-dependi/compare/v1.1.0...v1.2.0
 [1.1.0]: https://github.com/mpiton/zed-dependi/compare/v1.0.0...v1.1.0
 [1.0.0]: https://github.com/mpiton/zed-dependi/compare/v0.3.1...v1.0.0

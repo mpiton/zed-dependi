@@ -10,7 +10,7 @@
 
 Dependency management extension for the [Zed](https://zed.dev) editor.
 
-**Version:** 1.2.0
+**Version:** 1.3.0
 
 ![Demo](docs/demo.gif)
 
