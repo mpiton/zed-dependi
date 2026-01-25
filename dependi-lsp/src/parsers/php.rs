@@ -134,7 +134,15 @@ fn find_dependency_position(
                 let (line, name_start_col) = offset_to_position(abs_offset + 1, line_offsets); // +1 to skip opening quote
                 let name_end_col = name_start_col + name.len() as u32;
 
-                let (_, version_start_col) = offset_to_position(version_abs + 1, line_offsets); // +1 to skip opening quote
+                let (version_line, version_start_col) =
+                    offset_to_position(version_abs + 1, line_offsets); // +1 to skip opening quote
+
+                // Ensure name and version are on the same line
+                if version_line != line {
+                    search_start = abs_offset + 1;
+                    continue;
+                }
+
                 let version_end_col = version_start_col + version.len() as u32;
 
                 return Some(Dependency {

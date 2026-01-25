@@ -71,7 +71,8 @@ jobs:
       - name: Check for crashes
         working-directory: dependi-lsp/fuzz
         run: |
-          if [ -d "artifacts/fuzz_${{ matrix.target }}" ]; then
+          # Check for actual crash files (not just directory existence)
+          if ls artifacts/fuzz_${{ matrix.target }}/crash-* 1>/dev/null 2>&1; then
             echo "::error::Crashes found in fuzz_${{ matrix.target }}!"
             ls -la artifacts/fuzz_${{ matrix.target }}/
             exit 1

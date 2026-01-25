@@ -257,14 +257,17 @@ fn find_inline_table_positions(
 }
 
 /// Find positions for a table dependency: `[dependencies.name]` with `version = "x.y.z"`
+///
+/// For table-style dependencies, the name is in the header `[dependencies.name]`
+/// and the version is on a separate line. We return the version line as the primary
+/// line since that's what gets highlighted, and set name positions to 0 since the
+/// name is on a different line.
 fn find_table_dependency_positions(
     content: &str,
     name: &str,
     version: &str,
 ) -> Option<(u32, u32, u32, u32, u32)> {
     let mut found_table = false;
-    let mut name_start = 0u32;
-    let mut name_end = 0u32;
 
     for (line_idx, line) in content.lines().enumerate() {
         let trimmed = line.trim();
@@ -275,11 +278,6 @@ fn find_table_dependency_positions(
             let inner = &trimmed[1..trimmed.len() - 1];
             if inner.contains("dependencies.") && inner.ends_with(name) {
                 found_table = true;
-                // Name position is in the header after the last dot
-                if let Some(dot_pos) = line.rfind('.') {
-                    name_start = (dot_pos + 1) as u32;
-                    name_end = (line.len() - 1) as u32; // Before the closing ]
-                }
                 continue;
             }
         }
@@ -294,13 +292,10 @@ fn find_table_dependency_positions(
             if trimmed.starts_with("version") && line.contains(version) {
                 let version_start = line.find(version)? as u32;
                 let version_end = version_start + version.len() as u32;
-                return Some((
-                    line_idx as u32,
-                    name_start,
-                    name_end,
-                    version_start,
-                    version_end,
-                ));
+
+                // For table dependencies, name is in header (different line)
+                // Set name positions to 0 since we can only return one line number
+                return Some((line_idx as u32, 0, 0, version_start, version_end));
             }
         }
     }

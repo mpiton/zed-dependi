@@ -1,6 +1,7 @@
 //! Parser for Python dependency files (requirements.txt, pyproject.toml)
 
 use super::{Dependency, Parser};
+use std::panic::{AssertUnwindSafe, catch_unwind};
 
 /// Parser for Python dependency files
 #[derive(Debug, Default)]
@@ -158,9 +159,11 @@ fn parse_pyproject_toml(content: &str) -> Vec<Dependency> {
     // Parse using toml crate for structure, but we need line positions
     // So we'll do a hybrid approach: parse TOML for structure, then find positions manually
 
-    let table: toml::Table = match content.parse() {
-        Ok(t) => t,
-        Err(_) => return dependencies,
+    // Wrap in catch_unwind to handle panics from malformed TOML input
+    let content_owned = content.to_string();
+    let table: toml::Table = match catch_unwind(AssertUnwindSafe(|| content_owned.parse())) {
+        Ok(Ok(t)) => t,
+        Ok(Err(_)) | Err(_) => return dependencies,
     };
 
     // PEP 621: [project.dependencies] array of strings
