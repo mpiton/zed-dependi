@@ -91,6 +91,20 @@ impl Parser for CargoParser {
             }
         }
 
+        // Parse workspace.dependencies section
+        if let Some(workspace_table) = dom.get("workspace").as_table()
+            && let Some(deps_node) = workspace_table.get("dependencies")
+            && let Some(deps_table) = deps_node.as_table()
+        {
+            let entries = deps_table.entries().read();
+            for (key, value) in entries.iter() {
+                let name = key.value().to_string();
+                if let Some(dep) = parse_dependency(&name, value, content, false) {
+                    dependencies.push(dep);
+                }
+            }
+        }
+
         dependencies
     }
 }
@@ -391,5 +405,60 @@ optional-dep = { version = "1.0", optional = true }
         let deps = parser.parse(content);
         assert_eq!(deps.len(), 1);
         assert!(deps[0].optional);
+    }
+
+    #[test]
+    fn test_workspace_dependencies_simple() {
+        let parser = CargoParser::new();
+        let content = r#"
+[workspace]
+members = ["crate-a"]
+
+[workspace.dependencies]
+serde = "1.0.0"
+"#;
+        let deps = parser.parse(content);
+        assert_eq!(deps.len(), 1);
+        assert_eq!(deps[0].name, "serde");
+        assert_eq!(deps[0].version, "1.0.0");
+    }
+
+    #[test]
+    fn test_workspace_dependencies_inline_table() {
+        let parser = CargoParser::new();
+        let content = r#"
+[workspace]
+members = ["crate-a"]
+
+[workspace.dependencies]
+tokio = { version = "1.0", features = ["full"] }
+"#;
+        let deps = parser.parse(content);
+        assert_eq!(deps.len(), 1);
+        assert_eq!(deps[0].name, "tokio");
+        assert_eq!(deps[0].version, "1.0");
+    }
+
+    #[test]
+    fn test_workspace_and_regular_dependencies() {
+        let parser = CargoParser::new();
+        let content = r#"
+[package]
+name = "test"
+version = "0.1.0"
+
+[workspace]
+members = ["crate-a"]
+
+[workspace.dependencies]
+serde = "1.0"
+
+[dependencies]
+anyhow = "1.0"
+"#;
+        let deps = parser.parse(content);
+        assert_eq!(deps.len(), 2);
+        assert!(deps.iter().any(|d| d.name == "serde"));
+        assert!(deps.iter().any(|d| d.name == "anyhow"));
     }
 }
