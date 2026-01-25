@@ -29,19 +29,41 @@ impl Parser for PythonParser {
 fn is_pyproject_toml(content: &str) -> bool {
     for line in content.lines() {
         let trimmed = line.trim();
-        // Match [project] section header
-        if trimmed == "[project]" {
+
+        // Match [project...] section headers (e.g., [project], [project.dependencies])
+        // Also allow inline comments: [project] # comment
+        if trimmed.starts_with("[project") && is_valid_section_header(trimmed, "[project") {
             return true;
         }
+
         // Match [tool.poetry...] section headers (e.g., [tool.poetry], [tool.poetry.dependencies])
-        if trimmed.starts_with("[tool.poetry")
-            && trimmed.ends_with(']')
-            && (trimmed == "[tool.poetry]" || trimmed.starts_with("[tool.poetry."))
-        {
+        if trimmed.starts_with("[tool.poetry") && is_valid_section_header(trimmed, "[tool.poetry") {
             return true;
         }
     }
     false
+}
+
+/// Check if a line is a valid TOML section header starting with the given prefix
+/// Requires: starts with prefix, followed by either ']' or '.' then more chars ending with ']'
+/// Allows optional whitespace and comments after the closing ']'
+fn is_valid_section_header(line: &str, prefix: &str) -> bool {
+    let after_prefix = &line[prefix.len()..];
+
+    // Find the closing bracket
+    let Some(bracket_pos) = after_prefix.find(']') else {
+        return false;
+    };
+
+    // Check what's between prefix and ']': must be empty or start with '.'
+    let inner = &after_prefix[..bracket_pos];
+    if !inner.is_empty() && !inner.starts_with('.') {
+        return false;
+    }
+
+    // Check what's after ']': must be only whitespace or a comment
+    let after_bracket = after_prefix[bracket_pos + 1..].trim_start();
+    after_bracket.is_empty() || after_bracket.starts_with('#')
 }
 
 /// Parse requirements.txt format
@@ -564,18 +586,38 @@ flask>=2.0.0
 
     #[test]
     fn test_is_pyproject_toml_detection() {
-        // Valid pyproject.toml patterns
+        // Valid pyproject.toml patterns - [project] and subsections
         assert!(is_pyproject_toml("[project]\nname = \"test\""));
         assert!(is_pyproject_toml("  [project]  \nname = \"test\""));
+        assert!(is_pyproject_toml(
+            "[project.dependencies]\nflask = \">=2.0\""
+        ));
+        assert!(is_pyproject_toml(
+            "[project.optional-dependencies]\ndev = []"
+        ));
+
+        // Valid patterns with inline comments
+        assert!(is_pyproject_toml(
+            "[project] # main section\nname = \"test\""
+        ));
+        assert!(is_pyproject_toml(
+            "[project.dependencies]  # deps\nflask = \"1.0\""
+        ));
+
+        // Valid [tool.poetry] patterns
         assert!(is_pyproject_toml("[tool.poetry]\nname = \"test\""));
         assert!(is_pyproject_toml(
             "[tool.poetry.dependencies]\npython = \"^3.9\""
+        ));
+        assert!(is_pyproject_toml(
+            "[tool.poetry] # comment\nname = \"test\""
         ));
 
         // Invalid patterns (should not trigger TOML parsing)
         assert!(!is_pyproject_toml("mypkg[project]==1.2"));
         assert!(!is_pyproject_toml("pkg[tool.poetry]>=1.0"));
         assert!(!is_pyproject_toml("[projects]\nname = \"test\"")); // not [project]
+        assert!(!is_pyproject_toml("[projectx]\nname = \"test\"")); // not [project] or [project.*]
         assert!(!is_pyproject_toml("[tool.poetryextra]\nname = \"test\"")); // not [tool.poetry...]
         assert!(!is_pyproject_toml("flask>=2.0.0\nrequests>=2.25.0"));
     }
