@@ -15,13 +15,33 @@ impl PythonParser {
 impl Parser for PythonParser {
     fn parse(&self, content: &str) -> Vec<Dependency> {
         // Detect file type based on content
-        // Only parse as TOML if it contains valid pyproject.toml sections
-        if content.contains("[project]") || content.contains("[tool.poetry") {
+        // Only parse as TOML if it contains valid pyproject.toml section headers
+        // Use line-anchored detection to avoid false positives like "mypkg[project]==1.2"
+        if is_pyproject_toml(content) {
             parse_pyproject_toml(content)
         } else {
             parse_requirements_txt(content)
         }
     }
+}
+
+/// Check if content is a pyproject.toml file by looking for line-anchored section headers
+fn is_pyproject_toml(content: &str) -> bool {
+    for line in content.lines() {
+        let trimmed = line.trim();
+        // Match [project] section header
+        if trimmed == "[project]" {
+            return true;
+        }
+        // Match [tool.poetry...] section headers (e.g., [tool.poetry], [tool.poetry.dependencies])
+        if trimmed.starts_with("[tool.poetry")
+            && trimmed.ends_with(']')
+            && (trimmed == "[tool.poetry]" || trimmed.starts_with("[tool.poetry."))
+        {
+            return true;
+        }
+    }
+    false
 }
 
 /// Parse requirements.txt format
@@ -523,5 +543,40 @@ pytest = "^7.0.0"
         assert_eq!(dep.name_end, 5);
         assert_eq!(dep.version_start, 7);
         assert_eq!(dep.version_end, 12);
+    }
+
+    #[test]
+    fn test_requirements_with_project_extra_not_toml() {
+        // Ensure packages with [project] as extras don't trigger TOML parsing
+        let parser = PythonParser::new();
+        let content = r#"
+mypkg[project]==1.2.0
+otherpkg[tool.poetry]>=2.0
+flask>=2.0.0
+"#;
+        let deps = parser.parse(content);
+        // Should be parsed as requirements.txt, not pyproject.toml
+        assert_eq!(deps.len(), 3);
+        assert!(deps.iter().any(|d| d.name == "mypkg"));
+        assert!(deps.iter().any(|d| d.name == "otherpkg"));
+        assert!(deps.iter().any(|d| d.name == "flask"));
+    }
+
+    #[test]
+    fn test_is_pyproject_toml_detection() {
+        // Valid pyproject.toml patterns
+        assert!(is_pyproject_toml("[project]\nname = \"test\""));
+        assert!(is_pyproject_toml("  [project]  \nname = \"test\""));
+        assert!(is_pyproject_toml("[tool.poetry]\nname = \"test\""));
+        assert!(is_pyproject_toml(
+            "[tool.poetry.dependencies]\npython = \"^3.9\""
+        ));
+
+        // Invalid patterns (should not trigger TOML parsing)
+        assert!(!is_pyproject_toml("mypkg[project]==1.2"));
+        assert!(!is_pyproject_toml("pkg[tool.poetry]>=1.0"));
+        assert!(!is_pyproject_toml("[projects]\nname = \"test\"")); // not [project]
+        assert!(!is_pyproject_toml("[tool.poetryextra]\nname = \"test\"")); // not [tool.poetry...]
+        assert!(!is_pyproject_toml("flask>=2.0.0\nrequests>=2.25.0"));
     }
 }
