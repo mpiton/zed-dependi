@@ -169,15 +169,20 @@ impl Registry for PubDevRegistry {
             .map(|v| v.version.clone())
             .collect();
 
-        // Find latest stable version
+        // Find latest stable version (versions are in ascending order, so iterate from end)
         let latest_stable = versions
             .iter()
+            .rev()
             .find(|v| !is_prerelease_dart(v))
             .cloned()
             .or_else(|| Some(pkg.latest.version.clone()));
 
-        // Find latest prerelease
-        let latest_prerelease = versions.iter().find(|v| is_prerelease_dart(v)).cloned();
+        // Find latest prerelease (iterate from end to get newest)
+        let latest_prerelease = versions
+            .iter()
+            .rev()
+            .find(|v| is_prerelease_dart(v))
+            .cloned();
 
         // Collect release dates
         let release_dates: HashMap<String, DateTime<Utc>> = pkg
@@ -221,5 +226,48 @@ mod tests {
         assert!(is_prerelease_dart("1.0.0-rc.1"));
         assert!(!is_prerelease_dart("1.0.0"));
         assert!(!is_prerelease_dart("2.0.0"));
+    }
+
+    #[test]
+    fn test_latest_version_from_ascending_list() {
+        let versions = [
+            "0.5.0",
+            "0.5.1",
+            "1.0.0",
+            "2.0.0-dev.1",
+            "2.0.0",
+            "3.0.0-beta.1",
+            "3.0.0",
+        ];
+
+        let latest_stable = versions
+            .iter()
+            .rev()
+            .find(|v| !is_prerelease_dart(v))
+            .map(|v| v.to_string());
+
+        let latest_prerelease = versions
+            .iter()
+            .rev()
+            .find(|v| is_prerelease_dart(v))
+            .map(|v| v.to_string());
+
+        assert_eq!(latest_stable, Some("3.0.0".to_string()));
+        assert_eq!(latest_prerelease, Some("3.0.0-beta.1".to_string()));
+    }
+
+    #[tokio::test]
+    #[ignore] // Requires network access
+    async fn test_flutter_riverpod_latest_version() {
+        let registry = PubDevRegistry::default();
+        let info = registry.get_version_info("flutter_riverpod").await.unwrap();
+
+        // Latest stable should be 2.x or 3.x, definitely not 0.5.x
+        let latest = info.latest.expect("Should have a latest version");
+        assert!(
+            latest.starts_with("2.") || latest.starts_with("3."),
+            "Expected latest version to be 2.x or 3.x, got: {}",
+            latest
+        );
     }
 }
