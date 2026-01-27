@@ -146,6 +146,24 @@ impl Registry for PubDevRegistry {
         Arc::clone(&self.client)
     }
 
+    /// Retrieve version metadata for a package from the pub.dev API.
+    ///
+    /// The returned `VersionInfo` contains the package's available versions (excluding retracted
+    /// releases), the latest stable version (falling back to the package's reported latest if none
+    /// can be determined), the latest prerelease if any, release dates parsed from RFC 3339 timestamps,
+    /// and metadata from the package's latest pubspec (description, homepage, repository, deprecated/yanked flags).
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// #[tokio::main]
+    /// async fn main() {
+    ///     let registry = PubDevRegistry::default();
+    ///     let info = registry.get_version_info("http").await.unwrap();
+    ///     // versions should contain at least one entry for a published package
+    ///     assert!(!info.versions.is_empty());
+    /// }
+    /// ```
     async fn get_version_info(&self, package_name: &str) -> anyhow::Result<VersionInfo> {
         let url = format!("{}/packages/{}", self.base_url, package_name);
 
