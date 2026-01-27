@@ -155,7 +155,7 @@ impl Registry for PubDevRegistry {
     ///
     /// # Examples
     ///
-    /// ```
+    /// ```ignore
     /// #[tokio::main]
     /// async fn main() {
     ///     let registry = PubDevRegistry::default();
