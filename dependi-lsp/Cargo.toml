@@ -33,7 +33,7 @@ r2d2_sqlite = "0.32"
 dirs = "6"
 serde_yaml = "0.9.34"
 chrono = { version = "0.4.43", features = ["serde"] }
-clap = { version = "4.5.54", features = ["derive"] }
+clap = { version = "4.5.57", features = ["derive"] }
 futures = "0.3.31"
 taplo = "0.14"
 
