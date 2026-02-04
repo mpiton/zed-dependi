@@ -7,6 +7,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.3.3] - 2026-02-04
+
+### Security
+
+- Bump `bytes` from 1.11.0 to 1.11.1 (fix integer overflow in `BytesMut::reserve`)
+
+### Changed
+
+- Bump `clap` from 4.5.54 to 4.5.57
+
 ## [1.3.2] - 2026-01-31
 
 ### Fixed
@@ -175,7 +185,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - In-memory caching for version data
 - Parallel registry requests (5 concurrent)
 
-[Unreleased]: https://github.com/mpiton/zed-dependi/compare/v1.3.2...HEAD
+[Unreleased]: https://github.com/mpiton/zed-dependi/compare/v1.3.3...HEAD
+[1.3.3]: https://github.com/mpiton/zed-dependi/compare/v1.3.2...v1.3.3
 [1.3.2]: https://github.com/mpiton/zed-dependi/compare/v1.3.1...v1.3.2
 [1.3.1]: https://github.com/mpiton/zed-dependi/compare/v1.3.0...v1.3.1
 [1.3.0]: https://github.com/mpiton/zed-dependi/compare/v1.2.0...v1.3.0
