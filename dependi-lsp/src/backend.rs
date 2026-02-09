@@ -744,9 +744,9 @@ impl LanguageServer for DependiBackend {
         if !config.registries.cargo.registries.is_empty() {
             // Read tokens from ~/.cargo/credentials.toml (fallback auth source)
             let credential_tokens = {
-                let cargo_home = std::env::var("CARGO_HOME")
-                    .ok()
-                    .or_else(|| std::env::var("HOME").ok().map(|h| format!("{}/.cargo", h)));
+                let cargo_home = std::env::var("CARGO_HOME").ok().or_else(|| {
+                    dirs::home_dir().map(|h| h.join(".cargo").to_string_lossy().to_string())
+                });
 
                 let mut tokens = std::collections::HashMap::new();
                 if let Some(cargo_home) = cargo_home {

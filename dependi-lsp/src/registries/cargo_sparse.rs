@@ -169,8 +169,25 @@ impl Registry for CargoSparseRegistry {
             })
             .cloned();
 
-        // Check if latest version is yanked
-        let yanked = false;
+        // Check if the most recent version overall (by semver) is yanked
+        let semver_cmp = |a: &&String, b: &&String| {
+            semver::Version::parse(a)
+                .unwrap_or_else(|_| semver::Version::new(0, 0, 0))
+                .cmp(
+                    &semver::Version::parse(b)
+                        .unwrap_or_else(|_| semver::Version::new(0, 0, 0)),
+                )
+        };
+        let max_non_yanked = all_versions.iter().max_by(semver_cmp);
+        let max_yanked = yanked_versions.iter().max_by(semver_cmp);
+        let yanked = match (max_non_yanked, max_yanked) {
+            (Some(non_yanked), Some(yanked_ver)) => {
+                // If the highest yanked version is newer than the highest non-yanked, yanked = true
+                semver_cmp(&yanked_ver, &non_yanked) == std::cmp::Ordering::Greater
+            }
+            (None, Some(_)) => true,  // All versions are yanked
+            _ => false,               // No yanked versions, or no versions at all
+        };
 
         Ok(VersionInfo {
             latest: latest_stable,
