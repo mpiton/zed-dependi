@@ -70,6 +70,9 @@ impl Parser for CargoParser {
                             .get("optional")
                             .and_then(|n| n.as_bool().map(|b| b.value()))
                             .unwrap_or(false);
+                        let registry = table
+                            .get("registry")
+                            .and_then(|n| n.as_str().map(|s| s.value().to_string()));
 
                         if let Some((line, name_start, name_end, version_start, version_end)) =
                             find_table_dependency_positions(content, &name, &version)
@@ -84,6 +87,7 @@ impl Parser for CargoParser {
                                 version_end,
                                 dev: is_dev,
                                 optional,
+                                registry,
                             });
                         }
                     }
@@ -128,6 +132,7 @@ fn parse_dependency(name: &str, node: &Node, content: &str, is_dev: bool) -> Opt
                 version_end,
                 dev: is_dev,
                 optional: false,
+                registry: None,
             })
         }
         Node::Table(table) => {
@@ -140,6 +145,10 @@ fn parse_dependency(name: &str, node: &Node, content: &str, is_dev: bool) -> Opt
                 .get("optional")
                 .and_then(|n| n.as_bool().map(|b| b.value()))
                 .unwrap_or(false);
+
+            let registry = table
+                .get("registry")
+                .and_then(|n| n.as_str().map(|s| s.value().to_string()));
 
             let (line, name_start, name_end, version_start, version_end) =
                 find_inline_table_positions(content, name, &version)?;
@@ -154,6 +163,7 @@ fn parse_dependency(name: &str, node: &Node, content: &str, is_dev: bool) -> Opt
                 version_end,
                 dev: is_dev,
                 optional,
+                registry,
             })
         }
         _ => None,
@@ -455,5 +465,32 @@ anyhow = "1.0"
         assert_eq!(deps.len(), 2);
         assert!(deps.iter().any(|d| d.name == "serde"));
         assert!(deps.iter().any(|d| d.name == "anyhow"));
+    }
+
+    #[test]
+    fn test_dependency_with_registry() {
+        let parser = CargoParser::new();
+        let content = r#"
+[dependencies]
+my-crate = { version = "0.1.0", registry = "kellnr" }
+"#;
+        let deps = parser.parse(content);
+        assert_eq!(deps.len(), 1);
+        assert_eq!(deps[0].name, "my-crate");
+        assert_eq!(deps[0].version, "0.1.0");
+        assert_eq!(deps[0].registry, Some("kellnr".to_string()));
+    }
+
+    #[test]
+    fn test_dependency_without_registry() {
+        let parser = CargoParser::new();
+        let content = r#"
+[dependencies]
+serde = { version = "1.0.0", features = ["derive"] }
+"#;
+        let deps = parser.parse(content);
+        assert_eq!(deps.len(), 1);
+        assert_eq!(deps[0].name, "serde");
+        assert!(deps[0].registry.is_none());
     }
 }

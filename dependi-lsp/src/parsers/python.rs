@@ -188,6 +188,7 @@ fn parse_requirement_line(line: &str, line_num: u32, dev: bool) -> Option<Depend
         version_end,
         dev,
         optional: false,
+        registry: None,
     })
 }
 
@@ -426,6 +427,7 @@ fn find_dependency_position(
                     version_end,
                     dev,
                     optional: dev, // optional-dependencies are optional
+                    registry: None,
                 });
             }
         }
@@ -467,6 +469,7 @@ fn find_poetry_dependency_position(
                     version_end,
                     dev,
                     optional: false,
+                    registry: None,
                 });
             }
         }

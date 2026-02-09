@@ -163,12 +163,34 @@ impl Default for NpmRegistryConfig {
     }
 }
 
+/// Configuration for a custom Cargo registry
+#[derive(Debug, Clone, Deserialize, Default)]
+pub struct CargoCustomRegistryConfig {
+    /// Sparse index URL for this registry (without sparse+ prefix)
+    pub index_url: String,
+    /// Authentication configuration
+    #[serde(default)]
+    pub auth: Option<AuthConfig>,
+}
+
+/// Cargo registry configuration
+#[derive(Debug, Clone, Deserialize, Default)]
+#[serde(default)]
+pub struct CargoRegistryConfig {
+    /// Named registries (registry name -> config)
+    #[serde(default)]
+    pub registries: HashMap<String, CargoCustomRegistryConfig>,
+}
+
 /// Package registries configuration
 #[derive(Debug, Clone, Deserialize, Default)]
 #[serde(default)]
 pub struct RegistriesConfig {
     /// npm registry configuration
     pub npm: NpmRegistryConfig,
+    /// Cargo alternative registries configuration
+    #[serde(default)]
+    pub cargo: CargoRegistryConfig,
 }
 
 impl Default for SecurityConfig {
@@ -488,6 +510,55 @@ mod tests {
 
         assert!(auth.is_configured());
         assert!(auth.get_token().is_none());
+    }
+
+    #[test]
+    fn test_cargo_registry_config_defaults() {
+        let config = CargoRegistryConfig::default();
+        assert!(config.registries.is_empty());
+    }
+
+    #[test]
+    fn test_cargo_registry_config_from_json() {
+        let json = json!({
+            "registries": {
+                "cargo": {
+                    "registries": {
+                        "kellnr": {
+                            "index_url": "https://kellnr.example.com/api/v1/crates"
+                        },
+                        "private": {
+                            "index_url": "https://private.registry.com/index",
+                            "auth": {
+                                "type": "env",
+                                "variable": "PRIVATE_REGISTRY_TOKEN"
+                            }
+                        }
+                    }
+                }
+            }
+        });
+
+        let config = Config::from_init_options(Some(json));
+        assert_eq!(config.registries.cargo.registries.len(), 2);
+
+        let kellnr = config.registries.cargo.registries.get("kellnr").unwrap();
+        assert_eq!(kellnr.index_url, "https://kellnr.example.com/api/v1/crates");
+        assert!(kellnr.auth.is_none());
+
+        let private = config.registries.cargo.registries.get("private").unwrap();
+        assert_eq!(private.index_url, "https://private.registry.com/index");
+        assert!(private.auth.is_some());
+        let auth = private.auth.as_ref().unwrap();
+        assert_eq!(auth.auth_type, "env");
+        assert_eq!(auth.variable, "PRIVATE_REGISTRY_TOKEN");
+    }
+
+    #[test]
+    fn test_cargo_registry_config_empty() {
+        let json = json!({});
+        let config = Config::from_init_options(Some(json));
+        assert!(config.registries.cargo.registries.is_empty());
     }
 
     #[test]

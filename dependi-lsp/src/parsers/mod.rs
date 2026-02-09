@@ -23,6 +23,8 @@ pub struct Dependency {
     pub dev: bool,
     /// Whether this dependency is optional
     pub optional: bool,
+    /// Custom registry name (Cargo only, e.g., "kellnr")
+    pub registry: Option<String>,
 }
 
 /// Trait for parsing dependency files

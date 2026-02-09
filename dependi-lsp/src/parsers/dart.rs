@@ -151,6 +151,7 @@ fn parse_dart_dependency_line(line: &str, line_num: u32, dev: bool) -> Option<De
         version_end,
         dev,
         optional: false,
+        registry: None,
     })
 }
 

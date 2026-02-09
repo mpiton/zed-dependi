@@ -102,6 +102,7 @@ fn parse_gem_declaration(line: &str, line_num: u32, dev: bool) -> Option<Depende
         version_end,
         dev,
         optional: false,
+        registry: None,
     })
 }
 

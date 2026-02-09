@@ -216,6 +216,7 @@ pub trait Registry: Send + Sync {
     fn http_client(&self) -> Arc<Client>;
 }
 
+pub mod cargo_sparse;
 pub mod crates_io;
 pub mod go_proxy;
 pub mod http_client;
