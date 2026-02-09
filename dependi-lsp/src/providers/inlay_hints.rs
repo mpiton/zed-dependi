@@ -406,6 +406,7 @@ mod tests {
             version_end: name.len() as u32 + 4 + version.len() as u32,
             dev: false,
             optional: false,
+            registry: None,
         }
     }
 

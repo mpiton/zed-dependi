@@ -7,6 +7,7 @@ use tower_lsp::jsonrpc::Result;
 use tower_lsp::lsp_types::*;
 use tower_lsp::{Client, LanguageServer};
 
+use crate::auth::cargo_credentials;
 use crate::auth::{EnvTokenProvider, TokenProviderManager, redact_token};
 use crate::cache::{HybridCache, ReadCache, WriteCache};
 use crate::config::Config;
@@ -25,6 +26,7 @@ use crate::providers::code_actions::create_code_actions;
 use crate::providers::completion::{format_release_age, get_completions};
 use crate::providers::diagnostics::create_diagnostics;
 use crate::providers::inlay_hints::create_inlay_hint;
+use crate::registries::cargo_sparse::CargoSparseRegistry;
 use crate::registries::crates_io::CratesIoRegistry;
 use crate::registries::go_proxy::GoProxyRegistry;
 use crate::registries::http_client::create_shared_client;
@@ -57,6 +59,7 @@ struct ProcessingContext {
     csharp_parser: Arc<CsharpParser>,
     ruby_parser: Arc<RubyParser>,
     crates_io: Arc<CratesIoRegistry>,
+    cargo_custom_registries: Arc<DashMap<String, Arc<CargoSparseRegistry>>>,
     npm_registry: Arc<tokio::sync::RwLock<NpmRegistry>>,
     pypi: Arc<PyPiRegistry>,
     go_proxy: Arc<GoProxyRegistry>,
@@ -98,6 +101,7 @@ impl ProcessingContext {
 
         // Clone Arc references for async tasks
         let crates_io = Arc::clone(&self.crates_io);
+        let cargo_custom_registries = Arc::clone(&self.cargo_custom_registries);
         let npm_registry = Arc::clone(&self.npm_registry);
         let pypi = Arc::clone(&self.pypi);
         let go_proxy = Arc::clone(&self.go_proxy);
@@ -111,8 +115,10 @@ impl ProcessingContext {
             .iter()
             .map(|dep| {
                 let name = dep.name.clone();
+                let registry = dep.registry.clone();
                 let cache_key = file_type.cache_key(&name);
                 let crates_io = Arc::clone(&crates_io);
+                let cargo_custom_registries = Arc::clone(&cargo_custom_registries);
                 let npm_registry = Arc::clone(&npm_registry);
                 let pypi = Arc::clone(&pypi);
                 let go_proxy = Arc::clone(&go_proxy);
@@ -128,7 +134,21 @@ impl ProcessingContext {
                     }
                     // Fetch from appropriate registry
                     let result = match file_type {
-                        FileType::Cargo => crates_io.get_version_info(&name).await,
+                        FileType::Cargo => {
+                            if let Some(ref reg_name) = registry {
+                                if let Some(reg) = cargo_custom_registries.get(reg_name) {
+                                    reg.get_version_info(&name).await
+                                } else {
+                                    tracing::warn!(
+                                        "Unknown Cargo registry '{}' for package '{}', falling back to crates.io",
+                                        reg_name, name
+                                    );
+                                    crates_io.get_version_info(&name).await
+                                }
+                            } else {
+                                crates_io.get_version_info(&name).await
+                            }
+                        }
                         FileType::Npm => npm_registry.read().await.get_version_info(&name).await,
                         FileType::Python => pypi.get_version_info(&name).await,
                         FileType::Go => go_proxy.get_version_info(&name).await,
@@ -255,6 +275,8 @@ pub struct DependiBackend {
     ruby_parser: Arc<RubyParser>,
     /// Registry clients
     crates_io: Arc<CratesIoRegistry>,
+    /// Cargo alternative registries (registry name -> sparse registry client)
+    cargo_custom_registries: Arc<DashMap<String, Arc<CargoSparseRegistry>>>,
     /// npm registry (tokio::sync::RwLock-wrapped to allow reconfiguration during initialize)
     npm_registry: Arc<tokio::sync::RwLock<NpmRegistry>>,
     pypi: Arc<PyPiRegistry>,
@@ -324,6 +346,7 @@ impl DependiBackend {
             csharp_parser: Arc::new(CsharpParser::new()),
             ruby_parser: Arc::new(RubyParser::new()),
             crates_io: Arc::new(CratesIoRegistry::with_client(Arc::clone(&http_client))),
+            cargo_custom_registries: Arc::new(DashMap::new()),
             npm_registry,
             pypi: Arc::new(PyPiRegistry::with_client(Arc::clone(&http_client))),
             go_proxy: Arc::new(GoProxyRegistry::with_client(Arc::clone(&http_client))),
@@ -356,6 +379,7 @@ impl DependiBackend {
             csharp_parser: Arc::clone(&self.csharp_parser),
             ruby_parser: Arc::clone(&self.ruby_parser),
             crates_io: Arc::clone(&self.crates_io),
+            cargo_custom_registries: Arc::clone(&self.cargo_custom_registries),
             npm_registry: Arc::clone(&self.npm_registry),
             pypi: Arc::clone(&self.pypi),
             go_proxy: Arc::clone(&self.go_proxy),
@@ -372,6 +396,7 @@ impl DependiBackend {
         &self,
         file_type: FileType,
         package_name: &str,
+        cargo_registry: Option<&str>,
     ) -> Option<VersionInfo> {
         let cache_key = file_type.cache_key(package_name);
 
@@ -382,7 +407,17 @@ impl DependiBackend {
 
         // Fetch from appropriate registry
         let result = match file_type {
-            FileType::Cargo => self.crates_io.get_version_info(package_name).await,
+            FileType::Cargo => {
+                if let Some(reg_name) = cargo_registry {
+                    if let Some(reg) = self.cargo_custom_registries.get(reg_name) {
+                        reg.get_version_info(package_name).await
+                    } else {
+                        self.crates_io.get_version_info(package_name).await
+                    }
+                } else {
+                    self.crates_io.get_version_info(package_name).await
+                }
+            }
             FileType::Npm => {
                 self.npm_registry
                     .read()
@@ -670,6 +705,72 @@ impl LanguageServer for DependiBackend {
             );
         }
 
+        // Configure Cargo alternative registries
+        if !config.registries.cargo.registries.is_empty() {
+            // Read tokens from ~/.cargo/credentials.toml (fallback auth source)
+            let credential_tokens = {
+                let cargo_home = std::env::var("CARGO_HOME")
+                    .ok()
+                    .or_else(|| std::env::var("HOME").ok().map(|h| format!("{}/.cargo", h)));
+
+                let mut tokens = std::collections::HashMap::new();
+                if let Some(cargo_home) = cargo_home {
+                    let cred_path = std::path::PathBuf::from(&cargo_home).join("credentials.toml");
+                    let alt_path = std::path::PathBuf::from(&cargo_home).join("credentials");
+
+                    let content = if let Ok(c) = tokio::fs::read_to_string(&cred_path).await {
+                        c
+                    } else {
+                        tokio::fs::read_to_string(&alt_path)
+                            .await
+                            .unwrap_or_default()
+                    };
+
+                    if !content.is_empty() {
+                        tokens = cargo_credentials::parse_credentials_content(&content);
+                        tracing::debug!("Loaded {} tokens from Cargo credentials", tokens.len());
+                    }
+                }
+                tokens
+            };
+
+            for (registry_name, registry_config) in &config.registries.cargo.registries {
+                // Token priority: LSP config auth > credentials.toml
+                let token = registry_config
+                    .auth
+                    .as_ref()
+                    .and_then(|auth| auth.get_token())
+                    .or_else(|| credential_tokens.get(registry_name).cloned());
+
+                if let Some(ref t) = token {
+                    tracing::info!(
+                        "Using auth token for Cargo registry '{}' (token: {})",
+                        registry_name,
+                        redact_token(t)
+                    );
+                }
+
+                let registry = Arc::new(CargoSparseRegistry::with_client_and_config(
+                    Arc::clone(&self.http_client),
+                    registry_config.index_url.clone(),
+                    token,
+                ));
+
+                self.cargo_custom_registries
+                    .insert(registry_name.clone(), registry);
+                tracing::info!(
+                    "Configured Cargo alternative registry: {} -> {}",
+                    registry_name,
+                    registry_config.index_url
+                );
+            }
+
+            tracing::info!(
+                "Cargo alternative registries configured: {}",
+                self.cargo_custom_registries.len()
+            );
+        }
+
         // Store the configuration
         if let Ok(mut cfg) = self.config.write() {
             *cfg = config;
@@ -921,7 +1022,9 @@ impl LanguageServer for DependiBackend {
         drop(doc);
 
         // Get version info
-        let version_info = self.get_version_info(file_type, &dep.name).await;
+        let version_info = self
+            .get_version_info(file_type, &dep.name, dep.registry.as_deref())
+            .await;
 
         let content = match version_info {
             Some(info) => {

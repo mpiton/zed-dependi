@@ -7,28 +7,22 @@
 //! The parsing logic is tested; file I/O integration will be added when
 //! this is wired into the main auth flow.
 
-#[cfg(test)]
 use std::collections::HashMap;
 
-#[cfg(test)]
 use serde::Deserialize;
 
-// These types are used only via deserialization in parse_credentials_content
-#[cfg(test)]
 #[derive(Debug, Deserialize)]
 struct CargoCredentials {
     #[serde(default)]
     registries: HashMap<String, RegistryCredential>,
 }
 
-#[cfg(test)]
 #[derive(Debug, Deserialize)]
 struct RegistryCredential {
     token: Option<String>,
 }
 
-#[cfg(test)]
-fn parse_credentials_content(content: &str) -> HashMap<String, String> {
+pub fn parse_credentials_content(content: &str) -> HashMap<String, String> {
     let credentials: CargoCredentials = match toml::from_str(content) {
         Ok(c) => c,
         Err(_) => return HashMap::new(),
