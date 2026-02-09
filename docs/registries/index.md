@@ -68,6 +68,7 @@ VersionInfo {
 - Name normalization: `foo-bar` = `foo_bar`
 - `yanked` field for withdrawn versions
 - [Documentation](https://crates.io/data-access)
+- **Alternative registries**: Dependi also supports querying alternative Cargo registries (Kellnr, Cloudsmith, etc.) via the sparse index protocol. See [Private Registries]({% link registries/private.md %}) for configuration.
 
 ### npm
 

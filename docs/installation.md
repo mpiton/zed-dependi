@@ -96,7 +96,7 @@ Dependi needs network access to package registries and the vulnerability databas
 
 | Service | URL | Purpose |
 |---------|-----|---------|
-| crates.io | `https://crates.io` | Rust packages |
+| crates.io | `https://crates.io` | Rust packages (+ your alternative registry URLs) |
 | npm | `https://registry.npmjs.org` | Node.js packages |
 | PyPI | `https://pypi.org` | Python packages |
 | Go Proxy | `https://proxy.golang.org` | Go modules |

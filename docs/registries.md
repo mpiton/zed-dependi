@@ -62,6 +62,10 @@ GET https://crates.io/api/v1/crates/{crate_name}
 - `yanked` field indicates withdrawn versions
 - `max_stable_version` provides latest stable directly
 
+#### Alternative Registries
+
+Dependi also supports alternative Cargo registries (Kellnr, Cloudsmith, Artifactory, etc.) via the sparse index protocol. Dependencies using the `registry` field in `Cargo.toml` are routed to the configured alternative registry. See [Private Registries](docs/private-registries.md) for configuration details.
+
 #### External Links
 
 - [Data Access](https://crates.io/data-access)

@@ -15,9 +15,95 @@ Dependi supports custom registry configuration for organizations that need to:
 | Ecosystem | Custom Registry | Scoped Registries | Authentication |
 |-----------|-----------------|-------------------|----------------|
 | npm | Yes | Yes | Environment Variables |
-| Cargo | Planned | Planned | — |
+| Cargo | Yes | N/A (uses `registry` field) | Environment Variables, `~/.cargo/credentials.toml` |
 | PyPI | Planned | — | — |
 | Other | Not yet | — | — |
+
+## Cargo Configuration
+
+Dependi supports alternative Cargo registries using the sparse index protocol. This works with self-hosted registries like Kellnr, Cloudsmith, Artifactory, and others.
+
+### Configuring Registries
+
+Add your alternative registries in Zed `settings.json`:
+
+```json
+{
+  "lsp": {
+    "dependi": {
+      "initialization_options": {
+        "registries": {
+          "cargo": {
+            "registries": {
+              "my-registry": {
+                "index_url": "https://my-registry.example.com/api/v1/crates"
+              }
+            }
+          }
+        }
+      }
+    }
+  }
+}
+```
+
+### Using Alternative Registries in Cargo.toml
+
+Dependencies must specify which registry to use via the `registry` field:
+
+```toml
+[dependencies]
+# Fetched from the configured "my-registry" alternative registry
+my-private-crate = { version = "0.1.0", registry = "my-registry" }
+
+# Fetched from crates.io (default)
+serde = { version = "1.0", features = ["derive"] }
+```
+
+### Authentication
+
+Cargo registry authentication supports two methods (in order of priority):
+
+1. **LSP configuration** (recommended for CI/CD):
+
+```json
+{
+  "registries": {
+    "cargo": {
+      "registries": {
+        "my-registry": {
+          "index_url": "https://my-registry.example.com/api/v1/crates",
+          "auth": {
+            "type": "env",
+            "variable": "MY_REGISTRY_TOKEN"
+          }
+        }
+      }
+    }
+  }
+}
+```
+
+2. **Cargo credentials file** (fallback):
+
+Dependi reads tokens from `~/.cargo/credentials.toml` automatically:
+
+```toml
+[registries.my-registry]
+token = "Bearer my-token-here"
+```
+
+### Common Cargo Registry Solutions
+
+| Registry | Use Case | Example Index URL |
+|----------|----------|-------------------|
+| **Kellnr** | Self-hosted, small teams | `https://kellnr.example.com/api/v1/crates` |
+| **Cloudsmith** | Cloud-hosted private registry | `https://dl.cloudsmith.io/basic/org/repo/cargo/index/` |
+| **Artifactory** | Enterprise artifact management | `https://artifactory.company.com/cargo-local` |
+
+### Cache Behavior
+
+Alternative registry dependencies use namespaced cache keys (e.g., `crates:my-registry:my-crate`) to prevent collisions with crates.io packages that may share the same name.
 
 ## npm Configuration
 
@@ -303,24 +389,6 @@ Look for log entries like:
 
 The following features are planned for future releases:
 
-### Cargo Custom Registries
-
-```json
-{
-  "registries": {
-    "cargo": {
-      "url": "https://crates.my-org.com/api/v1",
-      "alternative": {
-        "my-registry": {
-          "url": "https://crates.my-org.com/api/v1",
-          "index": "https://github.com/my-org/crates-index"
-        }
-      }
-    }
-  }
-}
-```
-
 ### PyPI Custom Registries
 
 ```json
@@ -341,7 +409,6 @@ The following features are planned for future releases:
 
 Support for reading tokens from:
 - `.npmrc` files
-- `~/.cargo/credentials.toml`
 
 ## References
 
