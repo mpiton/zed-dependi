@@ -178,7 +178,47 @@ The cache is stored in your system's cache directory. Increasing TTL reduces net
 
 ### Private Registries
 
-Configure custom npm registries for private packages. See [Private Registries]({% link registries/private.md %}) for detailed setup.
+Configure custom registries for private packages. See [Private Registries]({% link registries/private.md %}) for detailed setup.
+
+#### Cargo Alternative Registries
+
+| Option | Type | Description |
+|--------|------|-------------|
+| `registries.cargo.registries` | object | Map of registry name to configuration |
+| `registries.cargo.registries.<name>.index_url` | string | Sparse index URL (without `sparse+` prefix) |
+| `registries.cargo.registries.<name>.auth` | object | Optional authentication configuration |
+| `registries.cargo.registries.<name>.auth.type` | string | Auth type (`"env"`) |
+| `registries.cargo.registries.<name>.auth.variable` | string | Environment variable containing the token |
+
+**Example:**
+```json
+{
+  "lsp": {
+    "dependi": {
+      "initialization_options": {
+        "registries": {
+          "cargo": {
+            "registries": {
+              "my-registry": {
+                "index_url": "https://my-registry.example.com/api/v1/crates",
+                "auth": {
+                  "type": "env",
+                  "variable": "MY_REGISTRY_TOKEN"
+                }
+              }
+            }
+          }
+        }
+      }
+    }
+  }
+}
+```
+
+{: .note }
+Dependencies using an alternative registry must specify it in `Cargo.toml`: `my-crate = { version = "0.1.0", registry = "my-registry" }`. Dependencies without a `registry` field are fetched from crates.io. Authentication falls back to `~/.cargo/credentials.toml` if not configured in LSP settings.
+
+#### npm Scoped Registries
 
 | Option | Type | Description |
 |--------|------|-------------|

@@ -7,6 +7,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- Cargo alternative registry support for private registries (Kellnr, Cloudsmith, Artifactory, etc.) (#133)
+  - Sparse index protocol implementation for querying alternative Cargo registries
+  - Per-dependency registry routing via the `registry` field in `Cargo.toml`
+  - Authentication via LSP configuration (environment variables) or `~/.cargo/credentials.toml` fallback
+  - Registry-scoped cache keys to prevent cross-registry collisions
+  - Cross-platform `CARGO_HOME` resolution (Linux, macOS, Windows)
+
 ## [1.3.3] - 2026-02-04
 
 ### Security

@@ -26,13 +26,49 @@ Support for Rust projects using Cargo.toml.
 |------|-------------|
 | `Cargo.toml` | Main dependency manifest |
 
-## Registry
+## Registries
+
+### crates.io (Default)
 
 **crates.io** - The official Rust package registry
 
 - Base URL: `https://crates.io/api/v1`
 - Rate limit: 1 request per second (strictly enforced)
 - Documentation: [crates.io](https://crates.io)
+
+### Alternative Registries
+
+Dependi supports querying alternative Cargo registries (Kellnr, Cloudsmith, Artifactory, etc.) for dependencies that specify a `registry` field in `Cargo.toml`.
+
+Configure alternative registries in your Zed `settings.json`:
+
+```json
+{
+  "lsp": {
+    "dependi": {
+      "initialization_options": {
+        "registries": {
+          "cargo": {
+            "registries": {
+              "my-registry": {
+                "index_url": "https://my-registry.example.com/api/v1/crates",
+                "auth": {
+                  "type": "env",
+                  "variable": "MY_REGISTRY_TOKEN"
+                }
+              }
+            }
+          }
+        }
+      }
+    }
+  }
+}
+```
+
+- The `index_url` is the sparse index URL (without the `sparse+` prefix)
+- Authentication can be configured via LSP settings or falls back to `~/.cargo/credentials.toml`
+- Dependencies without a `registry` field are fetched from crates.io as usual
 
 ## Dependency Formats
 
@@ -117,6 +153,15 @@ my-crate = { git = "https://github.com/user/repo" }
 ```
 
 Git dependencies show `→ Git` hint (no registry lookup).
+
+### Alternative Registry Dependencies
+
+```toml
+[dependencies]
+my-crate = { version = "0.1.0", registry = "my-registry" }
+```
+
+Dependencies with a `registry` field are fetched from the configured alternative registry. See [Alternative Registries](#alternative-registries) above for setup.
 
 ### Yanked Versions
 

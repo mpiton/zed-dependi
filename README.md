@@ -46,7 +46,7 @@ Dependency management extension for the [Zed](https://zed.dev) editor.
 
 | Language | File | Registry | Status |
 |----------|------|----------|--------|
-| Rust | `Cargo.toml` | crates.io | ✅ |
+| Rust | `Cargo.toml` | crates.io + alternative registries | ✅ |
 | JavaScript/TypeScript | `package.json` | npm | ✅ |
 | Python | `requirements.txt`, `pyproject.toml` | PyPI | ✅ |
 | Go | `go.mod` | proxy.golang.org | ✅ |
@@ -221,7 +221,52 @@ Configure Dependi in your Zed `settings.json`:
 
 ### Private Registries
 
-Dependi supports custom npm registries for enterprise environments. Configure scoped registries to use private packages alongside public ones:
+Dependi supports custom registries for enterprise environments.
+
+#### Cargo Alternative Registries
+
+Query private Cargo registries (Kellnr, Cloudsmith, Artifactory, etc.) alongside crates.io:
+
+```json
+{
+  "lsp": {
+    "dependi": {
+      "initialization_options": {
+        "registries": {
+          "cargo": {
+            "registries": {
+              "my-registry": {
+                "index_url": "https://my-registry.example.com/api/v1/crates",
+                "auth": {
+                  "type": "env",
+                  "variable": "MY_REGISTRY_TOKEN"
+                }
+              }
+            }
+          }
+        }
+      }
+    }
+  }
+}
+```
+
+Then in your `Cargo.toml`, use the `registry` field:
+
+```toml
+[dependencies]
+my-crate = { version = "0.1.0", registry = "my-registry" }
+serde = "1.0"  # still fetched from crates.io
+```
+
+**Key points:**
+- The `index_url` is the sparse index URL (without the `sparse+` prefix)
+- Authentication can be configured via LSP settings or falls back to `~/.cargo/credentials.toml`
+- Dependencies without a `registry` field are fetched from crates.io as usual
+
+#### npm Scoped Registries
+
+Configure scoped registries to use private npm packages alongside public ones:
 
 ```json
 {
@@ -447,7 +492,8 @@ security-scan:
 │  │   Parsers    │  │  Providers   │  │  Registries  │      │
 │  ├──────────────┤  ├──────────────┤  ├──────────────┤      │
 │  │ • Cargo.toml │  │ • Inlay Hints│  │ • crates.io  │      │
-│  │ • package.json│ │ • Diagnostics│  │ • npm        │      │
+│  │ • package.json│ │ • Diagnostics│  │ • Cargo alt  │      │
+│  │ • requirements│ │ • Code Action│  │ • npm        │      │
 │  │ • requirements│ │ • Code Action│  │ • PyPI       │      │
 │  │ • pyproject  │  │ • Completion │  │ • Go Proxy   │      │
 │  │ • go.mod     │  │ • Hover      │  │ • Packagist  │      │
@@ -624,7 +670,7 @@ Yes, with limitations. If packages were previously cached, their information rem
 
 | Language | Registry | URL |
 |----------|----------|-----|
-| Rust | crates.io | https://crates.io |
+| Rust | crates.io (+ alternative registries) | https://crates.io |
 | JavaScript/TypeScript | npm | https://registry.npmjs.org |
 | Python | PyPI | https://pypi.org |
 | Go | Go Proxy | https://proxy.golang.org |
