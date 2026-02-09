@@ -141,8 +141,10 @@ impl ProcessingContext {
                 async move {
                     // Check cache first
                     if cache.get(&cache_key).is_some() {
+                        tracing::debug!("Cache hit for '{}' (key: {})", name, cache_key);
                         return;
                     }
+                    tracing::debug!("Cache miss for '{}' (key: {}), fetching from registry {:?}", name, cache_key, registry);
                     // Fetch from appropriate registry
                     let result = match file_type {
                         FileType::Cargo => {
@@ -168,8 +170,16 @@ impl ProcessingContext {
                         FileType::Csharp => nuget.get_version_info(&name).await,
                         FileType::Ruby => rubygems.get_version_info(&name).await,
                     };
-                    if let Ok(info) = result {
-                        cache.insert(cache_key, info);
+                    match result {
+                        Ok(info) => {
+                            cache.insert(cache_key, info);
+                        }
+                        Err(e) => {
+                            tracing::error!(
+                                "Failed to fetch version info for '{}' (registry: {:?}): {}",
+                                name, registry, e
+                            );
+                        }
                     }
                 }
             })
