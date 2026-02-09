@@ -42,6 +42,17 @@ use crate::vulnerabilities::VulnerabilityQuery;
 use crate::vulnerabilities::cache::VulnerabilityCache;
 use crate::vulnerabilities::osv::OsvClient;
 
+/// Compute cache key for a dependency, including registry for Cargo alternative registries.
+///
+/// For Cargo deps with `registry = "name"`, the key is `crates:{registry}:{name}` to avoid
+/// collisions between crates.io and private registries. All other deps use the standard key.
+fn dep_cache_key(dep: &crate::parsers::Dependency, file_type: FileType) -> String {
+    match (&dep.registry, file_type) {
+        (Some(registry), FileType::Cargo) => format!("crates:{}:{}", registry, dep.name),
+        _ => file_type.cache_key(&dep.name),
+    }
+}
+
 /// Holds cloneable references to backend state for async document processing.
 /// Used by debounce tasks to process documents after the debounce period.
 #[derive(Clone)]
@@ -116,7 +127,7 @@ impl ProcessingContext {
             .map(|dep| {
                 let name = dep.name.clone();
                 let registry = dep.registry.clone();
-                let cache_key = file_type.cache_key(&name);
+                let cache_key = dep_cache_key(dep, file_type);
                 let crates_io = Arc::clone(&crates_io);
                 let cargo_custom_registries = Arc::clone(&cargo_custom_registries);
                 let npm_registry = Arc::clone(&npm_registry);
@@ -215,10 +226,20 @@ impl ProcessingContext {
             } else {
                 None
             };
+            // Pre-build cache key map for registry-aware lookups
+            let cache_key_map: std::collections::HashMap<String, String> = dependencies
+                .iter()
+                .map(|dep| (dep.name.clone(), dep_cache_key(dep, file_type)))
+                .collect();
             let diagnostics = create_diagnostics(
                 &dependencies,
                 &self.version_cache,
-                |name| file_type.cache_key(name),
+                |name| {
+                    cache_key_map
+                        .get(name)
+                        .cloned()
+                        .unwrap_or_else(|| file_type.cache_key(name))
+                },
                 severity_filter,
             );
 
@@ -398,7 +419,12 @@ impl DependiBackend {
         package_name: &str,
         cargo_registry: Option<&str>,
     ) -> Option<VersionInfo> {
-        let cache_key = file_type.cache_key(package_name);
+        let cache_key = match (cargo_registry, file_type) {
+            (Some(registry), FileType::Cargo) => {
+                format!("crates:{}:{}", registry, package_name)
+            }
+            _ => file_type.cache_key(package_name),
+        };
 
         // Check cache first
         if let Some(cached) = self.version_cache.get(&cache_key) {
@@ -457,6 +483,12 @@ impl DependiBackend {
 
         let ecosystem = file_type.to_ecosystem();
 
+        // Pre-build cache key map for registry-aware lookups
+        let cache_key_map: std::collections::HashMap<String, String> = dependencies
+            .iter()
+            .map(|dep| (dep.name.clone(), dep_cache_key(dep, file_type)))
+            .collect();
+
         // Build queries for packages not in vulnerability cache
         let queries: Vec<VulnerabilityQuery> = dependencies
             .iter()
@@ -494,7 +526,10 @@ impl DependiBackend {
                     vuln_cache.insert(vuln_key);
 
                     // Store vulnerabilities and deprecated status in version_cache
-                    let cache_key = file_type.cache_key(&query.package_name);
+                    let cache_key = cache_key_map
+                        .get(&query.package_name)
+                        .cloned()
+                        .unwrap_or_else(|| file_type.cache_key(&query.package_name));
                     if let Some(mut info) = cache.get(&cache_key) {
                         info.vulnerabilities = result.vulnerabilities.clone();
                         info.deprecated = result.deprecated;
@@ -609,7 +644,7 @@ impl DependiBackend {
         let mut summary = VulnerabilitySummary::default();
 
         for dep in &dependencies {
-            let cache_key = file_type.cache_key(&dep.name);
+            let cache_key = dep_cache_key(dep, file_type);
             if let Some(info) = self.version_cache.get(&cache_key) {
                 for vuln in &info.vulnerabilities {
                     summary.total += 1;
@@ -973,7 +1008,7 @@ impl LanguageServer for DependiBackend {
                 })
             })
             .filter_map(|dep| {
-                let cache_key = file_type.cache_key(&dep.name);
+                let cache_key = dep_cache_key(dep, file_type);
                 let version_info = self.version_cache.get(&cache_key);
                 let hint = create_inlay_hint(dep, version_info.as_ref());
 
@@ -1133,13 +1168,23 @@ impl LanguageServer for DependiBackend {
         };
 
         let file_type = doc.file_type;
+        let cache_key_map: std::collections::HashMap<String, String> = doc
+            .dependencies
+            .iter()
+            .map(|dep| (dep.name.clone(), dep_cache_key(dep, file_type)))
+            .collect();
         let actions = create_code_actions(
             &doc.dependencies,
             &self.version_cache,
             uri,
             params.range,
             file_type,
-            |name| file_type.cache_key(name),
+            |name| {
+                cache_key_map
+                    .get(name)
+                    .cloned()
+                    .unwrap_or_else(|| file_type.cache_key(name))
+            },
         );
 
         Ok(Some(actions))
@@ -1154,9 +1199,17 @@ impl LanguageServer for DependiBackend {
         };
 
         let file_type = doc.file_type;
+        let cache_key_map: std::collections::HashMap<String, String> = doc
+            .dependencies
+            .iter()
+            .map(|dep| (dep.name.clone(), dep_cache_key(dep, file_type)))
+            .collect();
         let completions =
             get_completions(&doc.dependencies, position, &self.version_cache, |name| {
-                file_type.cache_key(name)
+                cache_key_map
+                    .get(name)
+                    .cloned()
+                    .unwrap_or_else(|| file_type.cache_key(name))
             });
 
         match completions {
