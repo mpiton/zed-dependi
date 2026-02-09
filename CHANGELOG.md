@@ -16,6 +16,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - Registry-scoped cache keys to prevent cross-registry collisions
   - Cross-platform `CARGO_HOME` resolution (Linux, macOS, Windows)
 
+### Changed
+
+- Bump `anyhow` from 1.0.100 to 1.0.101
+- Bump `criterion` from 0.8.1 to 0.8.2
+- Update 52 transitive dependencies via cargo update
+
+### Removed
+
+- Remove unused `serde_yaml` dependency (deprecated since March 2024, never imported)
+
 ## [1.3.3] - 2026-02-04
 
 ### Security
