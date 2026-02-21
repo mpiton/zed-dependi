@@ -21,7 +21,7 @@ serde = { version = "1.0.228", features = ["derive"] }
 serde_json = "1.0.149"
 reqwest = { version = "0.12.28", features = ["json", "rustls-tls"], default-features = false }
 dashmap = "6.1"
-toml = "0.9.11"
+toml = "1.0.3"
 semver = "1.0.27"
 tracing = "0.1.44"
 tracing-subscriber = { version = "0.3.22", features = ["env-filter"] }
