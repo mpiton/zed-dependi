@@ -1,5 +1,5 @@
 requests==2.32.4
-flask>=2.0.0,<3.0.0
+flask>=2.0.0,<4.0.0
 numpy~=1.24.0
 pandas[sql,excel]>=2.0.0
 pytest!=7.0.0
