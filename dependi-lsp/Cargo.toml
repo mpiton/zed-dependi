@@ -2,6 +2,7 @@
 name = "dependi-lsp"
 version = "1.4.1"
 edition = "2024"
+rust-version = "1.85"
 license = "MIT"
 description = "Language server for dependency management in Zed"
 authors = ["Mathieu"]
