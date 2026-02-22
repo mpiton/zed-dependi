@@ -7,6 +7,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.4.1] - 2026-02-22
+
+### Added
+
+- Support for `zed-python-requirements` extension for Python constraints and requirements files (#148)
+
+### Changed
+
+- Bump `anyhow` from 1.0.101 to 1.0.102
+- Bump `clap` from 4.5.57 to 4.5.60
+- Bump `futures` from 0.3.31 to 0.3.32
+- Bump `toml` from 0.9.11 to 1.0.3
+- Bump `serial_test` from 3.2.0 to 3.2.1
+
 ## [1.4.0] - 2026-02-09
 
 ### Added
@@ -206,7 +220,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - In-memory caching for version data
 - Parallel registry requests (5 concurrent)
 
-[Unreleased]: https://github.com/mpiton/zed-dependi/compare/v1.4.0...HEAD
+[Unreleased]: https://github.com/mpiton/zed-dependi/compare/v1.4.1...HEAD
+[1.4.1]: https://github.com/mpiton/zed-dependi/compare/v1.4.0...v1.4.1
 [1.4.0]: https://github.com/mpiton/zed-dependi/compare/v1.3.3...v1.4.0
 [1.3.3]: https://github.com/mpiton/zed-dependi/compare/v1.3.2...v1.3.3
 [1.3.2]: https://github.com/mpiton/zed-dependi/compare/v1.3.1...v1.3.2
