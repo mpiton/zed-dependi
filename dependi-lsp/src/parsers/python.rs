@@ -1,4 +1,4 @@
-//! Parser for Python dependency files (requirements.txt, pyproject.toml)
+//! Parser for Python dependency files (requirements.txt, constraints.txt, pyproject.toml)
 
 use super::{Dependency, Parser};
 
@@ -66,7 +66,7 @@ fn is_valid_section_header(line: &str, prefix: &str) -> bool {
     after_bracket.is_empty() || after_bracket.starts_with('#')
 }
 
-/// Parse requirements.txt format
+/// Parse requirements.txt / constraints.txt format
 /// Format: package==1.0.0, package>=1.0.0, package~=1.0.0, etc.
 fn parse_requirements_txt(content: &str) -> Vec<Dependency> {
     let mut dependencies = Vec::new();
