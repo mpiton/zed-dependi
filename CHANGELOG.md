@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.4.2] - 2026-02-23
+
+### Fixed
+
+- Handle Python compatible release operator (`~=`) correctly in requirements.txt and pyproject.toml (#151)
+
 ## [1.4.1] - 2026-02-22
 
 ### Added
@@ -220,7 +226,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - In-memory caching for version data
 - Parallel registry requests (5 concurrent)
 
-[Unreleased]: https://github.com/mpiton/zed-dependi/compare/v1.4.1...HEAD
+[Unreleased]: https://github.com/mpiton/zed-dependi/compare/v1.4.2...HEAD
+[1.4.2]: https://github.com/mpiton/zed-dependi/compare/v1.4.1...v1.4.2
 [1.4.1]: https://github.com/mpiton/zed-dependi/compare/v1.4.0...v1.4.1
 [1.4.0]: https://github.com/mpiton/zed-dependi/compare/v1.3.3...v1.4.0
 [1.3.3]: https://github.com/mpiton/zed-dependi/compare/v1.3.2...v1.3.3
