@@ -13,6 +13,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - Handle Python compatible release operator (`~=`) correctly in requirements.txt and pyproject.toml (#151)
 
+### Security
+
+- Bump `time` from 0.3.45 to 0.3.47 (fix DoS via stack exhaustion, RUSTSEC-2026-0009)
+
 ## [1.4.1] - 2026-02-22
 
 ### Added
