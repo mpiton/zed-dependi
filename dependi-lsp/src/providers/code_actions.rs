@@ -61,12 +61,17 @@ pub fn compare_update_type(current: &str, new: &str) -> VersionUpdateType {
 
 fn normalize_version(version: &str) -> String {
     let version = version.trim();
+    // Multi-char operators first to avoid partial matches
     let version = version
-        .strip_prefix("~>")
-        .or_else(|| version.strip_prefix('^'))
-        .or_else(|| version.strip_prefix('~'))
+        .strip_prefix("~=")
+        .or_else(|| version.strip_prefix("~>"))
+        .or_else(|| version.strip_prefix("==="))
+        .or_else(|| version.strip_prefix("!="))
+        .or_else(|| version.strip_prefix("=="))
         .or_else(|| version.strip_prefix(">="))
         .or_else(|| version.strip_prefix("<="))
+        .or_else(|| version.strip_prefix('^'))
+        .or_else(|| version.strip_prefix('~'))
         .or_else(|| version.strip_prefix('>'))
         .or_else(|| version.strip_prefix('<'))
         .or_else(|| version.strip_prefix('='))
@@ -108,6 +113,15 @@ pub fn create_code_actions(
     actions
 }
 
+/// Extract Python version operator prefix from a version string (e.g., "~=" from "~=14.3")
+fn extract_python_operator(version: &str) -> Option<&str> {
+    let operators = ["===", "~=", "==", ">=", "<=", "!=", ">", "<"];
+    operators
+        .iter()
+        .find(|op| version.starts_with(*op))
+        .copied()
+}
+
 /// Create an "Update to X.Y.Z" code action for a dependency
 fn create_update_action(
     dep: &Dependency,
@@ -122,7 +136,7 @@ fn create_update_action(
     match compare_versions(&dep.version, &version_info) {
         VersionStatus::UpdateAvailable(new_version) => {
             let update_type = compare_update_type(&dep.version, &new_version);
-            let new_text = format_version(&new_version, file_type);
+            let new_text = format_version_for_dep(&new_version, file_type, &dep.version);
 
             let edit = TextEdit {
                 range: Range {
@@ -195,7 +209,7 @@ fn create_update_all_action(
     let edits: Vec<TextEdit> = outdated_deps
         .iter()
         .map(|(dep, new_version)| {
-            let new_text = format_version(new_version, file_type);
+            let new_text = format_version_for_dep(new_version, file_type, &dep.version);
             TextEdit {
                 range: Range {
                     start: Position {
@@ -267,6 +281,20 @@ fn format_version(version: &str, file_type: FileType) -> String {
             version.to_string()
         }
     }
+}
+
+/// Format version for a dependency update, preserving the original operator for Python
+fn format_version_for_dep(
+    new_version: &str,
+    file_type: FileType,
+    original_version: &str,
+) -> String {
+    if file_type == FileType::Python {
+        if let Some(op) = extract_python_operator(original_version) {
+            return format!("{}{}", op, format_version(new_version, file_type));
+        }
+    }
+    format_version(new_version, file_type)
 }
 
 #[cfg(test)]
@@ -746,6 +774,117 @@ mod tests {
 
         let normalized = super::normalize_version("=1.0.0");
         assert_eq!(normalized, "1.0.0");
+
+        // Python operators
+        let normalized = super::normalize_version("~=14.3");
+        assert_eq!(normalized, "14.3.0");
+
+        let normalized = super::normalize_version("==2.0.0");
+        assert_eq!(normalized, "2.0.0");
+
+        let normalized = super::normalize_version("!=1.0");
+        assert_eq!(normalized, "1.0.0");
+    }
+
+    #[test]
+    fn test_format_version_for_dep_python_compatible_release() {
+        // ~= operator should be preserved in replacement
+        assert_eq!(
+            format_version_for_dep("14.3", FileType::Python, "~=14.2"),
+            "~=14.3"
+        );
+        // == operator preserved
+        assert_eq!(
+            format_version_for_dep("3.0.0", FileType::Python, "==2.0.0"),
+            "==3.0.0"
+        );
+        // >= operator preserved
+        assert_eq!(
+            format_version_for_dep("3.0.0", FileType::Python, ">=2.0.0"),
+            ">=3.0.0"
+        );
+        // Non-Python file types are unchanged
+        assert_eq!(
+            format_version_for_dep("2.0.0", FileType::Cargo, "1.0.0"),
+            "2.0.0"
+        );
+    }
+
+    #[test]
+    fn test_python_compatible_release_code_action() {
+        let cache = MemoryCache::new();
+        cache.insert(
+            "test:rich".to_string(),
+            VersionInfo {
+                latest: Some("14.3.3".to_string()),
+                ..Default::default()
+            },
+        );
+
+        // ~=14.2 with latest 14.3.3: compare_versions returns UpdateAvailable("14.3")
+        let deps = vec![create_test_dependency("rich", "~=14.2", 5)];
+        let uri = Url::parse("file:///test/requirements.txt").unwrap();
+        let range = Range {
+            start: Position {
+                line: 0,
+                character: 0,
+            },
+            end: Position {
+                line: 10,
+                character: 0,
+            },
+        };
+
+        let actions = create_code_actions(&deps, &cache, &uri, range, FileType::Python, |name| {
+            format!("test:{}", name)
+        });
+
+        assert_eq!(actions.len(), 1);
+        match &actions[0] {
+            CodeActionOrCommand::CodeAction(action) => {
+                assert!(action.title.contains("Update rich to 14.3"));
+                // Verify the edit replaces with ~=14.3 (operator preserved)
+                if let Some(edit) = &action.edit {
+                    if let Some(changes) = &edit.changes {
+                        let edits = changes.get(&uri).unwrap();
+                        assert_eq!(edits[0].new_text, "~=14.3");
+                    }
+                }
+            }
+            _ => panic!("Expected CodeAction"),
+        }
+    }
+
+    #[test]
+    fn test_python_compatible_release_up_to_date_no_action() {
+        let cache = MemoryCache::new();
+        cache.insert(
+            "test:rich".to_string(),
+            VersionInfo {
+                latest: Some("14.3.3".to_string()),
+                ..Default::default()
+            },
+        );
+
+        // ~=14.3 with latest 14.3.3: should be UpToDate, no code action
+        let deps = vec![create_test_dependency("rich", "~=14.3", 5)];
+        let uri = Url::parse("file:///test/requirements.txt").unwrap();
+        let range = Range {
+            start: Position {
+                line: 0,
+                character: 0,
+            },
+            end: Position {
+                line: 10,
+                character: 0,
+            },
+        };
+
+        let actions = create_code_actions(&deps, &cache, &uri, range, FileType::Python, |name| {
+            format!("test:{}", name)
+        });
+
+        assert_eq!(actions.len(), 0);
     }
 
     #[test]
