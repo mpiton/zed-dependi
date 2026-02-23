@@ -10,7 +10,7 @@
 
 Dependency management extension for the [Zed](https://zed.dev) editor.
 
-**Version:** 1.4.1
+**Version:** 1.4.2
 
 ![Demo](docs/demo.gif)
 
@@ -48,7 +48,7 @@ Dependency management extension for the [Zed](https://zed.dev) editor.
 |----------|------|----------|--------|
 | Rust | `Cargo.toml` | crates.io + alternative registries | ✅ |
 | JavaScript/TypeScript | `package.json` | npm | ✅ |
-| Python | `requirements.txt`, `pyproject.toml` | PyPI | ✅ |
+| Python | `requirements.txt`, `constraints.txt`, `pyproject.toml` | PyPI | ✅ |
 | Go | `go.mod` | proxy.golang.org | ✅ |
 | PHP | `composer.json` | Packagist | ✅ |
 | Dart/Flutter | `pubspec.yaml` | pub.dev | ✅ |
@@ -129,7 +129,7 @@ zed-dependi/
 
 ### Prerequisites
 
-- Rust 1.75+ (tested with 1.91.1)
+- Rust 1.85+ (edition 2024)
 - `wasm32-wasip1` target: `rustup target add wasm32-wasip1`
 
 ### Building
@@ -150,7 +150,7 @@ cargo build --release --target wasm32-wasip1
 ### Testing
 
 ```bash
-# Run all tests (66 tests)
+# Run all tests
 cd dependi-lsp
 cargo test
 
@@ -494,8 +494,8 @@ security-scan:
 │  │ • Cargo.toml │  │ • Inlay Hints│  │ • crates.io  │      │
 │  │ • package.json│ │ • Diagnostics│  │ • Cargo alt  │      │
 │  │ • requirements│ │ • Code Action│  │ • npm        │      │
-│  │ • requirements│ │ • Code Action│  │ • PyPI       │      │
-│  │ • pyproject  │  │ • Completion │  │ • Go Proxy   │      │
+│  │ • constraints│  │ • Completion │  │ • PyPI       │      │
+│  │ • pyproject  │  │ • Hover      │  │ • Go Proxy   │      │
 │  │ • go.mod     │  │ • Hover      │  │ • Packagist  │      │
 │  │ • composer   │  └──────────────┘  │ • RubyGems   │      │
 │  │ • Gemfile    │                    └──────────────┘      │
