@@ -145,22 +145,24 @@ fn parse_requirement_line(line: &str, line_num: u32, dev: bool) -> Option<Depend
         return None;
     }
 
-    // Extract version
+    // Extract version (including the operator, to align with Ruby/npm behavior)
     let version = if let Some(op_pos) = version_op_pos {
+        let operator = &without_comment[op_pos..op_pos + version_op_len];
         let version_part = &without_comment[op_pos + version_op_len..];
         // Handle comma-separated version constraints: >=1.0,<2.0
-        let version = if let Some(comma_pos) = version_part.find(',') {
+        let version_num = if let Some(comma_pos) = version_part.find(',') {
             &version_part[..comma_pos]
         } else {
             version_part
         };
         // Remove environment markers: ; python_version >= "3.8"
-        let version = if let Some(semi_pos) = version.find(';') {
-            &version[..semi_pos]
+        let version_num = if let Some(semi_pos) = version_num.find(';') {
+            &version_num[..semi_pos]
         } else {
-            version
+            version_num
         };
-        version.trim().to_string()
+        let version_num = version_num.trim();
+        format!("{}{}", operator, version_num)
     } else {
         // No version specified
         return None;
@@ -174,7 +176,7 @@ fn parse_requirement_line(line: &str, line_num: u32, dev: bool) -> Option<Depend
     let name_start = line.find(name)? as u32;
     let name_end = name_start + name.len() as u32;
 
-    // Find version position in the original line
+    // Find version (with operator) position in the original line
     let version_start = line.find(&version)? as u32;
     let version_end = version_start + version.len() as u32;
 
@@ -361,20 +363,21 @@ fn parse_pep508_dependency(dep_str: &str) -> Option<(String, String)> {
     };
     let name = name.trim();
 
-    // Extract version
+    // Extract version (including operator, to align with requirements.txt behavior)
+    let operator = &without_markers[op_pos..op_pos + op_len];
     let version_part = &without_markers[op_pos + op_len..];
-    let version = if let Some(comma_pos) = version_part.find(',') {
+    let version_num = if let Some(comma_pos) = version_part.find(',') {
         &version_part[..comma_pos]
     } else {
         version_part
     };
-    let version = version.trim();
+    let version_num = version_num.trim();
 
-    if name.is_empty() || version.is_empty() {
+    if name.is_empty() || version_num.is_empty() {
         return None;
     }
 
-    Some((name.to_string(), version.to_string()))
+    Some((name.to_string(), format!("{}{}", operator, version_num)))
 }
 
 /// Extract version from Poetry dependency value (using taplo Node)
@@ -493,13 +496,13 @@ django~=4.0
         assert_eq!(deps.len(), 3);
 
         let flask = deps.iter().find(|d| d.name == "flask").unwrap();
-        assert_eq!(flask.version, "2.0.0");
+        assert_eq!(flask.version, "==2.0.0");
 
         let requests = deps.iter().find(|d| d.name == "requests").unwrap();
-        assert_eq!(requests.version, "2.25.0");
+        assert_eq!(requests.version, ">=2.25.0");
 
         let django = deps.iter().find(|d| d.name == "django").unwrap();
-        assert_eq!(django.version, "4.0");
+        assert_eq!(django.version, "~=4.0");
     }
 
     #[test]
@@ -509,7 +512,7 @@ django~=4.0
         let deps = parser.parse(content);
         assert_eq!(deps.len(), 1);
         assert_eq!(deps[0].name, "uvicorn");
-        assert_eq!(deps[0].version, "0.20.0");
+        assert_eq!(deps[0].version, ">=0.20.0");
     }
 
     #[test]
@@ -559,11 +562,11 @@ dev = [
         assert_eq!(deps.len(), 3);
 
         let flask = deps.iter().find(|d| d.name == "flask").unwrap();
-        assert_eq!(flask.version, "2.0.0");
+        assert_eq!(flask.version, ">=2.0.0");
         assert!(!flask.dev);
 
         let pytest = deps.iter().find(|d| d.name == "pytest").unwrap();
-        assert_eq!(pytest.version, "7.0.0");
+        assert_eq!(pytest.version, ">=7.0.0");
         assert!(pytest.dev);
     }
 
@@ -603,9 +606,11 @@ pytest = "^7.0.0"
         assert_eq!(deps.len(), 1);
 
         let dep = &deps[0];
+        assert_eq!(dep.version, "==2.0.0");
         assert_eq!(dep.name_start, 0);
         assert_eq!(dep.name_end, 5);
-        assert_eq!(dep.version_start, 7);
+        // version_start now includes the operator "=="
+        assert_eq!(dep.version_start, 5);
         assert_eq!(dep.version_end, 12);
     }
 

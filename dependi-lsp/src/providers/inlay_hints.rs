@@ -328,6 +328,37 @@ pub fn compare_versions(current: &str, info: &VersionInfo) -> VersionStatus {
         return VersionStatus::Unknown;
     };
 
+    // Handle Python compatible release operator (~=)
+    // ~=X.Y means >=X.Y, ==X.* — compare at the same granularity
+    if let Some(base) = current.strip_prefix("~=") {
+        let base = base.trim();
+        let segments = base.split('.').count();
+        let truncated_latest = truncate_version(latest, segments);
+
+        let base_normalized = normalize_version(base);
+        let truncated_normalized = normalize_version(&truncated_latest);
+
+        return match (
+            semver::Version::parse(&base_normalized),
+            semver::Version::parse(&truncated_normalized),
+        ) {
+            (Ok(base_ver), Ok(trunc_ver)) => {
+                if base_ver >= trunc_ver {
+                    VersionStatus::UpToDate
+                } else {
+                    VersionStatus::UpdateAvailable(truncated_latest)
+                }
+            }
+            _ => {
+                if base_normalized == truncated_normalized {
+                    VersionStatus::UpToDate
+                } else {
+                    VersionStatus::UpdateAvailable(truncated_latest)
+                }
+            }
+        };
+    }
+
     // Normalize versions for comparison
     let current_normalized = normalize_version(current);
     let latest_normalized = normalize_version(latest);
@@ -355,21 +386,38 @@ pub fn compare_versions(current: &str, info: &VersionInfo) -> VersionStatus {
     }
 }
 
+/// Truncate a version string to a specific number of segments
+/// e.g., truncate_version("14.3.3", 2) → "14.3"
+fn truncate_version(version: &str, segments: usize) -> String {
+    let parts: Vec<&str> = version.split('.').collect();
+    if parts.len() <= segments {
+        version.to_string()
+    } else {
+        parts[..segments].join(".")
+    }
+}
+
 /// Normalize a version string for comparison
-/// Handles version specifiers like ^, ~, >=, etc.
-fn normalize_version(version: &str) -> String {
+/// Handles version specifiers like ^, ~, >=, ~=, ==, etc.
+pub fn normalize_version(version: &str) -> String {
     let version = version.trim();
 
-    // Remove common prefixes
+    // Remove common prefixes (multi-char operators first to avoid partial matches)
     let version = version
-        .strip_prefix('^')
-        .or_else(|| version.strip_prefix('~'))
+        .strip_prefix("~=")
+        .or_else(|| version.strip_prefix("~>"))
+        .or_else(|| version.strip_prefix("==="))
+        .or_else(|| version.strip_prefix("!="))
+        .or_else(|| version.strip_prefix("=="))
         .or_else(|| version.strip_prefix(">="))
         .or_else(|| version.strip_prefix("<="))
+        .or_else(|| version.strip_prefix('^'))
+        .or_else(|| version.strip_prefix('~'))
         .or_else(|| version.strip_prefix('>'))
         .or_else(|| version.strip_prefix('<'))
         .or_else(|| version.strip_prefix('='))
-        .unwrap_or(version);
+        .unwrap_or(version)
+        .trim();
 
     // Handle version ranges like ">=1.0, <2.0" - take the first part
     let version = version.split(',').next().unwrap_or(version).trim();
@@ -454,6 +502,69 @@ mod tests {
         assert_eq!(normalize_version(">=1.0, <2.0"), "1.0.0");
         assert_eq!(normalize_version("1"), "1.0.0");
         assert_eq!(normalize_version("1.2"), "1.2.0");
+        // Python operators
+        assert_eq!(normalize_version("~=14.3"), "14.3.0");
+        assert_eq!(normalize_version("==2.0.0"), "2.0.0");
+        assert_eq!(normalize_version("!=1.0"), "1.0.0");
+    }
+
+    #[test]
+    fn test_compare_versions_compatible_release_up_to_date() {
+        // ~=14.3 with latest 14.3.3: latest truncated to 14.3, matches base → UpToDate
+        let info = make_version_info("14.3.3");
+        assert!(matches!(
+            compare_versions("~=14.3", &info),
+            VersionStatus::UpToDate
+        ));
+    }
+
+    #[test]
+    fn test_compare_versions_compatible_release_outdated() {
+        // ~=14.2 with latest 14.3.3: truncated to 14.3, 14.2 < 14.3 → UpdateAvailable("14.3")
+        let info = make_version_info("14.3.3");
+        match compare_versions("~=14.2", &info) {
+            VersionStatus::UpdateAvailable(v) => assert_eq!(v, "14.3"),
+            _ => panic!("Expected UpdateAvailable"),
+        }
+    }
+
+    #[test]
+    fn test_compare_versions_compatible_release_3_segments() {
+        // ~=14.3.2 with latest 14.3.5: truncated to 14.3.5, 14.3.2 < 14.3.5 → UpdateAvailable
+        let info = make_version_info("14.3.5");
+        match compare_versions("~=14.3.2", &info) {
+            VersionStatus::UpdateAvailable(v) => assert_eq!(v, "14.3.5"),
+            _ => panic!("Expected UpdateAvailable"),
+        }
+    }
+
+    #[test]
+    fn test_compare_versions_compatible_release_3_segments_up_to_date() {
+        // ~=14.3.3 with latest 14.3.3: truncated matches → UpToDate
+        let info = make_version_info("14.3.3");
+        assert!(matches!(
+            compare_versions("~=14.3.3", &info),
+            VersionStatus::UpToDate
+        ));
+    }
+
+    #[test]
+    fn test_compare_versions_compatible_release_major_jump() {
+        // ~=14.3 with latest 15.0.0: truncated to 15.0, 14.3 < 15.0 → UpdateAvailable("15.0")
+        let info = make_version_info("15.0.0");
+        match compare_versions("~=14.3", &info) {
+            VersionStatus::UpdateAvailable(v) => assert_eq!(v, "15.0"),
+            _ => panic!("Expected UpdateAvailable"),
+        }
+    }
+
+    #[test]
+    fn test_truncate_version() {
+        assert_eq!(truncate_version("14.3.3", 2), "14.3");
+        assert_eq!(truncate_version("14.3.3", 3), "14.3.3");
+        assert_eq!(truncate_version("14.3.3", 1), "14");
+        assert_eq!(truncate_version("1.0", 2), "1.0");
+        assert_eq!(truncate_version("1.0", 3), "1.0");
     }
 
     #[test]
