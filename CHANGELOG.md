@@ -11,7 +11,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
-- Handle Python compatible release operator (`~=`) correctly in requirements.txt and pyproject.toml (#151)
+- Handle Python-compatible release operator (`~=`) correctly in requirements.txt and pyproject.toml (#151)
 
 ### Security
 

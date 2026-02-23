@@ -97,7 +97,7 @@ zed-dependi/
 │   │   ├── parsers/       # Dependency file parsers
 │   │   │   ├── cargo.rs   # Cargo.toml parser
 │   │   │   ├── npm.rs     # package.json parser
-│   │   │   ├── python.rs  # requirements.txt, pyproject.toml
+│   │   │   ├── python.rs  # requirements.txt, constraints.txt, pyproject.toml
 │   │   │   ├── go.rs      # go.mod parser
 │   │   │   ├── php.rs     # composer.json parser
 │   │   │   └── ruby.rs    # Gemfile parser
@@ -323,7 +323,7 @@ dependi-lsp scan --file <path> [options]
 
 - Rust: `Cargo.toml`
 - JavaScript/TypeScript: `package.json`
-- Python: `requirements.txt`, `pyproject.toml`
+- Python: `requirements.txt`, `constraints.txt`, `pyproject.toml`
 - Go: `go.mod`
 - PHP: `composer.json`
 - Dart/Flutter: `pubspec.yaml`
