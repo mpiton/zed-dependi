@@ -17,7 +17,7 @@ pub enum FileType {
     Cargo,
     /// JavaScript/Node.js packages (package.json)
     Npm,
-    /// Python packages (requirements.txt, pyproject.toml)
+    /// Python packages (requirements.txt, constraints.txt, pyproject.toml)
     Python,
     /// Go modules (go.mod)
     Go,
@@ -38,13 +38,13 @@ impl FileType {
     /// or `None` if the file type is not recognized.
     pub fn detect(uri: &Url) -> Option<Self> {
         let path = uri.path();
+        let filename = path.rsplit('/').next().unwrap_or(path);
         if path.ends_with("Cargo.toml") {
             Some(FileType::Cargo)
         } else if path.ends_with("package.json") {
             Some(FileType::Npm)
-        } else if path.ends_with("requirements.txt")
-            || path.ends_with("requirements-dev.txt")
-            || path.ends_with("requirements-test.txt")
+        } else if filename.ends_with(".txt")
+            && (filename.contains("constraints") || filename.contains("requirements"))
             || path.ends_with("pyproject.toml")
         {
             Some(FileType::Python)
@@ -120,6 +120,30 @@ mod tests {
 
         let uri = Url::parse("file:///project/requirements-dev.txt").unwrap();
         assert_eq!(FileType::detect(&uri), Some(FileType::Python));
+
+        let uri = Url::parse("file:///project/dev-requirements.txt").unwrap();
+        assert_eq!(FileType::detect(&uri), Some(FileType::Python));
+    }
+
+    #[test]
+    fn test_detect_python_constraints() {
+        let uri = Url::parse("file:///project/constraints.txt").unwrap();
+        assert_eq!(FileType::detect(&uri), Some(FileType::Python));
+
+        let uri = Url::parse("file:///project/constraints-dev.txt").unwrap();
+        assert_eq!(FileType::detect(&uri), Some(FileType::Python));
+
+        let uri = Url::parse("file:///project/dev-constraints.txt").unwrap();
+        assert_eq!(FileType::detect(&uri), Some(FileType::Python));
+    }
+
+    #[test]
+    fn test_no_false_positive_requirements_dir() {
+        let uri = Url::parse("file:///project/requirements/notes.txt").unwrap();
+        assert_eq!(FileType::detect(&uri), None);
+
+        let uri = Url::parse("file:///project/constraints/readme.txt").unwrap();
+        assert_eq!(FileType::detect(&uri), None);
     }
 
     #[test]
