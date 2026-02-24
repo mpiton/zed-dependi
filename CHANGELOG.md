@@ -7,6 +7,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.4.3] - 2026-02-24
+
+### Fixed
+
+- Handle pre-release versions in Python compatible release operator (`~=`) (#154)
+- Improve detection of Python requirements and constraints files
+
+### Changed
+
+- CI: grant `checks:write` permission to security-audit job
+
 ## [1.4.2] - 2026-02-23
 
 ### Fixed
@@ -230,7 +241,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - In-memory caching for version data
 - Parallel registry requests (5 concurrent)
 
-[Unreleased]: https://github.com/mpiton/zed-dependi/compare/v1.4.2...HEAD
+[Unreleased]: https://github.com/mpiton/zed-dependi/compare/v1.4.3...HEAD
+[1.4.3]: https://github.com/mpiton/zed-dependi/compare/v1.4.2...v1.4.3
 [1.4.2]: https://github.com/mpiton/zed-dependi/compare/v1.4.1...v1.4.2
 [1.4.1]: https://github.com/mpiton/zed-dependi/compare/v1.4.0...v1.4.1
 [1.4.0]: https://github.com/mpiton/zed-dependi/compare/v1.3.3...v1.4.0
