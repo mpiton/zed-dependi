@@ -322,6 +322,38 @@ pub fn is_local_dependency(version: &str) -> bool {
         || version.starts_with("npm:")
 }
 
+/// Strip PEP 440 pre-release suffixes from a version string
+/// Examples: "4.0a" → "4.0", "4.0a1" → "4.0", "4.0.0b2" → "4.0.0", "4.0rc1" → "4.0"
+fn strip_python_prerelease(version: &str) -> String {
+    version
+        .split('.')
+        .map(|part| {
+            let lower = part.to_lowercase();
+            // Long patterns first (to avoid partial matches with short ones)
+            for pattern in &["alpha", "beta", "dev", "rc"] {
+                if let Some(pos) = lower.find(pattern) {
+                    return if pos > 0 {
+                        part[..pos].to_string()
+                    } else {
+                        // Pure pre-release segment like "dev1" → "0"
+                        "0".to_string()
+                    };
+                }
+            }
+            // Short patterns (a, b, c) — only when preceded by a digit
+            for &ch in &['a', 'b', 'c'] {
+                if let Some(pos) = lower.find(ch) {
+                    if pos > 0 && lower.as_bytes()[pos - 1].is_ascii_digit() {
+                        return part[..pos].to_string();
+                    }
+                }
+            }
+            part.to_string()
+        })
+        .collect::<Vec<_>>()
+        .join(".")
+}
+
 /// Compare a dependency version with the latest available
 pub fn compare_versions(current: &str, info: &VersionInfo) -> VersionStatus {
     let Some(latest) = &info.latest else {
@@ -332,10 +364,13 @@ pub fn compare_versions(current: &str, info: &VersionInfo) -> VersionStatus {
     // ~=X.Y means >=X.Y, ==X.* — compare at the same granularity
     if let Some(base) = current.strip_prefix("~=") {
         let base = base.trim();
-        let segments = base.split('.').count();
+        // Strip PEP 440 pre-release markers (e.g., "4.0a" → "4.0") so that
+        // semver parsing succeeds and we compare numeric parts correctly
+        let base_clean = strip_python_prerelease(base);
+        let segments = base_clean.split('.').count();
         let truncated_latest = truncate_version(latest, segments);
 
-        let base_normalized = normalize_version(base);
+        let base_normalized = normalize_version(&base_clean);
         let truncated_normalized = normalize_version(&truncated_latest);
 
         return match (
@@ -556,6 +591,80 @@ mod tests {
             VersionStatus::UpdateAvailable(v) => assert_eq!(v, "15.0"),
             _ => panic!("Expected UpdateAvailable"),
         }
+    }
+
+    #[test]
+    fn test_strip_python_prerelease() {
+        assert_eq!(strip_python_prerelease("4.0a"), "4.0");
+        assert_eq!(strip_python_prerelease("4.0a1"), "4.0");
+        assert_eq!(strip_python_prerelease("4.0.0a1"), "4.0.0");
+        assert_eq!(strip_python_prerelease("1.0b2"), "1.0");
+        assert_eq!(strip_python_prerelease("1.0.0b2"), "1.0.0");
+        assert_eq!(strip_python_prerelease("2.0rc1"), "2.0");
+        assert_eq!(strip_python_prerelease("2.0.0rc1"), "2.0.0");
+        assert_eq!(strip_python_prerelease("1.0alpha"), "1.0");
+        assert_eq!(strip_python_prerelease("1.0beta"), "1.0");
+        assert_eq!(strip_python_prerelease("4.0.dev1"), "4.0.0");
+        // Stable versions should pass through unchanged
+        assert_eq!(strip_python_prerelease("3.11.0"), "3.11.0");
+        assert_eq!(strip_python_prerelease("14.3"), "14.3");
+        assert_eq!(strip_python_prerelease("1.0.0"), "1.0.0");
+        // Post-releases are stable per PEP 440
+        assert_eq!(strip_python_prerelease("1.0.0.post1"), "1.0.0.post1");
+    }
+
+    #[test]
+    fn test_compare_versions_compatible_release_prerelease_up_to_date() {
+        // ~=4.0a with latest 3.11.0: user is on a pre-release of 4.0, which is
+        // a higher major-minor than 3.11 → UpToDate (no downgrade suggestion)
+        let info = make_version_info("3.11.0");
+        assert!(matches!(
+            compare_versions("~=4.0a", &info),
+            VersionStatus::UpToDate
+        ));
+    }
+
+    #[test]
+    fn test_compare_versions_compatible_release_prerelease_alpha_newer() {
+        // ~=4.0a with latest 4.1.0: user is on 4.0a, latest truncated to 4.1,
+        // 4.0 < 4.1 → legitimate UpdateAvailable
+        let info = make_version_info("4.1.0");
+        match compare_versions("~=4.0a", &info) {
+            VersionStatus::UpdateAvailable(v) => assert_eq!(v, "4.1"),
+            _ => panic!("Expected UpdateAvailable"),
+        }
+    }
+
+    #[test]
+    fn test_compare_versions_compatible_release_prerelease_rc() {
+        // ~=2.0rc1 with latest 1.9.0: 2.0 > 1.9 → UpToDate
+        let info = make_version_info("1.9.0");
+        assert!(matches!(
+            compare_versions("~=2.0rc1", &info),
+            VersionStatus::UpToDate
+        ));
+    }
+
+    #[test]
+    fn test_compare_versions_compatible_release_prerelease_beta_3seg() {
+        // ~=1.0.0b2 with latest 1.0.5: base_clean = 1.0.0, truncated = 1.0.5,
+        // 1.0.0 < 1.0.5 → UpdateAvailable
+        let info = make_version_info("1.0.5");
+        match compare_versions("~=1.0.0b2", &info) {
+            VersionStatus::UpdateAvailable(v) => assert_eq!(v, "1.0.5"),
+            _ => panic!("Expected UpdateAvailable"),
+        }
+    }
+
+    #[test]
+    fn test_compare_versions_compatible_release_prerelease_dev() {
+        // ~=4.0.dev1 with latest 3.11.0: base_clean = 4.0.0 (dev1 → 0),
+        // segments = 3, truncated = 3.11.0, 4.0.0 > 3.11.0 → UpToDate
+        let info = make_version_info("3.11.0");
+        assert!(matches!(
+            compare_versions("~=4.0.dev1", &info),
+            VersionStatus::UpToDate
+        ));
     }
 
     #[test]
