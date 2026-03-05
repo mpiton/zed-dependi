@@ -11,6 +11,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - Disable ANSI escape sequences in LSP log output (#162)
 
+### Changed
+
+- Bump `actions/upload-artifact` from v6 to v7
+- Bump `actions/download-artifact` from v7 to v8
+- Bump `tokio` from 1.49 to 1.50
+- Bump `toml` from 1.0.3 to 1.0.4
+
 ## [1.4.3] - 2026-02-24
 
 ### Fixed
