@@ -102,7 +102,11 @@ async fn main() -> ExitCode {
     // Initialize tracing
     tracing_subscriber::registry()
         .with(EnvFilter::try_from_default_env().unwrap_or_else(|_| EnvFilter::new("info")))
-        .with(tracing_subscriber::fmt::layer().with_writer(std::io::stderr))
+        .with(
+            tracing_subscriber::fmt::layer()
+                .with_ansi(false)
+                .with_writer(std::io::stderr),
+        )
         .init();
 
     match cli.command {
