@@ -12,6 +12,10 @@ use crate::parsers::Dependency;
 pub fn create_document_links(deps: &[Dependency], file_type: &FileType) -> Vec<DocumentLink> {
     deps.iter()
         .filter_map(|dep| {
+            // Skip deps from alternative registries (e.g., private Cargo registries)
+            if dep.registry.is_some() {
+                return None;
+            }
             let url_str = file_type.registry_package_url(&dep.name)?;
             let url = match Url::parse(&url_str) {
                 Ok(u) => u,
