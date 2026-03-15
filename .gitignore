@@ -34,6 +34,9 @@ TASKS.md
 # Test files
 test-files/
 
+# Fuzz corpus (generated, large)
+dependi-lsp/fuzz/corpus/
+
 # Local release builds
 dependi-lsp/release/
 

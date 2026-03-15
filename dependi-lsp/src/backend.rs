@@ -1123,6 +1123,14 @@ impl LanguageServer for DependiBackend {
                     parts.push(format!("[Homepage]({})", homepage));
                 }
 
+                if let Some(registry_url) = file_type.registry_package_url(&dep.name) {
+                    parts.push(format!(
+                        "[View on {}]({})",
+                        file_type.registry_name(),
+                        registry_url
+                    ));
+                }
+
                 // Add vulnerability information if present
                 if !info.vulnerabilities.is_empty() {
                     parts.push(format!(
