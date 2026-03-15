@@ -124,6 +124,21 @@ fn parse_dart_dependency_line(line: &str, line_num: u32, dev: bool) -> Option<De
         return None;
     }
 
+    // Strip inline YAML comments (e.g. "^3.2.2 # From Google" -> "^3.2.2")
+    // Only strip if # is outside quoted strings
+    let version_part = if version_part.starts_with('"') || version_part.starts_with('\'') {
+        let quote = version_part.as_bytes()[0];
+        match version_part[1..].find(quote as char) {
+            Some(end) => version_part[..end + 2].trim(),
+            None => version_part,
+        }
+    } else {
+        match version_part.find('#') {
+            Some(hash_pos) => version_part[..hash_pos].trim(),
+            None => version_part,
+        }
+    };
+
     // Clean the version (remove quotes if present)
     let version = version_part
         .trim_matches('"')
@@ -279,6 +294,39 @@ dependencies:
         assert_eq!(deps.len(), 2);
         assert_eq!(deps[0].version, "^1.0.0");
         assert_eq!(deps[1].version, "^6.0.0");
+    }
+
+    #[test]
+    fn test_inline_comments_stripped() {
+        let content = r#"
+dependencies:
+  quiver: ^3.2.2 # From Google
+  http: ^1.0.0 # important lib
+  provider: ^6.0.0
+"#;
+        let parser = DartParser::new();
+        let deps = parser.parse(content);
+
+        assert_eq!(deps.len(), 3);
+
+        let quiver = deps.iter().find(|d| d.name == "quiver").unwrap();
+        assert_eq!(quiver.version, "^3.2.2");
+
+        let http = deps.iter().find(|d| d.name == "http").unwrap();
+        assert_eq!(http.version, "^1.0.0");
+    }
+
+    #[test]
+    fn test_quoted_version_with_inline_comment() {
+        let content = r#"
+dependencies:
+  http: "^1.0.0" # pinned version
+"#;
+        let parser = DartParser::new();
+        let deps = parser.parse(content);
+
+        assert_eq!(deps.len(), 1);
+        assert_eq!(deps[0].version, "^1.0.0");
     }
 
     #[test]
