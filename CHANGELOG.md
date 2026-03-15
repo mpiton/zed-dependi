@@ -12,6 +12,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Add clickable links on dependency names to open package registry pages (pub.dev, crates.io, npm, PyPI, etc.) (#171)
 - Add Linux ARM64 (`aarch64-unknown-linux-gnu`) release binary for devcontainers on Apple Silicon (#169)
 
+### Changed
+
+- Bump `reqwest` from 0.12 to 0.13 (rustls now default TLS backend, `rustls-tls` feature renamed to `rustls`)
+- Bump `chrono` from 0.4.43 to 0.4.44
+- Bump `toml` from 1.0.4 to 1.0.6
+- Bump `tracing-subscriber` from 0.3.22 to 0.3.23
+
 ### Fixed
 
 - Bump `quinn-proto` from 0.11.13 to 0.11.14 to resolve RUSTSEC-2026-0037 (DoS via QUIC transport parameters)
