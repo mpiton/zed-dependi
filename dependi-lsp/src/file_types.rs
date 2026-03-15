@@ -79,6 +79,34 @@ impl FileType {
         }
     }
 
+    /// Return the registry URL for a given package name.
+    pub fn registry_package_url(&self, name: &str) -> Option<String> {
+        match self {
+            FileType::Cargo => Some(format!("https://crates.io/crates/{name}")),
+            FileType::Npm => Some(format!("https://www.npmjs.com/package/{name}")),
+            FileType::Python => Some(format!("https://pypi.org/project/{name}")),
+            FileType::Go => Some(format!("https://pkg.go.dev/{name}")),
+            FileType::Php => Some(format!("https://packagist.org/packages/{name}")),
+            FileType::Dart => Some(format!("https://pub.dev/packages/{name}")),
+            FileType::Ruby => Some(format!("https://rubygems.org/gems/{name}")),
+            FileType::Csharp => Some(format!("https://www.nuget.org/packages/{name}")),
+        }
+    }
+
+    /// Return a human-readable registry name for tooltips.
+    pub fn registry_name(&self) -> &str {
+        match self {
+            FileType::Cargo => "crates.io",
+            FileType::Npm => "npm",
+            FileType::Python => "PyPI",
+            FileType::Go => "pkg.go.dev",
+            FileType::Php => "Packagist",
+            FileType::Dart => "pub.dev",
+            FileType::Ruby => "RubyGems",
+            FileType::Csharp => "NuGet",
+        }
+    }
+
     /// Generate a cache key for a package.
     ///
     /// The cache key includes the registry prefix (e.g., "crates:", "npm:")
@@ -209,5 +237,53 @@ mod tests {
             FileType::Go.cache_key("github.com/gin-gonic/gin"),
             "go:github.com/gin-gonic/gin"
         );
+    }
+
+    #[test]
+    fn test_registry_package_url() {
+        assert_eq!(
+            FileType::Dart.registry_package_url("http"),
+            Some("https://pub.dev/packages/http".to_string())
+        );
+        assert_eq!(
+            FileType::Cargo.registry_package_url("serde"),
+            Some("https://crates.io/crates/serde".to_string())
+        );
+        assert_eq!(
+            FileType::Npm.registry_package_url("express"),
+            Some("https://www.npmjs.com/package/express".to_string())
+        );
+        assert_eq!(
+            FileType::Python.registry_package_url("requests"),
+            Some("https://pypi.org/project/requests".to_string())
+        );
+        assert_eq!(
+            FileType::Go.registry_package_url("github.com/gin-gonic/gin"),
+            Some("https://pkg.go.dev/github.com/gin-gonic/gin".to_string())
+        );
+        assert_eq!(
+            FileType::Php.registry_package_url("laravel/framework"),
+            Some("https://packagist.org/packages/laravel/framework".to_string())
+        );
+        assert_eq!(
+            FileType::Ruby.registry_package_url("rails"),
+            Some("https://rubygems.org/gems/rails".to_string())
+        );
+        assert_eq!(
+            FileType::Csharp.registry_package_url("Newtonsoft.Json"),
+            Some("https://www.nuget.org/packages/Newtonsoft.Json".to_string())
+        );
+    }
+
+    #[test]
+    fn test_registry_name() {
+        assert_eq!(FileType::Cargo.registry_name(), "crates.io");
+        assert_eq!(FileType::Npm.registry_name(), "npm");
+        assert_eq!(FileType::Python.registry_name(), "PyPI");
+        assert_eq!(FileType::Go.registry_name(), "pkg.go.dev");
+        assert_eq!(FileType::Php.registry_name(), "Packagist");
+        assert_eq!(FileType::Dart.registry_name(), "pub.dev");
+        assert_eq!(FileType::Ruby.registry_name(), "RubyGems");
+        assert_eq!(FileType::Csharp.registry_name(), "NuGet");
     }
 }

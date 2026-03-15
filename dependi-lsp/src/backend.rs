@@ -25,6 +25,7 @@ use crate::parsers::ruby::RubyParser;
 use crate::providers::code_actions::create_code_actions;
 use crate::providers::completion::{format_release_age, get_completions};
 use crate::providers::diagnostics::create_diagnostics;
+use crate::providers::document_links::create_document_links;
 use crate::providers::inlay_hints::create_inlay_hint;
 use crate::registries::cargo_sparse::CargoSparseRegistry;
 use crate::registries::crates_io::CratesIoRegistry;
@@ -833,6 +834,10 @@ impl LanguageServer for DependiBackend {
                 inlay_hint_provider: Some(OneOf::Left(true)),
                 hover_provider: Some(HoverProviderCapability::Simple(true)),
                 code_action_provider: Some(CodeActionProviderCapability::Simple(true)),
+                document_link_provider: Some(DocumentLinkOptions {
+                    resolve_provider: Some(false),
+                    work_done_progress_options: Default::default(),
+                }),
                 completion_provider: Some(CompletionOptions {
                     trigger_characters: Some(vec!["\"".to_string(), "=".to_string()]),
                     ..Default::default()
@@ -1040,6 +1045,18 @@ impl LanguageServer for DependiBackend {
 
         tracing::debug!("Returning {} inlay hints for {}", hints.len(), uri);
         Ok(Some(hints))
+    }
+
+    async fn document_link(&self, params: DocumentLinkParams) -> Result<Option<Vec<DocumentLink>>> {
+        let uri = &params.text_document.uri;
+
+        let Some(doc) = self.documents.get(uri) else {
+            return Ok(Some(vec![]));
+        };
+
+        let links = create_document_links(&doc.dependencies, &doc.file_type);
+        tracing::debug!("Returning {} document links for {}", links.len(), uri);
+        Ok(Some(links))
     }
 
     async fn hover(&self, params: HoverParams) -> Result<Option<Hover>> {
