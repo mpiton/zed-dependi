@@ -28,6 +28,10 @@ jobs:
             target: aarch64-apple-darwin
             artifact_name: dependi-lsp
             asset_name: dependi-lsp-aarch64-apple-darwin
+          - os: ubuntu-latest
+            target: aarch64-unknown-linux-gnu
+            artifact_name: dependi-lsp
+            asset_name: dependi-lsp-aarch64-unknown-linux-gnu
           - os: windows-latest
             target: x86_64-pc-windows-msvc
             artifact_name: dependi-lsp.exe
@@ -42,6 +46,14 @@ jobs:
         uses: dtolnay/rust-toolchain@stable
         with:
           targets: ${{ matrix.target }}
+
+      - name: Install cross-compilation toolchain
+        if: matrix.target == 'aarch64-unknown-linux-gnu'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y gcc-aarch64-linux-gnu
+          echo "CARGO_TARGET_AARCH64_UNKNOWN_LINUX_GNU_LINKER=aarch64-linux-gnu-gcc" >> $GITHUB_ENV
+          echo "CC_aarch64_unknown_linux_gnu=aarch64-linux-gnu-gcc" >> $GITHUB_ENV
 
       - name: Build
         run: |

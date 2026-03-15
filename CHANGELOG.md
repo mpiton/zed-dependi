@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- Add Linux ARM64 (`aarch64-unknown-linux-gnu`) release binary for devcontainers on Apple Silicon (#169)
+
 ## [1.4.4] - 2026-03-05
 
 ### Fixed
