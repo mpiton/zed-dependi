@@ -20,6 +20,7 @@ use dashmap::DashMap;
 use crate::registries::VersionInfo;
 
 pub mod sqlite;
+pub mod sqlite_manager;
 
 pub use sqlite::SqliteCache;
 

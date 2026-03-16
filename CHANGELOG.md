@@ -14,10 +14,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- Replace `r2d2_sqlite` with custom `SqliteConnectionManager` to unblock `rusqlite` upgrades (#178)
+- Bump `rusqlite` from 0.38 to 0.39 (bundled SQLite 3.51.3)
 - Bump `reqwest` from 0.12 to 0.13 (rustls now default TLS backend, `rustls-tls` feature renamed to `rustls`)
 - Bump `chrono` from 0.4.43 to 0.4.44
 - Bump `toml` from 1.0.4 to 1.0.6
 - Bump `tracing-subscriber` from 0.3.22 to 0.3.23
+
+### Removed
+
+- Remove `r2d2_sqlite` dependency (replaced by ~50-line custom implementation)
 
 ### Fixed
 

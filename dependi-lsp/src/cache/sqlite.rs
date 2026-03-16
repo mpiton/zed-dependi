@@ -6,8 +6,8 @@ use std::sync::Arc;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
+use super::sqlite_manager::SqliteConnectionManager;
 use r2d2::{Pool, PooledConnection};
-use r2d2_sqlite::SqliteConnectionManager;
 use rusqlite::params;
 
 use crate::cache::{ReadCache, WriteCache};
@@ -74,16 +74,11 @@ impl SqliteCache {
         let busy_timeout_ms = config.busy_timeout_ms;
         let cache_size_kb = config.cache_size_kb;
 
-        let manager = SqliteConnectionManager::file(&path).with_init(move |conn| {
-            let pragmas = format!(
-                "PRAGMA busy_timeout={};
-                 PRAGMA synchronous=NORMAL;
-                 PRAGMA cache_size=-{};",
-                busy_timeout_ms, cache_size_kb
-            );
-            conn.execute_batch(&pragmas)?;
-            Ok(())
-        });
+        let manager = SqliteConnectionManager::file_with_config(
+            &path.to_string_lossy(),
+            busy_timeout_ms,
+            cache_size_kb,
+        );
 
         let pool = Pool::builder()
             .max_size(config.max_pool_size)
@@ -122,14 +117,7 @@ impl SqliteCache {
         let uri = format!("file:memdb{}?mode=memory&cache=shared", db_id);
         let config = SqliteCacheConfig::default();
 
-        let manager = SqliteConnectionManager::file(&uri).with_init(|conn| {
-            conn.execute_batch(
-                "PRAGMA busy_timeout=5000;
-                 PRAGMA synchronous=NORMAL;
-                 PRAGMA cache_size=-64000;",
-            )?;
-            Ok(())
-        });
+        let manager = SqliteConnectionManager::in_memory(&uri);
 
         let pool = Pool::builder().max_size(5).build(manager)?;
 
@@ -178,7 +166,7 @@ impl SqliteCache {
     /// Initialize the database schema with WAL mode
     ///
     /// Note: Per-connection PRAGMAs (busy_timeout, synchronous, cache_size)
-    /// are applied via with_init() on every new connection from the pool.
+    /// are applied in SqliteConnectionManager::connect() on every new connection.
     /// Only WAL mode (database-level) is set here.
     fn init_schema(&self) -> anyhow::Result<()> {
         let conn = self.pool.get()?;
