@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.5.0] - 2026-03-16
+
 ### Added
 
 - Add clickable links on dependency names to open package registry pages (pub.dev, crates.io, npm, PyPI, etc.) (#171)
