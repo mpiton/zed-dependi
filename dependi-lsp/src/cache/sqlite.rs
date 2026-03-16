@@ -74,11 +74,8 @@ impl SqliteCache {
         let busy_timeout_ms = config.busy_timeout_ms;
         let cache_size_kb = config.cache_size_kb;
 
-        let manager = SqliteConnectionManager::file_with_config(
-            &path.to_string_lossy(),
-            busy_timeout_ms,
-            cache_size_kb,
-        );
+        let manager =
+            SqliteConnectionManager::file_with_config(&path, busy_timeout_ms, cache_size_kb);
 
         let pool = Pool::builder()
             .max_size(config.max_pool_size)

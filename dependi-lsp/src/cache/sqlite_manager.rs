@@ -3,33 +3,26 @@
 //! Replaces `r2d2_sqlite::SqliteConnectionManager` with a lightweight
 //! implementation that internalizes PRAGMA configuration.
 
-use rusqlite::Connection;
+use std::path::{Path, PathBuf};
 
-const DEFAULT_BUSY_TIMEOUT_MS: u32 = 5000;
-const DEFAULT_CACHE_SIZE_KB: i64 = 64000;
-const DEFAULT_MEMORY_CACHE_SIZE_KB: i64 = 2000;
+use rusqlite::Connection;
 
 /// Connection manager for SQLite databases used with r2d2 connection pooling.
 pub struct SqliteConnectionManager {
-    path: String,
+    path: PathBuf,
     pragma_busy_timeout_ms: u32,
     pragma_cache_size_kb: i64,
 }
 
 impl SqliteConnectionManager {
-    /// Create a file-based connection manager with default settings.
-    pub fn file(path: &str) -> Self {
-        Self {
-            path: path.to_string(),
-            pragma_busy_timeout_ms: DEFAULT_BUSY_TIMEOUT_MS,
-            pragma_cache_size_kb: DEFAULT_CACHE_SIZE_KB,
-        }
-    }
-
     /// Create a file-based connection manager with custom PRAGMA settings.
-    pub fn file_with_config(path: &str, busy_timeout_ms: u32, cache_size_kb: i64) -> Self {
+    pub fn file_with_config(
+        path: impl AsRef<Path>,
+        busy_timeout_ms: u32,
+        cache_size_kb: i64,
+    ) -> Self {
         Self {
-            path: path.to_string(),
+            path: path.as_ref().to_path_buf(),
             pragma_busy_timeout_ms: busy_timeout_ms,
             pragma_cache_size_kb: cache_size_kb.max(1),
         }
@@ -38,11 +31,12 @@ impl SqliteConnectionManager {
     /// Create an in-memory connection manager for testing with shared in-memory DBs.
     ///
     /// The `uri` should be a SQLite URI like `file:memdb0?mode=memory&cache=shared`.
+    #[cfg(test)]
     pub fn in_memory(uri: &str) -> Self {
         Self {
-            path: uri.to_string(),
-            pragma_busy_timeout_ms: DEFAULT_BUSY_TIMEOUT_MS,
-            pragma_cache_size_kb: DEFAULT_MEMORY_CACHE_SIZE_KB,
+            path: PathBuf::from(uri),
+            pragma_busy_timeout_ms: 5000,
+            pragma_cache_size_kb: 2000,
         }
     }
 }
@@ -83,7 +77,7 @@ mod tests {
         let busy_timeout: u32 = conn
             .query_row("PRAGMA busy_timeout", [], |row| row.get(0))
             .unwrap();
-        assert_eq!(busy_timeout, DEFAULT_BUSY_TIMEOUT_MS);
+        assert_eq!(busy_timeout, 5000);
 
         let synchronous: i32 = conn
             .query_row("PRAGMA synchronous", [], |row| row.get(0))
