@@ -21,8 +21,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
-- Bump `quinn-proto` from 0.11.13 to 0.11.14 to resolve RUSTSEC-2026-0037 (DoS via QUIC transport parameters)
 - Fix pubspec.yaml dependencies with inline comments showing as outdated (false positive) (#170)
+
+### Security
+
+- Bump `quinn-proto` from 0.11.13 to 0.11.14 to resolve RUSTSEC-2026-0037 (DoS via QUIC transport parameters)
+- Bump `time` from 0.3.45 to 0.3.47 (fix DoS via stack exhaustion, RUSTSEC-2026-0009)
 
 ## [1.4.4] - 2026-03-05
 
