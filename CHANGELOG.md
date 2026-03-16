@@ -283,7 +283,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - In-memory caching for version data
 - Parallel registry requests (5 concurrent)
 
-[Unreleased]: https://github.com/mpiton/zed-dependi/compare/v1.4.4...HEAD
+[Unreleased]: https://github.com/mpiton/zed-dependi/compare/v1.5.0...HEAD
+[1.5.0]: https://github.com/mpiton/zed-dependi/compare/v1.4.4...v1.5.0
 [1.4.4]: https://github.com/mpiton/zed-dependi/compare/v1.4.3...v1.4.4
 [1.4.3]: https://github.com/mpiton/zed-dependi/compare/v1.4.2...v1.4.3
 [1.4.2]: https://github.com/mpiton/zed-dependi/compare/v1.4.1...v1.4.2
