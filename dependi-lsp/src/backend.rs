@@ -39,9 +39,9 @@ use crate::registries::pypi::PyPiRegistry;
 use crate::registries::rubygems::RubyGemsRegistry;
 use crate::registries::{Registry, VersionInfo, VulnerabilitySeverity};
 use crate::reports::{VulnerabilityReportEntry, VulnerabilitySummary, generate_markdown_report};
-use crate::vulnerabilities::VulnerabilityQuery;
 use crate::vulnerabilities::cache::VulnerabilityCache;
 use crate::vulnerabilities::osv::OsvClient;
+use crate::vulnerabilities::{VulnerabilityQuery, normalize_version_for_osv};
 
 /// Compute cache key for a dependency, including registry for Cargo alternative registries.
 ///
@@ -504,13 +504,14 @@ impl DependiBackend {
         let queries: Vec<VulnerabilityQuery> = dependencies
             .iter()
             .filter(|dep| {
-                let vuln_key = VulnCacheKey::new(ecosystem, &dep.name, &dep.version);
+                let normalized_version = normalize_version_for_osv(&dep.version);
+                let vuln_key = VulnCacheKey::new(ecosystem, &dep.name, &normalized_version);
                 !vuln_cache.contains(&vuln_key)
             })
             .map(|dep| VulnerabilityQuery {
                 ecosystem,
                 package_name: dep.name.clone(),
-                version: dep.version.clone(),
+                version: normalize_version_for_osv(&dep.version),
             })
             .collect();
 

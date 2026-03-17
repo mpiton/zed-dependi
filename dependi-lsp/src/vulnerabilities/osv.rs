@@ -420,4 +420,46 @@ mod tests {
         let vuln = &result.vulnerabilities[0];
         assert!(vuln.id.starts_with("RUSTSEC"));
     }
+
+    #[test]
+    fn test_normalize_version_strips_operators_for_osv() {
+        use super::super::normalize_version_for_osv;
+
+        // These are real-world version strings from Python pyproject.toml
+        assert_eq!(normalize_version_for_osv(">=1.23.0"), "1.23.0");
+        assert_eq!(normalize_version_for_osv("==2.0.0"), "2.0.0");
+        assert_eq!(normalize_version_for_osv("~=4.0"), "4.0");
+        // Cargo/npm style
+        assert_eq!(normalize_version_for_osv("^1.0.27"), "1.0.27");
+    }
+
+    #[tokio::test]
+    async fn test_version_normalization_prevents_false_positives() {
+        use super::super::normalize_version_for_osv;
+
+        // urllib3 1.26.0 should NOT have GHSA-m5vv-6r4h-3vj9 (only affects <1.16.1)
+        let raw_version = ">=1.26.0";
+        let normalized = normalize_version_for_osv(raw_version);
+        assert_eq!(normalized, "1.26.0");
+
+        let client = OsvClient::new().unwrap();
+        let query = VulnerabilityQuery {
+            ecosystem: crate::vulnerabilities::Ecosystem::PyPI,
+            package_name: "urllib3".to_string(),
+            version: normalized,
+        };
+
+        let results = client.query_batch(&[query]).await.unwrap();
+        assert!(!results.is_empty());
+
+        let result = &results[0];
+        // Verify the specific false-positive vulnerability is NOT present
+        let has_false_positive = result.vulnerabilities.iter().any(|v| {
+            v.id.contains("GHSA-m5vv-6r4h-3vj9") || v.description.contains("GHSA-m5vv-6r4h-3vj9")
+        });
+        assert!(
+            !has_false_positive,
+            "urllib3 1.26.0 should NOT have GHSA-m5vv-6r4h-3vj9 (only affects <1.16.1)"
+        );
+    }
 }
