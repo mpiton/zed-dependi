@@ -103,7 +103,43 @@ impl ProcessingContext {
             return;
         };
 
-        let dependencies = self.parse_document(uri, content);
+        let mut dependencies = self.parse_document(uri, content);
+
+        // Resolve versions from Cargo.lock for Cargo dependencies
+        if file_type == FileType::Cargo {
+            if let Ok(cargo_toml_path) = uri.to_file_path() {
+                if let Some(lock_path) =
+                    crate::parsers::cargo_lock::find_cargo_lock(&cargo_toml_path)
+                {
+                    match tokio::fs::read_to_string(&lock_path).await {
+                        Ok(lock_content) => {
+                            let lock_versions =
+                                crate::parsers::cargo_lock::parse_cargo_lock(&lock_content);
+                            for dep in &mut dependencies {
+                                if let Some(resolved) = lock_versions.get(&dep.name) {
+                                    dep.resolved_version = Some(resolved.clone());
+                                }
+                            }
+                            tracing::debug!(
+                                "Resolved {} versions from {}",
+                                dependencies
+                                    .iter()
+                                    .filter(|d| d.resolved_version.is_some())
+                                    .count(),
+                                lock_path.display()
+                            );
+                        }
+                        Err(e) => {
+                            tracing::debug!(
+                                "Could not read Cargo.lock at {}: {}",
+                                lock_path.display(),
+                                e
+                            );
+                        }
+                    }
+                }
+            }
+        }
 
         tracing::info!(
             "Parsed {} dependencies from {}",
@@ -504,14 +540,14 @@ impl DependiBackend {
         let queries: Vec<VulnerabilityQuery> = dependencies
             .iter()
             .filter(|dep| {
-                let normalized_version = normalize_version_for_osv(&dep.version);
+                let normalized_version = normalize_version_for_osv(dep.effective_version());
                 let vuln_key = VulnCacheKey::new(ecosystem, &dep.name, &normalized_version);
                 !vuln_cache.contains(&vuln_key)
             })
             .map(|dep| VulnerabilityQuery {
                 ecosystem,
                 package_name: dep.name.clone(),
-                version: normalize_version_for_osv(&dep.version),
+                version: normalize_version_for_osv(dep.effective_version()),
             })
             .collect();
 

@@ -20,7 +20,7 @@ pub enum VersionStatus {
 /// Generate an inlay hint for a dependency
 pub fn create_inlay_hint(dep: &Dependency, version_info: Option<&VersionInfo>) -> InlayHint {
     let status = match version_info {
-        Some(info) => compare_versions(&dep.version, info),
+        Some(info) => compare_versions(dep.effective_version(), info),
         None => VersionStatus::Unknown,
     };
 
@@ -490,6 +490,7 @@ mod tests {
             dev: false,
             optional: false,
             registry: None,
+            resolved_version: None,
         }
     }
 
@@ -1159,6 +1160,114 @@ mod tests {
                     s
                 );
             }
+            _ => panic!("Expected string label"),
+        }
+    }
+
+    // --- Cargo.lock resolved version tests (issue #184) ---
+
+    fn make_test_dep_with_resolved(name: &str, version: &str, resolved: &str) -> Dependency {
+        Dependency {
+            name: name.to_string(),
+            version: version.to_string(),
+            line: 5,
+            name_start: 0,
+            name_end: name.len() as u32,
+            version_start: name.len() as u32 + 4,
+            version_end: name.len() as u32 + 4 + version.len() as u32,
+            dev: false,
+            optional: false,
+            registry: None,
+            resolved_version: Some(resolved.to_string()),
+        }
+    }
+
+    #[test]
+    fn test_effective_version_with_resolved() {
+        let dep = make_test_dep_with_resolved("bon", "3.9", "3.9.1");
+        assert_eq!(dep.effective_version(), "3.9.1");
+    }
+
+    #[test]
+    fn test_effective_version_without_resolved() {
+        let dep = make_test_dep("bon", "3.9");
+        assert_eq!(dep.effective_version(), "3.9");
+    }
+
+    #[test]
+    fn test_resolved_version_prevents_false_positive() {
+        // Issue #184: "bon = 3.9" with Cargo.lock having 3.9.1, latest is 3.9.1
+        // Without resolved_version: compare_versions("3.9", info) → "3.9.0" < "3.9.1" → UpdateAvailable (BUG)
+        // With resolved_version: compare_versions("3.9.1", info) → UpToDate (FIXED)
+        let dep = make_test_dep_with_resolved("bon", "3.9", "3.9.1");
+        let info = make_version_info("3.9.1");
+        assert!(matches!(
+            compare_versions(dep.effective_version(), &info),
+            VersionStatus::UpToDate
+        ));
+    }
+
+    #[test]
+    fn test_resolved_version_caret_syntax() {
+        // "^3.9" with Cargo.lock having 3.9.1, latest is 3.9.1
+        let dep = make_test_dep_with_resolved("bon", "^3.9", "3.9.1");
+        let info = make_version_info("3.9.1");
+        assert!(matches!(
+            compare_versions(dep.effective_version(), &info),
+            VersionStatus::UpToDate
+        ));
+    }
+
+    #[test]
+    fn test_resolved_version_real_update_available() {
+        // "3.9" with Cargo.lock having 3.9.1, but latest is 3.10.0
+        let dep = make_test_dep_with_resolved("bon", "3.9", "3.9.1");
+        let info = make_version_info("3.10.0");
+        match compare_versions(dep.effective_version(), &info) {
+            VersionStatus::UpdateAvailable(v) => assert_eq!(v, "3.10.0"),
+            _ => panic!("Expected UpdateAvailable for genuine update"),
+        }
+    }
+
+    #[test]
+    fn test_resolved_version_major_only() {
+        // "1" with Cargo.lock having 1.5.3, latest is 1.5.3
+        let dep = make_test_dep_with_resolved("serde", "1", "1.5.3");
+        let info = make_version_info("1.5.3");
+        assert!(matches!(
+            compare_versions(dep.effective_version(), &info),
+            VersionStatus::UpToDate
+        ));
+    }
+
+    #[test]
+    fn test_inlay_hint_uses_resolved_version() {
+        // End-to-end: create_inlay_hint should show UpToDate when resolved matches latest
+        let dep = make_test_dep_with_resolved("bon", "3.9", "3.9.1");
+        let info = make_version_info("3.9.1");
+        let hint = create_inlay_hint(&dep, Some(&info));
+        match hint.label {
+            InlayHintLabel::String(s) => assert!(
+                s.contains("✓"),
+                "Expected ✓ (up to date) with resolved version, got: {}",
+                s
+            ),
+            _ => panic!("Expected string label"),
+        }
+    }
+
+    #[test]
+    fn test_inlay_hint_without_resolved_shows_update() {
+        // Without resolved_version, minimal syntax shows update available (original behavior)
+        let dep = make_test_dep("bon", "3.9");
+        let info = make_version_info("3.9.1");
+        let hint = create_inlay_hint(&dep, Some(&info));
+        match hint.label {
+            InlayHintLabel::String(s) => assert!(
+                s.contains("->"),
+                "Expected -> (update available) without resolved version, got: {}",
+                s
+            ),
             _ => panic!("Expected string label"),
         }
     }

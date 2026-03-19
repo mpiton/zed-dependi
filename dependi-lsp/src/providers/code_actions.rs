@@ -133,9 +133,9 @@ fn create_update_action(
     let cache_key = cache_key_fn(&dep.name);
     let version_info = cache.get(&cache_key)?;
 
-    match compare_versions(&dep.version, &version_info) {
+    match compare_versions(dep.effective_version(), &version_info) {
         VersionStatus::UpdateAvailable(new_version) => {
-            let update_type = compare_update_type(&dep.version, &new_version);
+            let update_type = compare_update_type(dep.effective_version(), &new_version);
             let new_text = format_version_for_dep(&new_version, file_type, &dep.version);
 
             let edit = TextEdit {
@@ -195,7 +195,7 @@ fn create_update_all_action(
             let cache_key = cache_key_fn(&dep.name);
             let version_info = cache.get(&cache_key)?;
 
-            match compare_versions(&dep.version, &version_info) {
+            match compare_versions(dep.effective_version(), &version_info) {
                 VersionStatus::UpdateAvailable(new_version) => Some((dep, new_version)),
                 _ => None,
             }
@@ -315,6 +315,7 @@ mod tests {
             dev: false,
             optional: false,
             registry: None,
+            resolved_version: None,
         }
     }
 

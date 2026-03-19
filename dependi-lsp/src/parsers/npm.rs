@@ -187,6 +187,7 @@ fn find_dependency_position(
                     dev,
                     optional,
                     registry: None,
+                    resolved_version: None,
                 });
             }
         }

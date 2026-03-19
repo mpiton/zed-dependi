@@ -25,6 +25,17 @@ pub struct Dependency {
     pub optional: bool,
     /// Custom registry name (Cargo only, e.g., "kellnr")
     pub registry: Option<String>,
+    /// Resolved version from the lock file (e.g., Cargo.lock), if available
+    #[serde(default)]
+    pub resolved_version: Option<String>,
+}
+
+impl Dependency {
+    /// Returns the resolved version (from lock file) if available,
+    /// otherwise falls back to the declared version from the manifest.
+    pub fn effective_version(&self) -> &str {
+        self.resolved_version.as_deref().unwrap_or(&self.version)
+    }
 }
 
 /// Trait for parsing dependency files
@@ -34,6 +45,7 @@ pub trait Parser: Send + Sync {
 }
 
 pub mod cargo;
+pub mod cargo_lock;
 pub mod csharp;
 pub mod dart;
 pub mod go;

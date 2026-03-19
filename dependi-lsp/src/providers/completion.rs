@@ -153,6 +153,7 @@ mod tests {
             dev: false,
             optional: false,
             registry: None,
+            resolved_version: None,
         }
     }
 

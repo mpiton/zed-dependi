@@ -79,6 +79,7 @@ fn parse_package_reference(line: &str, line_num: u32) -> Option<Dependency> {
         dev: false, // NuGet doesn't have explicit dev dependencies in .csproj
         optional: false,
         registry: None,
+        resolved_version: None,
     })
 }
 

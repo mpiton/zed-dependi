@@ -90,7 +90,7 @@ fn create_outdated_diagnostic(
     let cache_key = cache_key_fn(&dep.name);
     let version_info = cache.get(&cache_key)?;
 
-    match compare_versions(&dep.version, &version_info) {
+    match compare_versions(dep.effective_version(), &version_info) {
         VersionStatus::UpdateAvailable(new_version) => Some(Diagnostic {
             range: Range {
                 start: Position {
@@ -105,7 +105,11 @@ fn create_outdated_diagnostic(
             severity: Some(DiagnosticSeverity::HINT),
             code: Some(NumberOrString::String("outdated".to_string())),
             source: Some("dependi".to_string()),
-            message: format!("Update available: {} -> {}", dep.version, new_version),
+            message: format!(
+                "Update available: {} -> {}",
+                dep.effective_version(),
+                new_version
+            ),
             related_information: None,
             tags: None,
             code_description: None,
@@ -358,6 +362,7 @@ mod tests {
             dev: false,
             optional: false,
             registry: None,
+            resolved_version: None,
         }
     }
 

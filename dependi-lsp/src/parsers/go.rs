@@ -137,6 +137,7 @@ fn parse_require_with_positions(
         dev: false,
         optional: is_indirect,
         registry: None,
+        resolved_version: None,
     })
 }
 

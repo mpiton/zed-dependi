@@ -156,6 +156,7 @@ fn find_dependency_position(
                     dev,
                     optional: false,
                     registry: None,
+                    resolved_version: None,
                 });
             }
         }

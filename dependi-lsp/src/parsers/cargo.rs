@@ -88,6 +88,7 @@ impl Parser for CargoParser {
                                 dev: is_dev,
                                 optional,
                                 registry,
+                                resolved_version: None,
                             });
                         }
                     }
@@ -133,6 +134,7 @@ fn parse_dependency(name: &str, node: &Node, content: &str, is_dev: bool) -> Opt
                 dev: is_dev,
                 optional: false,
                 registry: None,
+                resolved_version: None,
             })
         }
         Node::Table(table) => {
@@ -164,6 +166,7 @@ fn parse_dependency(name: &str, node: &Node, content: &str, is_dev: bool) -> Opt
                 dev: is_dev,
                 optional,
                 registry,
+                resolved_version: None,
             })
         }
         _ => None,
