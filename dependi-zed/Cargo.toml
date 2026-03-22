@@ -2,7 +2,7 @@
 name = "dependi-zed"
 version = "1.5.0"
 edition = "2024"
-rust-version = "1.85"
+rust-version = "1.94"
 license = "MIT"
 description = "Zed extension for dependency management"
 authors = ["Mathieu"]
