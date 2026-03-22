@@ -265,6 +265,46 @@ impl ProcessingContext {
             }
         }
 
+        // Resolve versions from composer.lock for PHP dependencies
+        if file_type == FileType::Php {
+            if let Ok(composer_json_path) = uri.to_file_path() {
+                if let Some(lock_path) =
+                    crate::parsers::composer_lock::find_composer_lock(&composer_json_path).await
+                {
+                    match tokio::fs::read_to_string(&lock_path).await {
+                        Ok(lock_content) => {
+                            let lock_versions =
+                                crate::parsers::composer_lock::parse_composer_lock(&lock_content);
+                            for dep in &mut dependencies {
+                                let normalized =
+                                    crate::parsers::composer_lock::normalize_composer_name(
+                                        &dep.name,
+                                    );
+                                if let Some(resolved) = lock_versions.get(&normalized) {
+                                    dep.resolved_version = Some(resolved.clone());
+                                }
+                            }
+                            tracing::debug!(
+                                "Resolved {} versions from {}",
+                                dependencies
+                                    .iter()
+                                    .filter(|d| d.resolved_version.is_some())
+                                    .count(),
+                                lock_path.display()
+                            );
+                        }
+                        Err(e) => {
+                            tracing::debug!(
+                                "Could not read composer.lock at {}: {}",
+                                lock_path.display(),
+                                e
+                            );
+                        }
+                    }
+                }
+            }
+        }
+
         tracing::info!(
             "Parsed {} dependencies from {}",
             dependencies.len(),

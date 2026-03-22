@@ -46,6 +46,7 @@ pub trait Parser: Send + Sync {
 
 pub mod cargo;
 pub mod cargo_lock;
+pub mod composer_lock;
 pub mod csharp;
 pub mod dart;
 pub mod go;
