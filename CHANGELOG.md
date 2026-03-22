@@ -23,6 +23,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - `go.sum` (Go modules checksum database)
 - Add PHP lockfile version resolution to eliminate false-positive "update available" warnings for `composer.json` dependencies ([#186](https://github.com/mpiton/zed-dependi/issues/186))
   - `composer.lock` (Composer)
+- Add Dart lockfile version resolution (`pubspec.lock`) to eliminate false-positive update warnings
 
 ### Fixed
 

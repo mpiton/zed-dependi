@@ -305,6 +305,41 @@ impl ProcessingContext {
             }
         }
 
+        // Resolve versions from pubspec.lock for Dart dependencies
+        if file_type == FileType::Dart {
+            if let Ok(pubspec_yaml_path) = uri.to_file_path() {
+                if let Some(lock_path) =
+                    crate::parsers::pubspec_lock::find_pubspec_lock(&pubspec_yaml_path).await
+                {
+                    match tokio::fs::read_to_string(&lock_path).await {
+                        Ok(lock_content) => {
+                            let lock_versions =
+                                crate::parsers::pubspec_lock::parse_pubspec_lock(&lock_content);
+                            for dep in &mut dependencies {
+                                if let Some(resolved) = lock_versions.get(&dep.name) {
+                                    dep.resolved_version = Some(resolved.clone());
+                                }
+                            }
+                            tracing::debug!(
+                                "Resolved {} Dart versions from pubspec.lock at {}",
+                                dependencies
+                                    .iter()
+                                    .filter(|d| d.resolved_version.is_some())
+                                    .count(),
+                                lock_path.display()
+                            );
+                        }
+                        Err(e) => {
+                            tracing::debug!(
+                                "Could not read pubspec.lock at {}: {e}",
+                                lock_path.display(),
+                            );
+                        }
+                    }
+                }
+            }
+        }
+
         tracing::info!(
             "Parsed {} dependencies from {}",
             dependencies.len(),
