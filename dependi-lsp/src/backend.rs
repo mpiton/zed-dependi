@@ -106,314 +106,283 @@ impl ProcessingContext {
         let mut dependencies = self.parse_document(uri, content);
 
         // Resolve versions from Cargo.lock for Cargo dependencies
-        if file_type == FileType::Cargo {
-            if let Ok(cargo_toml_path) = uri.to_file_path() {
-                if let Some(lock_path) =
-                    crate::parsers::cargo_lock::find_cargo_lock(&cargo_toml_path).await
-                {
-                    match tokio::fs::read_to_string(&lock_path).await {
-                        Ok(lock_content) => {
-                            let lock_versions =
-                                crate::parsers::cargo_lock::parse_cargo_lock(&lock_content);
-                            for dep in &mut dependencies {
-                                if let Some(resolved) = lock_versions.get(&dep.name) {
-                                    dep.resolved_version = Some(resolved.clone());
-                                }
-                            }
-                            tracing::debug!(
-                                "Resolved {} versions from {}",
-                                dependencies
-                                    .iter()
-                                    .filter(|d| d.resolved_version.is_some())
-                                    .count(),
-                                lock_path.display()
-                            );
-                        }
-                        Err(e) => {
-                            tracing::debug!(
-                                "Could not read Cargo.lock at {}: {}",
-                                lock_path.display(),
-                                e
-                            );
+        if file_type == FileType::Cargo
+            && let Ok(cargo_toml_path) = uri.to_file_path()
+            && let Some(lock_path) =
+                crate::parsers::cargo_lock::find_cargo_lock(&cargo_toml_path).await
+        {
+            match tokio::fs::read_to_string(&lock_path).await {
+                Ok(lock_content) => {
+                    let lock_versions = crate::parsers::cargo_lock::parse_cargo_lock(&lock_content);
+                    for dep in &mut dependencies {
+                        if let Some(resolved) = lock_versions.get(&dep.name) {
+                            dep.resolved_version = Some(resolved.clone());
                         }
                     }
+                    tracing::debug!(
+                        "Resolved {} versions from {}",
+                        dependencies
+                            .iter()
+                            .filter(|d| d.resolved_version.is_some())
+                            .count(),
+                        lock_path.display()
+                    );
+                }
+                Err(e) => {
+                    tracing::debug!(
+                        "Could not read Cargo.lock at {}: {}",
+                        lock_path.display(),
+                        e
+                    );
                 }
             }
         }
 
         // Resolve versions from lockfile for npm dependencies
-        if file_type == FileType::Npm {
-            if let Ok(package_json_path) = uri.to_file_path() {
-                if let Some((lock_path, lockfile_type)) =
-                    crate::parsers::npm_lock::find_npm_lockfile(&package_json_path).await
-                {
-                    match tokio::fs::read_to_string(&lock_path).await {
-                        Ok(lock_content) => {
-                            let lock_versions = crate::parsers::npm_lock::parse_npm_lockfile(
-                                &lock_content,
-                                lockfile_type,
-                            );
-                            for dep in &mut dependencies {
-                                if let Some(resolved) = lock_versions.get(&dep.name) {
-                                    dep.resolved_version = Some(resolved.clone());
-                                }
-                            }
-                            tracing::debug!(
-                                "Resolved {} versions from {} ({:?})",
-                                dependencies
-                                    .iter()
-                                    .filter(|d| d.resolved_version.is_some())
-                                    .count(),
-                                lock_path.display(),
-                                lockfile_type,
-                            );
-                        }
-                        Err(e) => {
-                            tracing::debug!(
-                                "Could not read lockfile at {}: {}",
-                                lock_path.display(),
-                                e
-                            );
+        if file_type == FileType::Npm
+            && let Ok(package_json_path) = uri.to_file_path()
+            && let Some((lock_path, lockfile_type)) =
+                crate::parsers::npm_lock::find_npm_lockfile(&package_json_path).await
+        {
+            match tokio::fs::read_to_string(&lock_path).await {
+                Ok(lock_content) => {
+                    let lock_versions =
+                        crate::parsers::npm_lock::parse_npm_lockfile(&lock_content, lockfile_type);
+                    for dep in &mut dependencies {
+                        if let Some(resolved) = lock_versions.get(&dep.name) {
+                            dep.resolved_version = Some(resolved.clone());
                         }
                     }
+                    tracing::debug!(
+                        "Resolved {} versions from {} ({:?})",
+                        dependencies
+                            .iter()
+                            .filter(|d| d.resolved_version.is_some())
+                            .count(),
+                        lock_path.display(),
+                        lockfile_type,
+                    );
+                }
+                Err(e) => {
+                    tracing::debug!("Could not read lockfile at {}: {}", lock_path.display(), e);
                 }
             }
         }
 
         // Resolve versions from lockfile for Python dependencies
-        if file_type == FileType::Python {
-            if let Ok(manifest_path) = uri.to_file_path() {
-                let preferred = crate::parsers::python_lock::detect_python_tool(content);
-                if let Some((lock_path, lockfile_type)) =
-                    crate::parsers::python_lock::find_python_lockfile(&manifest_path, preferred)
-                        .await
-                {
-                    match tokio::fs::read_to_string(&lock_path).await {
-                        Ok(lock_content) => {
-                            let lock_versions = crate::parsers::python_lock::parse_python_lockfile(
-                                &lock_content,
-                                lockfile_type,
-                            );
-                            for dep in &mut dependencies {
-                                let normalized =
-                                    crate::parsers::python_lock::normalize_python_name(&dep.name);
-                                if let Some(resolved) = lock_versions.get(&normalized) {
-                                    dep.resolved_version = Some(resolved.clone());
-                                }
+        if file_type == FileType::Python
+            && let Ok(manifest_path) = uri.to_file_path()
+        {
+            let preferred = crate::parsers::python_lock::detect_python_tool(content);
+            if let Some((lock_path, lockfile_type)) =
+                crate::parsers::python_lock::find_python_lockfile(&manifest_path, preferred).await
+            {
+                match tokio::fs::read_to_string(&lock_path).await {
+                    Ok(lock_content) => {
+                        let lock_versions = crate::parsers::python_lock::parse_python_lockfile(
+                            &lock_content,
+                            lockfile_type,
+                        );
+                        for dep in &mut dependencies {
+                            let normalized =
+                                crate::parsers::python_lock::normalize_python_name(&dep.name);
+                            if let Some(resolved) = lock_versions.get(&normalized) {
+                                dep.resolved_version = Some(resolved.clone());
                             }
-                            tracing::debug!(
-                                "Resolved {} versions from {} ({:?})",
-                                dependencies
-                                    .iter()
-                                    .filter(|d| d.resolved_version.is_some())
-                                    .count(),
-                                lock_path.display(),
-                                lockfile_type,
-                            );
                         }
-                        Err(e) => {
-                            tracing::debug!(
-                                "Could not read lockfile at {}: {}",
-                                lock_path.display(),
-                                e
-                            );
-                        }
+                        tracing::debug!(
+                            "Resolved {} versions from {} ({:?})",
+                            dependencies
+                                .iter()
+                                .filter(|d| d.resolved_version.is_some())
+                                .count(),
+                            lock_path.display(),
+                            lockfile_type,
+                        );
+                    }
+                    Err(e) => {
+                        tracing::debug!(
+                            "Could not read lockfile at {}: {}",
+                            lock_path.display(),
+                            e
+                        );
                     }
                 }
             }
         }
 
         // Resolve versions from go.sum for Go dependencies
-        if file_type == FileType::Go {
-            if let Ok(go_mod_path) = uri.to_file_path() {
-                if let Some(lock_path) = crate::parsers::go_sum::find_go_sum(&go_mod_path).await {
-                    match tokio::fs::read_to_string(&lock_path).await {
-                        Ok(lock_content) => {
-                            let lock_versions = crate::parsers::go_sum::parse_go_sum(&lock_content);
-                            for dep in &mut dependencies {
-                                if let Some(versions) = lock_versions.get(&dep.name) {
-                                    // Prefer dep.version when it appears among the
-                                    // candidates (confirms go.mod and go.sum agree).
-                                    // Fall back to auto-select only when exactly one
-                                    // candidate exists; skip ambiguous multi-version
-                                    // entries to avoid guessing.
-                                    if versions.iter().any(|v| v == &dep.version) {
-                                        dep.resolved_version = Some(dep.version.clone());
-                                    } else if versions.len() == 1 {
-                                        dep.resolved_version = Some(versions[0].clone());
-                                    }
-                                }
+        if file_type == FileType::Go
+            && let Ok(go_mod_path) = uri.to_file_path()
+            && let Some(lock_path) = crate::parsers::go_sum::find_go_sum(&go_mod_path).await
+        {
+            match tokio::fs::read_to_string(&lock_path).await {
+                Ok(lock_content) => {
+                    let lock_versions = crate::parsers::go_sum::parse_go_sum(&lock_content);
+                    for dep in &mut dependencies {
+                        if let Some(versions) = lock_versions.get(&dep.name) {
+                            // Prefer dep.version when it appears among the
+                            // candidates (confirms go.mod and go.sum agree).
+                            // Fall back to auto-select only when exactly one
+                            // candidate exists; skip ambiguous multi-version
+                            // entries to avoid guessing.
+                            if versions.iter().any(|v| v == &dep.version) {
+                                dep.resolved_version = Some(dep.version.clone());
+                            } else if versions.len() == 1 {
+                                dep.resolved_version = Some(versions[0].clone());
                             }
-                            tracing::debug!(
-                                "Resolved {} versions from {}",
-                                dependencies
-                                    .iter()
-                                    .filter(|d| d.resolved_version.is_some())
-                                    .count(),
-                                lock_path.display()
-                            );
-                        }
-                        Err(e) => {
-                            tracing::debug!(
-                                "Could not read go.sum at {}: {}",
-                                lock_path.display(),
-                                e
-                            );
                         }
                     }
+                    tracing::debug!(
+                        "Resolved {} versions from {}",
+                        dependencies
+                            .iter()
+                            .filter(|d| d.resolved_version.is_some())
+                            .count(),
+                        lock_path.display()
+                    );
+                }
+                Err(e) => {
+                    tracing::debug!("Could not read go.sum at {}: {}", lock_path.display(), e);
                 }
             }
         }
 
         // Resolve versions from composer.lock for PHP dependencies
-        if file_type == FileType::Php {
-            if let Ok(composer_json_path) = uri.to_file_path() {
-                if let Some(lock_path) =
-                    crate::parsers::composer_lock::find_composer_lock(&composer_json_path).await
-                {
-                    match tokio::fs::read_to_string(&lock_path).await {
-                        Ok(lock_content) => {
-                            let lock_versions =
-                                crate::parsers::composer_lock::parse_composer_lock(&lock_content);
-                            for dep in &mut dependencies {
-                                let normalized =
-                                    crate::parsers::composer_lock::normalize_composer_name(
-                                        &dep.name,
-                                    );
-                                if let Some(resolved) = lock_versions.get(&normalized) {
-                                    dep.resolved_version = Some(resolved.clone());
-                                }
-                            }
-                            tracing::debug!(
-                                "Resolved {} versions from {}",
-                                dependencies
-                                    .iter()
-                                    .filter(|d| d.resolved_version.is_some())
-                                    .count(),
-                                lock_path.display()
-                            );
-                        }
-                        Err(e) => {
-                            tracing::debug!(
-                                "Could not read composer.lock at {}: {}",
-                                lock_path.display(),
-                                e
-                            );
+        if file_type == FileType::Php
+            && let Ok(composer_json_path) = uri.to_file_path()
+            && let Some(lock_path) =
+                crate::parsers::composer_lock::find_composer_lock(&composer_json_path).await
+        {
+            match tokio::fs::read_to_string(&lock_path).await {
+                Ok(lock_content) => {
+                    let lock_versions =
+                        crate::parsers::composer_lock::parse_composer_lock(&lock_content);
+                    for dep in &mut dependencies {
+                        let normalized =
+                            crate::parsers::composer_lock::normalize_composer_name(&dep.name);
+                        if let Some(resolved) = lock_versions.get(&normalized) {
+                            dep.resolved_version = Some(resolved.clone());
                         }
                     }
+                    tracing::debug!(
+                        "Resolved {} versions from {}",
+                        dependencies
+                            .iter()
+                            .filter(|d| d.resolved_version.is_some())
+                            .count(),
+                        lock_path.display()
+                    );
+                }
+                Err(e) => {
+                    tracing::debug!(
+                        "Could not read composer.lock at {}: {}",
+                        lock_path.display(),
+                        e
+                    );
                 }
             }
         }
 
         // Resolve versions from pubspec.lock for Dart dependencies
-        if file_type == FileType::Dart {
-            if let Ok(pubspec_yaml_path) = uri.to_file_path() {
-                if let Some(lock_path) =
-                    crate::parsers::pubspec_lock::find_pubspec_lock(&pubspec_yaml_path).await
-                {
-                    match tokio::fs::read_to_string(&lock_path).await {
-                        Ok(lock_content) => {
-                            let lock_versions =
-                                crate::parsers::pubspec_lock::parse_pubspec_lock(&lock_content);
-                            for dep in &mut dependencies {
-                                if let Some(resolved) = lock_versions.get(&dep.name) {
-                                    dep.resolved_version = Some(resolved.clone());
-                                }
-                            }
-                            tracing::debug!(
-                                "Resolved {} Dart versions from pubspec.lock at {}",
-                                dependencies
-                                    .iter()
-                                    .filter(|d| d.resolved_version.is_some())
-                                    .count(),
-                                lock_path.display()
-                            );
-                        }
-                        Err(e) => {
-                            tracing::debug!(
-                                "Could not read pubspec.lock at {}: {e}",
-                                lock_path.display(),
-                            );
+        if file_type == FileType::Dart
+            && let Ok(pubspec_yaml_path) = uri.to_file_path()
+            && let Some(lock_path) =
+                crate::parsers::pubspec_lock::find_pubspec_lock(&pubspec_yaml_path).await
+        {
+            match tokio::fs::read_to_string(&lock_path).await {
+                Ok(lock_content) => {
+                    let lock_versions =
+                        crate::parsers::pubspec_lock::parse_pubspec_lock(&lock_content);
+                    for dep in &mut dependencies {
+                        if let Some(resolved) = lock_versions.get(&dep.name) {
+                            dep.resolved_version = Some(resolved.clone());
                         }
                     }
+                    tracing::debug!(
+                        "Resolved {} Dart versions from pubspec.lock at {}",
+                        dependencies
+                            .iter()
+                            .filter(|d| d.resolved_version.is_some())
+                            .count(),
+                        lock_path.display()
+                    );
+                }
+                Err(e) => {
+                    tracing::debug!(
+                        "Could not read pubspec.lock at {}: {e}",
+                        lock_path.display(),
+                    );
                 }
             }
         }
 
         // Resolve versions from packages.lock.json for C# dependencies
-        if file_type == FileType::Csharp {
-            if let Ok(csproj_path) = uri.to_file_path() {
-                if let Some(lock_path) =
-                    crate::parsers::packages_lock_json::find_packages_lock(&csproj_path).await
-                {
-                    match tokio::fs::read_to_string(&lock_path).await {
-                        Ok(lock_content) => {
-                            let lock_versions =
-                                crate::parsers::packages_lock_json::parse_packages_lock(
-                                    &lock_content,
-                                );
-                            for dep in &mut dependencies {
-                                let normalized =
-                                    crate::parsers::packages_lock_json::normalize_nuget_name(
-                                        &dep.name,
-                                    );
-                                if let Some(resolved) = lock_versions.get(&normalized) {
-                                    dep.resolved_version = Some(resolved.clone());
-                                }
-                            }
-                            tracing::debug!(
-                                "Resolved {} C# versions from packages.lock.json at {}",
-                                dependencies
-                                    .iter()
-                                    .filter(|d| d.resolved_version.is_some())
-                                    .count(),
-                                lock_path.display()
-                            );
-                        }
-                        Err(e) => {
-                            tracing::debug!(
-                                "Could not read packages.lock.json at {}: {e}",
-                                lock_path.display(),
-                            );
+        if file_type == FileType::Csharp
+            && let Ok(csproj_path) = uri.to_file_path()
+            && let Some(lock_path) =
+                crate::parsers::packages_lock_json::find_packages_lock(&csproj_path).await
+        {
+            match tokio::fs::read_to_string(&lock_path).await {
+                Ok(lock_content) => {
+                    let lock_versions =
+                        crate::parsers::packages_lock_json::parse_packages_lock(&lock_content);
+                    for dep in &mut dependencies {
+                        let normalized =
+                            crate::parsers::packages_lock_json::normalize_nuget_name(&dep.name);
+                        if let Some(resolved) = lock_versions.get(&normalized) {
+                            dep.resolved_version = Some(resolved.clone());
                         }
                     }
+                    tracing::debug!(
+                        "Resolved {} C# versions from packages.lock.json at {}",
+                        dependencies
+                            .iter()
+                            .filter(|d| d.resolved_version.is_some())
+                            .count(),
+                        lock_path.display()
+                    );
+                }
+                Err(e) => {
+                    tracing::debug!(
+                        "Could not read packages.lock.json at {}: {e}",
+                        lock_path.display(),
+                    );
                 }
             }
         }
 
         // Resolve versions from Gemfile.lock for Ruby dependencies
-        if file_type == FileType::Ruby {
-            if let Ok(gemfile_path) = uri.to_file_path() {
-                if let Some(lock_path) =
-                    crate::parsers::gemfile_lock::find_gemfile_lock(&gemfile_path).await
-                {
-                    match tokio::fs::read_to_string(&lock_path).await {
-                        Ok(lock_content) => {
-                            let lock_versions =
-                                crate::parsers::gemfile_lock::parse_gemfile_lock(&lock_content);
-                            for dep in &mut dependencies {
-                                let normalized =
-                                    crate::parsers::gemfile_lock::normalize_gem_name(&dep.name);
-                                if let Some(resolved) = lock_versions.get(&normalized) {
-                                    dep.resolved_version = Some(resolved.clone());
-                                }
-                            }
-                            tracing::debug!(
-                                "Resolved {} Ruby versions from Gemfile.lock at {}",
-                                dependencies
-                                    .iter()
-                                    .filter(|d| d.resolved_version.is_some())
-                                    .count(),
-                                lock_path.display()
-                            );
-                        }
-                        Err(e) => {
-                            tracing::debug!(
-                                "Could not read Gemfile.lock at {}: {e}",
-                                lock_path.display(),
-                            );
+        if file_type == FileType::Ruby
+            && let Ok(gemfile_path) = uri.to_file_path()
+            && let Some(lock_path) =
+                crate::parsers::gemfile_lock::find_gemfile_lock(&gemfile_path).await
+        {
+            match tokio::fs::read_to_string(&lock_path).await {
+                Ok(lock_content) => {
+                    let lock_versions =
+                        crate::parsers::gemfile_lock::parse_gemfile_lock(&lock_content);
+                    for dep in &mut dependencies {
+                        let normalized =
+                            crate::parsers::gemfile_lock::normalize_gem_name(&dep.name);
+                        if let Some(resolved) = lock_versions.get(&normalized) {
+                            dep.resolved_version = Some(resolved.clone());
                         }
                     }
+                    tracing::debug!(
+                        "Resolved {} Ruby versions from Gemfile.lock at {}",
+                        dependencies
+                            .iter()
+                            .filter(|d| d.resolved_version.is_some())
+                            .count(),
+                        lock_path.display()
+                    );
+                }
+                Err(e) => {
+                    tracing::debug!(
+                        "Could not read Gemfile.lock at {}: {e}",
+                        lock_path.display(),
+                    );
                 }
             }
         }
@@ -1437,14 +1406,14 @@ impl LanguageServer for DependiBackend {
                     parts.push(format!("[Homepage]({})", homepage));
                 }
 
-                if dep.registry.is_none() {
-                    if let Some(registry_url) = file_type.registry_package_url(&dep.name) {
-                        parts.push(format!(
-                            "[View on {}]({})",
-                            file_type.registry_name(),
-                            registry_url
-                        ));
-                    }
+                if dep.registry.is_none()
+                    && let Some(registry_url) = file_type.registry_package_url(&dep.name)
+                {
+                    parts.push(format!(
+                        "[View on {}]({})",
+                        file_type.registry_name(),
+                        registry_url
+                    ));
                 }
 
                 // Add vulnerability information if present
