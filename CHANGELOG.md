@@ -14,6 +14,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - `yarn.lock` (Yarn Classic v1 and Yarn Berry v2+)
   - `pnpm-lock.yaml` (pnpm v6 and v9)
   - `bun.lock` (Bun text JSONC format)
+- Add Python lockfile version resolution to eliminate false-positive "update available" warnings for `pyproject.toml` and `requirements.txt` dependencies ([#186](https://github.com/mpiton/zed-dependi/issues/186))
+  - `poetry.lock` (Poetry)
+  - `uv.lock` (uv)
+  - `pdm.lock` (PDM)
+  - `Pipfile.lock` (Pipenv)
 
 ### Fixed
 

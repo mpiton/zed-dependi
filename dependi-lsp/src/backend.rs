@@ -180,6 +180,47 @@ impl ProcessingContext {
             }
         }
 
+        // Resolve versions from lockfile for Python dependencies
+        if file_type == FileType::Python {
+            if let Ok(manifest_path) = uri.to_file_path() {
+                if let Some((lock_path, lockfile_type)) =
+                    crate::parsers::python_lock::find_python_lockfile(&manifest_path).await
+                {
+                    match tokio::fs::read_to_string(&lock_path).await {
+                        Ok(lock_content) => {
+                            let lock_versions = crate::parsers::python_lock::parse_python_lockfile(
+                                &lock_content,
+                                lockfile_type,
+                            );
+                            for dep in &mut dependencies {
+                                let normalized =
+                                    crate::parsers::python_lock::normalize_python_name(&dep.name);
+                                if let Some(resolved) = lock_versions.get(&normalized) {
+                                    dep.resolved_version = Some(resolved.clone());
+                                }
+                            }
+                            tracing::debug!(
+                                "Resolved {} versions from {} ({:?})",
+                                dependencies
+                                    .iter()
+                                    .filter(|d| d.resolved_version.is_some())
+                                    .count(),
+                                lock_path.display(),
+                                lockfile_type,
+                            );
+                        }
+                        Err(e) => {
+                            tracing::debug!(
+                                "Could not read lockfile at {}: {}",
+                                lock_path.display(),
+                                e
+                            );
+                        }
+                    }
+                }
+            }
+        }
+
         tracing::info!(
             "Parsed {} dependencies from {}",
             dependencies.len(),
