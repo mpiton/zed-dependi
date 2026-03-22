@@ -342,10 +342,10 @@ fn strip_python_prerelease(version: &str) -> String {
             }
             // Short patterns (a, b, c) — only when preceded by a digit
             for &ch in &['a', 'b', 'c'] {
-                if let Some(pos) = lower.find(ch) {
-                    if pos > 0 && lower.as_bytes()[pos - 1].is_ascii_digit() {
-                        return part[..pos].to_string();
-                    }
+                if let Some(pos @ 1..) = lower.find(ch)
+                    && lower.as_bytes()[pos - 1].is_ascii_digit()
+                {
+                    return part[..pos].to_string();
                 }
             }
             part.to_string()

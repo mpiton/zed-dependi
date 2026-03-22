@@ -38,15 +38,15 @@ pub fn parse_pubspec_lock(content: &str) -> HashMap<String, String> {
         }
 
         // Version at exactly 4-space indent: "    version: ..."
-        if line.starts_with("    ") && !line.starts_with("     ") {
-            if let Some(ref pkg) = current_package {
-                let trimmed = line.trim();
-                if let Some(rest) = trimmed.strip_prefix("version:") {
-                    let version = rest.trim().trim_matches('"').to_string();
-                    if !version.is_empty() {
-                        map.entry(pkg.clone()).or_insert(version);
-                    }
-                }
+        if line.starts_with("    ")
+            && !line.starts_with("     ")
+            && let Some(pkg) = current_package.as_deref()
+            && let Some(rest) = line.trim().strip_prefix("version:")
+        {
+            let version = rest.trim().trim_matches('"');
+            if !version.is_empty() {
+                map.entry(pkg.to_owned())
+                    .or_insert_with(|| version.to_owned());
             }
         }
     }

@@ -289,10 +289,10 @@ fn format_version_for_dep(
     file_type: FileType,
     original_version: &str,
 ) -> String {
-    if file_type == FileType::Python {
-        if let Some(op) = extract_python_operator(original_version) {
-            return format!("{}{}", op, format_version(new_version, file_type));
-        }
+    if file_type == FileType::Python
+        && let Some(op) = extract_python_operator(original_version)
+    {
+        return format!("{op}{}", format_version(new_version, file_type));
     }
     format_version(new_version, file_type)
 }
@@ -837,7 +837,7 @@ mod tests {
         };
 
         let actions = create_code_actions(&deps, &cache, &uri, range, FileType::Python, |name| {
-            format!("test:{}", name)
+            format!("test:{name}")
         });
 
         assert_eq!(actions.len(), 1);
@@ -845,11 +845,11 @@ mod tests {
             CodeActionOrCommand::CodeAction(action) => {
                 assert!(action.title.contains("Update rich to 14.3"));
                 // Verify the edit replaces with ~=14.3 (operator preserved)
-                if let Some(edit) = &action.edit {
-                    if let Some(changes) = &edit.changes {
-                        let edits = changes.get(&uri).unwrap();
-                        assert_eq!(edits[0].new_text, "~=14.3");
-                    }
+                if let Some(edit) = &action.edit
+                    && let Some(changes) = &edit.changes
+                {
+                    let edits = changes.get(&uri).unwrap();
+                    assert_eq!(edits[0].new_text, "~=14.3");
                 }
             }
             _ => panic!("Expected CodeAction"),

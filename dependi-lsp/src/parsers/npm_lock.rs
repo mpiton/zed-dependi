@@ -88,11 +88,11 @@ fn parse_package_lock(content: &str) -> HashMap<String, String> {
     // Try v2/v3 format first — packages object with node_modules/ paths
     if let Some(packages) = value.get("packages").and_then(|p| p.as_object()) {
         for (key, pkg) in packages {
-            if let Some(name) = extract_name_from_node_modules_path(key) {
-                if let Some(version) = pkg.get("version").and_then(|v| v.as_str()) {
-                    map.entry(name.to_string())
-                        .or_insert_with(|| version.to_string());
-                }
+            if let Some(name) = extract_name_from_node_modules_path(key)
+                && let Some(version) = pkg.get("version").and_then(|v| v.as_str())
+            {
+                map.entry(name.to_string())
+                    .or_insert_with(|| version.to_string());
             }
         }
         return map;
@@ -160,14 +160,15 @@ fn parse_yarn_lock(content: &str) -> HashMap<String, String> {
         }
 
         // Indented version line — assign to all current package names
-        if !current_names.is_empty() && (line.starts_with(' ') || line.starts_with('\t')) {
-            if let Some(version) = extract_yarn_version(trimmed) {
-                for &name in &current_names {
-                    map.entry(name.to_string())
-                        .or_insert_with(|| version.clone());
-                }
-                current_names.clear();
+        if !current_names.is_empty()
+            && line.starts_with([' ', '\t'])
+            && let Some(version) = extract_yarn_version(trimmed)
+        {
+            for &name in &current_names {
+                map.entry(name.to_string())
+                    .or_insert_with(|| version.clone());
             }
+            current_names.clear();
         }
     }
 
@@ -186,10 +187,10 @@ fn extract_yarn_package_names<'a>(line: &'a str, names: &mut Vec<&'a str>) {
 
     for spec in spec_line.split(", ") {
         let spec = spec.trim().trim_matches('"');
-        if let Some((name, _)) = split_name_version(spec) {
-            if !names.contains(&name) {
-                names.push(name);
-            }
+        if let Some((name, _)) = split_name_version(spec)
+            && !names.contains(&name)
+        {
+            names.push(name);
         }
     }
 }
@@ -306,11 +307,11 @@ fn parse_bun_lock(content: &str) -> HashMap<String, String> {
             .and_then(|arr| arr.first())
             .and_then(|v| v.as_str());
 
-        if let Some(spec) = spec {
-            if let Some((name, version)) = split_name_version(spec) {
-                map.entry(name.to_string())
-                    .or_insert_with(|| version.to_string());
-            }
+        if let Some(spec) = spec
+            && let Some((name, version)) = split_name_version(spec)
+        {
+            map.entry(name.to_string())
+                .or_insert_with(|| version.to_string());
         }
     }
 
