@@ -259,13 +259,19 @@ version = "0.1.0"
 python = "^3.11"
 requests = "^2.31"
 "#;
-        assert_eq!(detect_python_tool(content), Some(PythonLockfileType::PoetryLock));
+        assert_eq!(
+            detect_python_tool(content),
+            Some(PythonLockfileType::PoetryLock)
+        );
     }
 
     #[test]
     fn detect_poetry_nested_section() {
         let content = "[tool.poetry.dependencies]\nrequests = \"^2.31\"\n";
-        assert_eq!(detect_python_tool(content), Some(PythonLockfileType::PoetryLock));
+        assert_eq!(
+            detect_python_tool(content),
+            Some(PythonLockfileType::PoetryLock)
+        );
     }
 
     #[test]
@@ -277,13 +283,19 @@ name = "my-app"
 [tool.uv]
 dev-dependencies = ["pytest"]
 "#;
-        assert_eq!(detect_python_tool(content), Some(PythonLockfileType::UvLock));
+        assert_eq!(
+            detect_python_tool(content),
+            Some(PythonLockfileType::UvLock)
+        );
     }
 
     #[test]
     fn detect_pdm_project() {
         let content = "[tool.pdm]\n";
-        assert_eq!(detect_python_tool(content), Some(PythonLockfileType::PdmLock));
+        assert_eq!(
+            detect_python_tool(content),
+            Some(PythonLockfileType::PdmLock)
+        );
     }
 
     #[test]
