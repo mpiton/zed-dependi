@@ -7,10 +7,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- Add Node.js lockfile version resolution to eliminate false-positive "update available" warnings for `package.json` dependencies ([#186](https://github.com/mpiton/zed-dependi/issues/186))
+  - `package-lock.json` (npm lockfileVersion 1, 2, and 3)
+  - `yarn.lock` (Yarn Classic v1 and Yarn Berry v2+)
+  - `pnpm-lock.yaml` (pnpm v6 and v9)
+  - `bun.lock` (Bun text JSONC format)
+
 ### Fixed
 
 - Fix false-positive "update available" reports when using minimal version syntax (e.g., `bon = "3.9"`) by reading resolved versions from `Cargo.lock` ([#184](https://github.com/mpiton/zed-dependi/issues/184))
 - Fix false-positive vulnerability reports by normalizing version operators before OSV.dev queries ([#181](https://github.com/mpiton/zed-dependi/issues/181))
+- Use async I/O for lockfile discovery to avoid blocking the Tokio executor
 
 ## [1.5.0] - 2026-03-16
 
