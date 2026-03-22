@@ -49,6 +49,7 @@ pub mod cargo_lock;
 pub mod csharp;
 pub mod dart;
 pub mod go;
+pub mod go_sum;
 pub mod npm;
 pub mod npm_lock;
 pub mod php;

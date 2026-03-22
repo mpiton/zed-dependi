@@ -223,6 +223,39 @@ impl ProcessingContext {
             }
         }
 
+        // Resolve versions from go.sum for Go dependencies
+        if file_type == FileType::Go {
+            if let Ok(go_mod_path) = uri.to_file_path() {
+                if let Some(lock_path) = crate::parsers::go_sum::find_go_sum(&go_mod_path).await {
+                    match tokio::fs::read_to_string(&lock_path).await {
+                        Ok(lock_content) => {
+                            let lock_versions = crate::parsers::go_sum::parse_go_sum(&lock_content);
+                            for dep in &mut dependencies {
+                                if let Some(resolved) = lock_versions.get(&dep.name) {
+                                    dep.resolved_version = Some(resolved.clone());
+                                }
+                            }
+                            tracing::debug!(
+                                "Resolved {} versions from {}",
+                                dependencies
+                                    .iter()
+                                    .filter(|d| d.resolved_version.is_some())
+                                    .count(),
+                                lock_path.display()
+                            );
+                        }
+                        Err(e) => {
+                            tracing::debug!(
+                                "Could not read go.sum at {}: {}",
+                                lock_path.display(),
+                                e
+                            );
+                        }
+                    }
+                }
+            }
+        }
+
         tracing::info!(
             "Parsed {} dependencies from {}",
             dependencies.len(),
