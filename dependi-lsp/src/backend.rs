@@ -231,8 +231,17 @@ impl ProcessingContext {
                         Ok(lock_content) => {
                             let lock_versions = crate::parsers::go_sum::parse_go_sum(&lock_content);
                             for dep in &mut dependencies {
-                                if let Some(resolved) = lock_versions.get(&dep.name) {
-                                    dep.resolved_version = Some(resolved.clone());
+                                if let Some(versions) = lock_versions.get(&dep.name) {
+                                    // Prefer dep.version when it appears among the
+                                    // candidates (confirms go.mod and go.sum agree).
+                                    // Fall back to auto-select only when exactly one
+                                    // candidate exists; skip ambiguous multi-version
+                                    // entries to avoid guessing.
+                                    if versions.iter().any(|v| v == &dep.version) {
+                                        dep.resolved_version = Some(dep.version.clone());
+                                    } else if versions.len() == 1 {
+                                        dep.resolved_version = Some(versions[0].clone());
+                                    }
                                 }
                             }
                             tracing::debug!(
