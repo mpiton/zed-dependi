@@ -109,7 +109,7 @@ impl ProcessingContext {
         if file_type == FileType::Cargo {
             if let Ok(cargo_toml_path) = uri.to_file_path() {
                 if let Some(lock_path) =
-                    crate::parsers::cargo_lock::find_cargo_lock(&cargo_toml_path)
+                    crate::parsers::cargo_lock::find_cargo_lock(&cargo_toml_path).await
                 {
                     match tokio::fs::read_to_string(&lock_path).await {
                         Ok(lock_content) => {
@@ -132,6 +132,45 @@ impl ProcessingContext {
                         Err(e) => {
                             tracing::debug!(
                                 "Could not read Cargo.lock at {}: {}",
+                                lock_path.display(),
+                                e
+                            );
+                        }
+                    }
+                }
+            }
+        }
+
+        // Resolve versions from lockfile for npm dependencies
+        if file_type == FileType::Npm {
+            if let Ok(package_json_path) = uri.to_file_path() {
+                if let Some((lock_path, lockfile_type)) =
+                    crate::parsers::npm_lock::find_npm_lockfile(&package_json_path).await
+                {
+                    match tokio::fs::read_to_string(&lock_path).await {
+                        Ok(lock_content) => {
+                            let lock_versions = crate::parsers::npm_lock::parse_npm_lockfile(
+                                &lock_content,
+                                lockfile_type,
+                            );
+                            for dep in &mut dependencies {
+                                if let Some(resolved) = lock_versions.get(&dep.name) {
+                                    dep.resolved_version = Some(resolved.clone());
+                                }
+                            }
+                            tracing::debug!(
+                                "Resolved {} versions from {} ({:?})",
+                                dependencies
+                                    .iter()
+                                    .filter(|d| d.resolved_version.is_some())
+                                    .count(),
+                                lock_path.display(),
+                                lockfile_type,
+                            );
+                        }
+                        Err(e) => {
+                            tracing::debug!(
+                                "Could not read lockfile at {}: {}",
                                 lock_path.display(),
                                 e
                             );

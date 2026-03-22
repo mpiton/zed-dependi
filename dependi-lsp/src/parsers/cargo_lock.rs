@@ -39,17 +39,18 @@ pub fn parse_cargo_lock(content: &str) -> HashMap<String, String> {
 /// Find the Cargo.lock file by walking up from a Cargo.toml path.
 ///
 /// Handles both single-crate and workspace layouts by searching parent directories.
+/// Uses async I/O to avoid blocking the Tokio executor on slow or networked filesystems.
 /// Stops after 10 levels to prevent infinite traversal on unusual file systems.
-pub fn find_cargo_lock(cargo_toml_path: &Path) -> Option<PathBuf> {
+pub async fn find_cargo_lock(cargo_toml_path: &Path) -> Option<PathBuf> {
     let start_dir = cargo_toml_path.parent()?;
 
-    let mut current = start_dir;
+    let mut current = start_dir.to_path_buf();
     let mut depth = 0;
     const MAX_DEPTH: usize = 10;
 
     loop {
         let candidate = current.join("Cargo.lock");
-        if candidate.exists() {
+        if tokio::fs::try_exists(&candidate).await.unwrap_or(false) {
             return Some(candidate);
         }
 
@@ -58,7 +59,7 @@ pub fn find_cargo_lock(cargo_toml_path: &Path) -> Option<PathBuf> {
             return None;
         }
 
-        current = current.parent()?;
+        current = current.parent()?.to_path_buf();
     }
 }
 
