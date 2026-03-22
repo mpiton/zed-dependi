@@ -47,7 +47,7 @@ impl Parser for CargoParser {
             }
 
             // Parse table-style dependencies (e.g., [dependencies.reqwest])
-            let pattern = format!("{}.*", section_name);
+            let pattern = format!("{section_name}.*");
             if let Ok(keys) = pattern.parse::<taplo::dom::Keys>()
                 && let Ok(matches) = dom.find_all_matches(keys, false)
             {

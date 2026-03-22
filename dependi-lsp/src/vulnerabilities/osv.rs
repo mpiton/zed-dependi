@@ -175,7 +175,7 @@ impl OsvClient {
         let tasks: Vec<_> = ids
             .iter()
             .map(|id| {
-                let url = format!("{}/vulns/{}", self.base_url, id);
+                let url = format!("{}/vulns/{id}", self.base_url);
                 let client = Arc::clone(&self.client);
                 let id_clone = id.clone();
 

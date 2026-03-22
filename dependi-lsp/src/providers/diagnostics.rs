@@ -1,12 +1,14 @@
 //! Diagnostics provider for outdated dependencies and vulnerabilities
 
+use core::fmt;
+
 use tower_lsp::lsp_types::*;
 
 use crate::cache::ReadCache;
 use crate::parsers::Dependency;
 use crate::providers::inlay_hints::{VersionStatus, compare_versions, is_local_dependency};
 use crate::registries::{VersionInfo, Vulnerability, VulnerabilitySeverity};
-use crate::utils::truncate_string;
+use crate::utils::fmt_truncate_string;
 
 /// Create diagnostics for a list of dependencies
 ///
@@ -106,9 +108,8 @@ fn create_outdated_diagnostic(
             code: Some(NumberOrString::String("outdated".to_string())),
             source: Some("dependi".to_string()),
             message: format!(
-                "Update available: {} -> {}",
-                dep.effective_version(),
-                new_version
+                "Update available: {} -> {new_version}",
+                dep.effective_version()
             ),
             related_information: None,
             tags: None,
@@ -150,10 +151,9 @@ fn create_deprecation_diagnostic(dep: &Dependency, version_info: &VersionInfo) -
         dep.name
     );
 
-    if let Some(latest) = &version_info.latest {
+    if let Some(latest) = version_info.latest.as_deref() {
         message.push_str(&format!(
-            " Latest version: {} (may not be deprecated).",
-            latest
+            " Latest version: {latest} (may not be deprecated)."
         ));
     }
 
@@ -211,14 +211,19 @@ fn create_deprecation_diagnostic(dep: &Dependency, version_info: &VersionInfo) -
 
 /// Create a diagnostic for a yanked version
 fn create_yanked_diagnostic(dep: &Dependency, version_info: &VersionInfo) -> Diagnostic {
-    let mut message = format!(
-        "The version '{}' of '{}' has been yanked from crates.io and should not be used.",
-        dep.version, dep.name
-    );
+    let dep_name = &*dep.name;
+    let dep_version = &*dep.version;
 
-    if let Some(latest) = &version_info.latest {
-        message.push_str(&format!(" Update to {}.", latest));
-    }
+    let message = fmt::from_fn(|f| {
+        write!(f,
+            "The version '{dep_version}' of '{dep_name}' has been yanked from crates.io and should not be used.",
+        )?;
+
+        if let Some(latest) = version_info.latest.as_deref() {
+            write!(f, " Update to {latest}.")?;
+        }
+        Ok(())
+    }).to_string();
 
     let crates_io_url = format!("https://crates.io/crates/{}", dep.name);
     let mut related_info = vec![DiagnosticRelatedInformation {
@@ -296,20 +301,24 @@ fn create_vulnerability_summary_diagnostic(
     // Build summary message
     let vuln_word = if count == 1 { "vuln" } else { "vulns" };
     let vuln_ids: Vec<_> = vulns.iter().map(|v| v.id.as_str()).collect();
-    let message = format!("⚠ {} {}: {}", count, vuln_word, vuln_ids.join(", "));
+    let message = format!("⚠ {count} {vuln_word}: {}", vuln_ids.join(", "));
 
     // Collect related information for all vulnerabilities
     let related_info: Vec<_> = vulns
         .iter()
-        .filter_map(|vuln| {
-            vuln.url.as_ref().map(|url| DiagnosticRelatedInformation {
+        .filter_map(|&vuln| {
+            vuln.url.as_deref().map(|url| DiagnosticRelatedInformation {
                 location: Location {
                     uri: Url::parse(url).unwrap_or_else(|_| {
                         Url::parse("https://osv.dev").expect("Invalid fallback URL")
                     }),
                     range: Range::default(),
                 },
-                message: format!("{}: {}", vuln.id, truncate_string(&vuln.description, 80)),
+                message: format!(
+                    "{}: {}",
+                    vuln.id,
+                    fmt_truncate_string(&vuln.description, 80)
+                ),
             })
         })
         .collect();
@@ -326,14 +335,10 @@ fn create_vulnerability_summary_diagnostic(
             },
         },
         severity: Some(diagnostic_severity),
-        code: Some(NumberOrString::String(format!("{}-vulns", count))),
+        code: Some(NumberOrString::String(format!("{count}-vulns"))),
         source: Some("dependi-security".to_string()),
         message,
-        related_information: if related_info.is_empty() {
-            None
-        } else {
-            Some(related_info)
-        },
+        related_information: (!related_info.is_empty()).then_some(related_info),
         tags: None,
         code_description: vulns.first().and_then(|v| {
             v.url
@@ -378,7 +383,7 @@ mod tests {
         );
 
         let deps = vec![create_test_dependency("serde", "1.0.0", 5)];
-        let diagnostics = create_diagnostics(&deps, &cache, |name| format!("test:{}", name), None);
+        let diagnostics = create_diagnostics(&deps, &cache, |name| format!("test:{name}"), None);
 
         assert_eq!(diagnostics.len(), 1);
         assert!(diagnostics[0].message.contains("2.0.0"));
@@ -397,7 +402,7 @@ mod tests {
         );
 
         let deps = vec![create_test_dependency("serde", "1.0.0", 5)];
-        let diagnostics = create_diagnostics(&deps, &cache, |name| format!("test:{}", name), None);
+        let diagnostics = create_diagnostics(&deps, &cache, |name| format!("test:{name}"), None);
 
         assert_eq!(diagnostics.len(), 0);
     }
@@ -406,7 +411,7 @@ mod tests {
     fn test_no_diagnostic_no_cache() {
         let cache = MemoryCache::new();
         let deps = vec![create_test_dependency("unknown", "1.0.0", 5)];
-        let diagnostics = create_diagnostics(&deps, &cache, |name| format!("test:{}", name), None);
+        let diagnostics = create_diagnostics(&deps, &cache, |name| format!("test:{name}"), None);
 
         assert_eq!(diagnostics.len(), 0);
     }
@@ -445,7 +450,7 @@ mod tests {
             },
         );
 
-        let diagnostics = create_diagnostics(&deps, &cache, |name| format!("test:{}", name), None);
+        let diagnostics = create_diagnostics(&deps, &cache, |name| format!("test:{name}"), None);
 
         let deprecation_diags: Vec<_> = diagnostics
             .iter()
@@ -482,7 +487,7 @@ mod tests {
             },
         );
 
-        let diagnostics = create_diagnostics(&deps, &cache, |name| format!("test:{}", name), None);
+        let diagnostics = create_diagnostics(&deps, &cache, |name| format!("test:{name}"), None);
 
         let deprecation_diags: Vec<_> = diagnostics
             .iter()
@@ -518,7 +523,7 @@ mod tests {
             },
         );
 
-        let diagnostics = create_diagnostics(&deps, &cache, |name| format!("test:{}", name), None);
+        let diagnostics = create_diagnostics(&deps, &cache, |name| format!("test:{name}"), None);
 
         let deprecation_diags: Vec<_> = diagnostics
             .iter()
@@ -567,7 +572,7 @@ mod tests {
             },
         );
 
-        let diagnostics = create_diagnostics(&deps, &cache, |name| format!("test:{}", name), None);
+        let diagnostics = create_diagnostics(&deps, &cache, |name| format!("test:{name}"), None);
 
         let yanked_diags: Vec<_> = diagnostics
             .iter()
@@ -600,7 +605,7 @@ mod tests {
             },
         );
 
-        let diagnostics = create_diagnostics(&deps, &cache, |name| format!("test:{}", name), None);
+        let diagnostics = create_diagnostics(&deps, &cache, |name| format!("test:{name}"), None);
 
         let yanked_diags: Vec<_> = diagnostics
             .iter()
@@ -632,7 +637,7 @@ mod tests {
             },
         );
 
-        let diagnostics = create_diagnostics(&deps, &cache, |name| format!("test:{}", name), None);
+        let diagnostics = create_diagnostics(&deps, &cache, |name| format!("test:{name}"), None);
 
         let yanked_diags: Vec<_> = diagnostics
             .iter()
@@ -687,7 +692,7 @@ mod tests {
             },
         );
 
-        let diagnostics = create_diagnostics(&deps, &cache, |name| format!("test:{}", name), None);
+        let diagnostics = create_diagnostics(&deps, &cache, |name| format!("test:{name}"), None);
 
         let yanked_diags: Vec<_> = diagnostics
             .iter()
@@ -728,7 +733,7 @@ mod tests {
         let deps = vec![create_test_dependency("local-crate", "../local", 5)];
         let cache = MemoryCache::new();
 
-        let diagnostics = create_diagnostics(&deps, &cache, |name| format!("test:{}", name), None);
+        let diagnostics = create_diagnostics(&deps, &cache, |name| format!("test:{name}"), None);
 
         assert_eq!(diagnostics.len(), 1);
         assert!(diagnostics[0].message.contains("Local"));
@@ -761,7 +766,7 @@ mod tests {
             },
         );
 
-        let diagnostics = create_diagnostics(&deps, &cache, |name| format!("test:{}", name), None);
+        let diagnostics = create_diagnostics(&deps, &cache, |name| format!("test:{name}"), None);
 
         let vuln_diags: Vec<_> = diagnostics
             .iter()
@@ -807,7 +812,7 @@ mod tests {
         let diagnostics = create_diagnostics(
             &deps,
             &cache,
-            |name| format!("test:{}", name),
+            |name| format!("test:{name}"),
             Some(VulnerabilitySeverity::High),
         );
 
@@ -838,7 +843,7 @@ mod tests {
             },
         );
 
-        let diagnostics = create_diagnostics(&deps, &cache, |name| format!("test:{}", name), None);
+        let diagnostics = create_diagnostics(&deps, &cache, |name| format!("test:{name}"), None);
 
         let deprecation_diags: Vec<_> = diagnostics
             .iter()
@@ -869,7 +874,7 @@ mod tests {
             },
         );
 
-        let diagnostics = create_diagnostics(&deps, &cache, |name| format!("test:{}", name), None);
+        let diagnostics = create_diagnostics(&deps, &cache, |name| format!("test:{name}"), None);
 
         let yanked_diags: Vec<_> = diagnostics
             .iter()
@@ -904,7 +909,7 @@ mod tests {
             },
         );
 
-        let diagnostics = create_diagnostics(&deps, &cache, |name| format!("test:{}", name), None);
+        let diagnostics = create_diagnostics(&deps, &cache, |name| format!("test:{name}"), None);
 
         let vuln_diags: Vec<_> = diagnostics
             .iter()
@@ -937,7 +942,7 @@ mod tests {
             },
         );
 
-        let diagnostics = create_diagnostics(&deps, &cache, |name| format!("test:{}", name), None);
+        let diagnostics = create_diagnostics(&deps, &cache, |name| format!("test:{name}"), None);
 
         let vuln_diags: Vec<_> = diagnostics
             .iter()
@@ -970,7 +975,7 @@ mod tests {
             },
         );
 
-        let diagnostics = create_diagnostics(&deps, &cache, |name| format!("test:{}", name), None);
+        let diagnostics = create_diagnostics(&deps, &cache, |name| format!("test:{name}"), None);
 
         let vuln_diags: Vec<_> = diagnostics
             .iter()

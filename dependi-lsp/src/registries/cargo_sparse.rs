@@ -22,13 +22,13 @@ use super::{Registry, VersionInfo};
 /// - 3 characters: `3/{first_char}/{name}`
 /// - 4+ characters: `{first_two}/{next_two}/{name}`
 fn sparse_index_path(name: &str) -> String {
-    let lower = name.to_lowercase();
-    match lower.len() {
-        0 => lower,
-        1 => format!("1/{}", lower),
-        2 => format!("2/{}", lower),
-        3 => format!("3/{}/{}", &lower[..1], lower),
-        _ => format!("{}/{}/{}", &lower[..2], &lower[2..4], lower),
+    let name = name.to_lowercase();
+    match name.len() {
+        0 => name,
+        1 => format!("1/{name}"),
+        2 => format!("2/{name}"),
+        3 => format!("3/{}/{name}", &name[..1]),
+        _ => format!("{}/{}/{name}", &name[..2], &name[2..4]),
     }
 }
 
@@ -58,7 +58,7 @@ impl CargoSparseRegistry {
     ) -> Self {
         let auth_headers = auth_token.and_then(|token| {
             let mut headers = HeaderMap::new();
-            let auth_value = format!("Bearer {}", token);
+            let auth_value = format!("Bearer {token}");
             if let Ok(value) = HeaderValue::from_str(&auth_value) {
                 headers.insert(AUTHORIZATION, value);
                 Some(headers)
@@ -92,7 +92,7 @@ impl Registry for CargoSparseRegistry {
 
     async fn get_version_info(&self, package_name: &str) -> anyhow::Result<VersionInfo> {
         let path = sparse_index_path(package_name);
-        let url = format!("{}/{}", self.index_url, path);
+        let url = format!("{}/{path}", self.index_url);
 
         let mut request = self.client.get(&url);
         if let Some(headers) = &self.auth_headers {
@@ -103,13 +103,11 @@ impl Registry for CargoSparseRegistry {
 
         let response = request.send().await?;
 
-        if !response.status().is_success() {
-            anyhow::bail!(
-                "Failed to fetch crate info for {} from sparse registry: {}",
-                package_name,
-                response.status()
-            );
-        }
+        anyhow::ensure!(
+            response.status().is_success(),
+            "Failed to fetch crate info for {package_name} from sparse registry: {}",
+            response.status()
+        );
 
         let body = response.text().await?;
 

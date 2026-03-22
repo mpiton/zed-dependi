@@ -20,8 +20,7 @@ struct DependiExtension {
 /// error if the fetch fails.
 fn fetch_checksum(release_version: &str, asset_name: &str) -> Result<Option<String>> {
     let checksum_url = format!(
-        "https://github.com/mpiton/zed-dependi/releases/download/{}/{}.binary.sha256",
-        release_version, asset_name
+        "https://github.com/mpiton/zed-dependi/releases/download/{release_version}/{asset_name}.binary.sha256"
     );
 
     let request = HttpRequest::builder()
@@ -67,8 +66,11 @@ fn verify_checksum(binary_path: &str, expected: &str) -> Result<()> {
     let actual = compute_file_sha256(binary_path)?;
     if actual != expected {
         return Err(format!(
-            "Checksum verification failed!\nExpected: {}\nActual: {}\n\nThe downloaded binary may have been tampered with.",
-            expected, actual
+            "Checksum verification failed!\n\
+             Expected: {expected}\n\
+             Actual: {actual}\n\
+             \n\
+             The downloaded binary may have been tampered with."
         ));
     }
     Ok(())
@@ -116,11 +118,11 @@ impl DependiExtension {
 
         let (asset_name, file_type) = match platform {
             zed::Os::Windows => (
-                format!("dependi-lsp-{}.zip", target),
+                format!("dependi-lsp-{target}.zip"),
                 zed::DownloadedFileType::Zip,
             ),
             _ => (
-                format!("dependi-lsp-{}.tar.gz", target),
+                format!("dependi-lsp-{target}.tar.gz"),
                 zed::DownloadedFileType::GzipTar,
             ),
         };

@@ -146,7 +146,8 @@ fn parse_requirement_line(line: &str, line_num: u32, dev: bool) -> Option<Depend
     }
 
     // Extract version (including the operator, to align with Ruby/npm behavior)
-    let version = if let Some(op_pos) = version_op_pos {
+    let version = {
+        let op_pos = version_op_pos?;
         let operator = &without_comment[op_pos..op_pos + version_op_len];
         let version_part = &without_comment[op_pos + version_op_len..];
         // Handle comma-separated version constraints: >=1.0,<2.0
@@ -162,10 +163,7 @@ fn parse_requirement_line(line: &str, line_num: u32, dev: bool) -> Option<Depend
             version_num
         };
         let version_num = version_num.trim();
-        format!("{}{}", operator, version_num)
-    } else {
-        // No version specified
-        return None;
+        format!("{operator}{version_num}")
     };
 
     if version.is_empty() {
@@ -378,7 +376,7 @@ fn parse_pep508_dependency(dep_str: &str) -> Option<(String, String)> {
         return None;
     }
 
-    Some((name.to_string(), format!("{}{}", operator, version_num)))
+    Some((name.to_string(), format!("{operator}{version_num}")))
 }
 
 /// Extract version from Poetry dependency value (using taplo Node)

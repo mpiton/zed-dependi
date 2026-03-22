@@ -144,7 +144,7 @@ fn find_dependency_position(
     optional: bool,
 ) -> Option<Dependency> {
     // Search for the quoted name pattern: "name": "version"
-    let search_pattern = format!("\"{}\"", name);
+    let search_pattern = format!(r#""{name}""#);
 
     // Find all occurrences and pick the one followed by a colon and the version
     let mut search_start = 0;
@@ -158,7 +158,7 @@ fn find_dependency_position(
 
         if trimmed.starts_with(':') {
             // This is a key, now find the version
-            if let Some(version_offset) = rest.find(&format!("\"{}\"", version)) {
+            if let Some(version_offset) = rest.find(&format!(r#""{version}""#)) {
                 let version_abs = after_name + version_offset;
 
                 // Calculate positions

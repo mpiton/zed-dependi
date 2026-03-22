@@ -3,6 +3,8 @@
 //! This module handles the generation of vulnerability reports
 //! in various formats (JSON, Markdown).
 
+use core::fmt;
+
 use serde::{Deserialize, Serialize};
 use tower_lsp::lsp_types::Url;
 
@@ -42,84 +44,104 @@ pub struct VulnerabilityReportEntry {
     pub url: Option<String>,
 }
 
-/// Generate a Markdown-formatted vulnerability report.
+/// Returns an <code>[fmt::Display] + [fmt::Debug]</code> implementation
+/// which produces a Markdown-formatted vulnerability report.
 ///
 /// Creates a human-readable report with a summary table and detailed
 /// vulnerability entries grouped by package.
-pub fn generate_markdown_report(
+#[must_use = "returns a type implementing Display and Debug, which does not have any effects unless they are used"]
+pub fn fmt_markdown_report(
     uri: &Url,
     summary: &VulnerabilitySummary,
     vulnerabilities: &[VulnerabilityReportEntry],
-) -> String {
-    let mut lines = vec![
-        "# Vulnerability Report".to_string(),
-        String::new(),
-        format!("**File**: {}", uri.path()),
-        format!("**Date**: {}", chrono::Local::now().format("%Y-%m-%d")),
-        String::new(),
-        "## Summary".to_string(),
-        "| Severity | Count |".to_string(),
-        "|----------|-------|".to_string(),
-        format!("| ⚠ Critical | {} |", summary.critical),
-        format!("| ▲ High | {} |", summary.high),
-        format!("| ● Medium | {} |", summary.medium),
-        format!("| ○ Low | {} |", summary.low),
-        format!("| **Total** | **{}** |", summary.total),
-        String::new(),
-    ];
+) -> impl fmt::Display + fmt::Debug {
+    fmt::from_fn(move |f| {
+        writeln!(
+            f,
+            "# Vulnerability Report\n\
+             \n\
+             **File**: {}",
+            uri.path()
+        )?;
+        writeln!(f, "**Date**: {}\n", chrono::Local::now().format("%Y-%m-%d"))?;
+        writeln!(
+            f,
+            "## Summary\n\
+             \n\
+             | Severity | Count |\n\
+             |----------|-------|\n\
+             | ⚠ Critical | {c} |\n\
+             | ▲ High | {h} |\n\
+             | ● Medium | {m} |\n\
+             | ○ Low | {l} |\n\
+             | **Total** | **{t}** |\n",
+            c = summary.critical,
+            h = summary.high,
+            m = summary.medium,
+            l = summary.low,
+            t = summary.total,
+        )?;
 
-    if !vulnerabilities.is_empty() {
-        lines.push("## Vulnerabilities".to_string());
-        lines.push(String::new());
+        if !vulnerabilities.is_empty() {
+            writeln!(f, "## Vulnerabilities\n")?;
 
-        let mut current_package = String::new();
-        let mut current_version = String::new();
-        for vuln in vulnerabilities {
-            if vuln.package != current_package || vuln.version != current_version {
-                current_package = vuln.package.clone();
-                current_version = vuln.version.clone();
-                lines.push(format!("### {}@{}", vuln.package, vuln.version));
-                lines.push(String::new());
+            let mut current_package = String::new();
+            let mut current_version = String::new();
+            for VulnerabilityReportEntry {
+                package,
+                version,
+                id,
+                severity,
+                description,
+                url,
+            } in vulnerabilities
+            {
+                if *package != current_package || *version != current_version {
+                    current_package = package.clone();
+                    current_version = version.clone();
+                    writeln!(f, "### {package}@{version}\n")?;
+                }
+
+                let severity_icon = match severity.as_str() {
+                    "critical" => "⚠",
+                    "high" => "▲",
+                    "medium" => "●",
+                    _ => "○",
+                };
+
+                let severity = severity.to_uppercase();
+                if let Some(url) = url.as_deref() {
+                    writeln!(
+                        f,
+                        "- **[{id}]({url})** ({severity_icon} {severity}): {description}",
+                    )?;
+                } else {
+                    writeln!(f, "- **{id}** ({severity_icon} {severity}): {description}")?;
+                }
             }
-
-            let severity_icon = match vuln.severity.as_str() {
-                "critical" => "⚠",
-                "high" => "▲",
-                "medium" => "●",
-                _ => "○",
-            };
-
-            if let Some(url) = &vuln.url {
-                lines.push(format!(
-                    "- **[{}]({})** ({} {}): {}",
-                    vuln.id,
-                    url,
-                    severity_icon,
-                    vuln.severity.to_uppercase(),
-                    vuln.description
-                ));
-            } else {
-                lines.push(format!(
-                    "- **{}** ({} {}): {}",
-                    vuln.id,
-                    severity_icon,
-                    vuln.severity.to_uppercase(),
-                    vuln.description
-                ));
-            }
+        } else {
+            writeln!(
+                f,
+                "## No vulnerabilities found\n\
+                 ✅ All dependencies are free of known security vulnerabilities."
+            )?;
         }
-    } else {
-        lines.push("## No vulnerabilities found".to_string());
-        lines.push(String::new());
-        lines.push("✅ All dependencies are free of known security vulnerabilities.".to_string());
-    }
 
-    lines.join("\n")
+        Ok(())
+    })
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn generate_markdown_report(
+        uri: &Url,
+        summary: &VulnerabilitySummary,
+        vulnerabilities: &[VulnerabilityReportEntry],
+    ) -> String {
+        fmt_markdown_report(uri, summary, vulnerabilities).to_string()
+    }
 
     #[test]
     fn test_generate_markdown_report_with_vulnerabilities() {

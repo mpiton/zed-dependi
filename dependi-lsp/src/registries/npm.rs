@@ -72,7 +72,7 @@ use reqwest::header::{AUTHORIZATION, HeaderMap, HeaderValue};
 use super::http_client::create_shared_client;
 use super::version_utils::is_prerelease_npm;
 use super::{Registry, VersionInfo};
-use crate::auth::redact_token;
+use crate::auth::fmt_redact_token;
 use crate::config::NpmRegistryConfig;
 
 /// Client for the npm registry
@@ -135,21 +135,19 @@ impl NpmRegistry {
 
                 if let Some(token) = auth.get_token() {
                     let mut headers = HeaderMap::new();
-                    let auth_value = format!("Bearer {}", token);
+                    let auth_value = format!("Bearer {token}");
                     if let Ok(value) = HeaderValue::from_str(&auth_value) {
                         headers.insert(AUTHORIZATION, value);
                         auth_headers.insert(cfg.url.clone(), headers);
                         tracing::info!(
-                            "Configured auth for npm scope @{} -> {} (token: {})",
-                            normalized_scope,
+                            "Configured auth for npm scope @{normalized_scope} -> {} (token: {})",
                             cfg.url,
-                            redact_token(&token)
+                            fmt_redact_token(&token)
                         );
                     }
                 } else if auth.is_configured() {
                     tracing::warn!(
-                        "Auth configured for npm scope @{} but token not found in env var {}",
-                        normalized_scope,
+                        "Auth configured for npm scope @{normalized_scope} but token not found in env var {}",
                         auth.variable
                     );
                 }
@@ -293,7 +291,7 @@ impl Registry for NpmRegistry {
 
         // Get the appropriate registry URL (may differ for scoped packages)
         let registry_url = self.get_registry_url(package_name);
-        let url = format!("{}/{}", registry_url, encoded_name);
+        let url = format!("{registry_url}/{encoded_name}");
 
         // Build request with optional authentication
         let mut request = self.client.get(&url);
@@ -305,13 +303,11 @@ impl Registry for NpmRegistry {
 
         let response = request.send().await?;
 
-        if !response.status().is_success() {
-            anyhow::bail!(
-                "Failed to fetch package info for {}: {}",
-                package_name,
-                response.status()
-            );
-        }
+        anyhow::ensure!(
+            response.status().is_success(),
+            "Failed to fetch package info for {package_name}: {}",
+            response.status()
+        );
 
         let pkg: PackageResponse = response.json().await?;
 

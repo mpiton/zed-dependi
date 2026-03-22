@@ -16,11 +16,12 @@ pub fn create_document_links(deps: &[Dependency], file_type: &FileType) -> Vec<D
             if dep.registry.is_some() {
                 return None;
             }
-            let url_str = file_type.registry_package_url(&dep.name)?;
+            let dep_name = &*dep.name;
+            let url_str = file_type.fmt_registry_package_url(dep_name).to_string();
             let url = match Url::parse(&url_str) {
                 Ok(u) => u,
                 Err(e) => {
-                    tracing::warn!("Failed to parse registry URL for '{}': {}", dep.name, e);
+                    tracing::warn!("Failed to parse registry URL for '{dep_name}': {e}");
                     return None;
                 }
             };
@@ -36,11 +37,7 @@ pub fn create_document_links(deps: &[Dependency], file_type: &FileType) -> Vec<D
                     },
                 },
                 target: Some(url),
-                tooltip: Some(format!(
-                    "Open {} on {}",
-                    dep.name,
-                    file_type.registry_name()
-                )),
+                tooltip: Some(format!("Open {dep_name} on {}", file_type.registry_name())),
                 data: None,
             })
         })

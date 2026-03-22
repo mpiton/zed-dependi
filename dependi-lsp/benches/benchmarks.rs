@@ -69,7 +69,7 @@ edition = "2021"
         } else {
             String::new()
         };
-        content.push_str(&format!("{}{} = \"{}\"\n", name, suffix, version));
+        content.push_str(&format!("{name}{suffix} = \"{version}\"\n"));
     }
 
     content
@@ -110,7 +110,7 @@ fn generate_package_json(dep_count: usize) -> String {
         if i > 0 {
             dep_str.push_str(",\n    ");
         }
-        dep_str.push_str(&format!("\"{}{}\": \"{}\"", name, suffix, version));
+        dep_str.push_str(&format!("\"{name}{suffix}\": \"{version}\""));
     }
 
     format!(
@@ -118,10 +118,9 @@ fn generate_package_json(dep_count: usize) -> String {
   "name": "test-project",
   "version": "1.0.0",
   "dependencies": {{
-    {}
+    {dep_str}
   }}
-}}"#,
-        dep_str
+}}"#
     )
 }
 
@@ -157,7 +156,7 @@ fn generate_requirements_txt(dep_count: usize) -> String {
         } else {
             String::new()
         };
-        content.push_str(&format!("{}{}{}\n", name, suffix, version));
+        content.push_str(&format!("{name}{suffix}{version}\n"));
     }
 
     content
@@ -193,7 +192,7 @@ require (
         } else {
             String::new()
         };
-        content.push_str(&format!("\t{}{} {}\n", path, suffix, version));
+        content.push_str(&format!("\t{path}{suffix} {version}\n"));
     }
 
     content.push_str(")\n");
@@ -225,17 +224,16 @@ fn generate_composer_json(dep_count: usize) -> String {
         if i > 0 {
             dep_str.push_str(",\n    ");
         }
-        dep_str.push_str(&format!("\"{}{}\": \"{}\"", name, suffix, version));
+        dep_str.push_str(&format!("\"{name}{suffix}\": \"{version}\""));
     }
 
     format!(
         r#"{{
   "name": "test/project",
   "require": {{
-    {}
+    {dep_str}
   }}
-}}"#,
-        dep_str
+}}"#
     )
 }
 
@@ -262,8 +260,7 @@ fn generate_csproj(dep_count: usize) -> String {
             String::new()
         };
         pkg_refs.push_str(&format!(
-            "    <PackageReference Include=\"{}{}\" Version=\"{}\" />\n",
-            name, suffix, version
+            "    <PackageReference Include=\"{name}{suffix}\" Version=\"{version}\" />\n"
         ));
     }
 
@@ -273,9 +270,8 @@ fn generate_csproj(dep_count: usize) -> String {
     <TargetFramework>net8.0</TargetFramework>
   </PropertyGroup>
   <ItemGroup>
-{}  </ItemGroup>
-</Project>"#,
-        pkg_refs
+{pkg_refs}  </ItemGroup>
+</Project>"#
     )
 }
 
@@ -314,7 +310,7 @@ dependencies:
         } else {
             String::new()
         };
-        content.push_str(&format!("  {}{}: {}\n", name, suffix, version));
+        content.push_str(&format!("  {name}{suffix}: {version}\n"));
     }
 
     content
@@ -343,7 +339,7 @@ fn generate_gemfile(dep_count: usize) -> String {
         } else {
             String::new()
         };
-        content.push_str(&format!("gem '{}{}', '{}'\n", name, suffix, version));
+        content.push_str(&format!("gem '{name}{suffix}', '{version}'\n"));
     }
 
     content
@@ -485,7 +481,7 @@ fn bench_memory_cache(c: &mut Criterion) {
         // Pre-populate cache
         for i in 0..entry_count {
             let info = create_version_info();
-            cache.insert(format!("package_{}", i), info);
+            cache.insert(format!("package_{i}"), info);
         }
 
         group.bench_with_input(
@@ -514,7 +510,7 @@ fn bench_memory_cache(c: &mut Criterion) {
             |b, cache| {
                 let mut i = entry_count;
                 b.iter(|| {
-                    cache.insert(format!("new_package_{}", i), create_version_info());
+                    cache.insert(format!("new_package_{i}"), create_version_info());
                     i += 1;
                 });
             },
@@ -545,7 +541,7 @@ fn bench_sqlite_cache(c: &mut Criterion) {
         cache.clear();
         for i in 0..entry_count {
             let info = create_version_info();
-            cache.insert(format!("package_{}", i), info);
+            cache.insert(format!("package_{i}"), info);
         }
 
         group.bench_with_input(
@@ -575,7 +571,7 @@ fn bench_sqlite_cache(c: &mut Criterion) {
             |b, _| {
                 b.iter(|| {
                     cache.insert(
-                        format!("new_package_{}", insert_counter),
+                        format!("new_package_{insert_counter}"),
                         create_version_info(),
                     );
                     insert_counter += 1;
@@ -675,7 +671,7 @@ fn bench_version_info(c: &mut Criterion) {
     let mut group = c.benchmark_group("version_info");
 
     let info = VersionInfo {
-        yanked_versions: (0..100).map(|i| format!("1.0.{}", i)).collect(),
+        yanked_versions: (0..100).map(|i| format!("1.0.{i}")).collect(),
         ..Default::default()
     };
 

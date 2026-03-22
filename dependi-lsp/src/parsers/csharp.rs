@@ -60,7 +60,7 @@ fn parse_package_reference(line: &str, line_num: u32) -> Option<Dependency> {
     };
 
     // Calculate positions
-    let name_pattern = format!("\"{}\"", name);
+    let name_pattern = format!(r#""{name}""#);
     let name_pos = line.find(&name_pattern)?;
     let name_start = (name_pos + 1) as u32;
     let name_end = name_start + name.len() as u32;

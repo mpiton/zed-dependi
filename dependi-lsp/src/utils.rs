@@ -1,6 +1,9 @@
 //! Common utility functions used across the LSP implementation.
 
-/// Truncates a string to a maximum character count with ellipsis.
+use core::fmt::{self, Write as _};
+
+/// Returns an <code>[fmt::Display] + [fmt::Debug]</code> implementation
+/// which truncates the given string to a maximum character count with ellipsis.
 ///
 /// This function properly handles UTF-8 strings by counting characters,
 /// not bytes. If the string needs truncation, an ellipsis ("...") is
@@ -14,20 +17,29 @@
 /// # Returns
 ///
 /// The truncated string, or the original string if it fits within `max_chars`.
-pub fn truncate_string(s: &str, max_chars: usize) -> String {
-    let char_count = s.chars().count();
-    if char_count <= max_chars {
-        return s.to_string();
-    }
+#[must_use = "returns a type implementing Display and Debug, which does not have any effects unless they are used"]
+pub fn fmt_truncate_string(s: &str, max_chars: usize) -> impl fmt::Display + fmt::Debug {
+    fmt::from_fn(move |f| {
+        let char_count = s.chars().count();
+        if char_count <= max_chars {
+            return f.write_str(s);
+        }
 
-    let keep_chars = max_chars.saturating_sub(3);
-    let truncated: String = s.chars().take(keep_chars).collect();
-    format!("{}...", truncated)
+        let keep_chars = max_chars.saturating_sub(3);
+        s.chars()
+            .take(keep_chars)
+            .try_for_each(|c| f.write_char(c))?;
+        write!(f, "...")
+    })
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn truncate_string(s: &str, max_chars: usize) -> String {
+        fmt_truncate_string(s, max_chars).to_string()
+    }
 
     #[test]
     fn test_no_truncation_needed() {

@@ -164,17 +164,15 @@ impl Registry for PyPiRegistry {
         // Normalize package name (PyPI is case-insensitive, uses lowercase)
         let normalized_name = normalize_package_name(package_name);
 
-        let url = format!("{}/{}/json", self.base_url, normalized_name);
+        let url = format!("{}/{normalized_name}/json", self.base_url);
 
         let response = self.client.get(&url).send().await?;
 
-        if !response.status().is_success() {
-            anyhow::bail!(
-                "Failed to fetch package info for {}: {}",
-                package_name,
-                response.status()
-            );
-        }
+        anyhow::ensure!(
+            response.status().is_success(),
+            "Failed to fetch package info for {package_name}: {}",
+            response.status()
+        );
 
         let pypi_response: PyPiResponse = response.json().await?;
 

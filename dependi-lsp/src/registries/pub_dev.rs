@@ -165,17 +165,15 @@ impl Registry for PubDevRegistry {
     /// }
     /// ```
     async fn get_version_info(&self, package_name: &str) -> anyhow::Result<VersionInfo> {
-        let url = format!("{}/packages/{}", self.base_url, package_name);
+        let url = format!("{}/packages/{package_name}", self.base_url);
 
         let response = self.client.get(&url).send().await?;
 
-        if !response.status().is_success() {
-            anyhow::bail!(
-                "Failed to fetch package info for {}: {}",
-                package_name,
-                response.status()
-            );
-        }
+        anyhow::ensure!(
+            response.status().is_success(),
+            "Failed to fetch package info for {package_name}: {}",
+            response.status(),
+        );
 
         let pkg: PubPackageResponse = response.json().await?;
 
@@ -284,8 +282,7 @@ mod tests {
         let latest = info.latest.expect("Should have a latest version");
         assert!(
             latest.starts_with("2.") || latest.starts_with("3."),
-            "Expected latest version to be 2.x or 3.x, got: {}",
-            latest
+            "Expected latest version to be 2.x or 3.x, got: {latest}"
         );
     }
 }

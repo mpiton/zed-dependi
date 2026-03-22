@@ -434,7 +434,7 @@ mod tests {
             expired_entries: 3,
             valid_entries: 7,
         };
-        let display = format!("{}", stats);
+        let display = stats.to_string();
         assert!(display.contains("total: 10"));
         assert!(display.contains("expired: 3"));
         assert!(display.contains("valid: 7"));

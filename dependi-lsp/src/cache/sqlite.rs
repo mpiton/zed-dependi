@@ -111,7 +111,7 @@ impl SqliteCache {
     #[cfg(test)]
     pub fn in_memory() -> anyhow::Result<Self> {
         let db_id = TEST_DB_COUNTER.fetch_add(1, Ordering::SeqCst);
-        let uri = format!("file:memdb{}?mode=memory&cache=shared", db_id);
+        let uri = format!("file:memdb{db_id}?mode=memory&cache=shared");
         let config = SqliteCacheConfig::default();
 
         let manager = SqliteConnectionManager::in_memory(&uri);
@@ -436,8 +436,8 @@ mod tests {
         let entries: Vec<(String, VersionInfo)> = (0..10)
             .map(|i| {
                 let mut info = create_test_version_info();
-                info.latest = Some(format!("{}.0.0", i));
-                (format!("pkg{}", i), info)
+                info.latest = Some(format!("{i}.0.0"));
+                (format!("pkg{i}"), info)
             })
             .collect();
 
@@ -445,8 +445,8 @@ mod tests {
         assert_eq!(count, 10);
 
         for i in 0..10 {
-            let retrieved = cache.get(&format!("pkg{}", i)).unwrap();
-            assert_eq!(retrieved.latest, Some(format!("{}.0.0", i)));
+            let retrieved = cache.get(&format!("pkg{i}")).unwrap();
+            assert_eq!(retrieved.latest, Some(format!("{i}.0.0")));
         }
     }
 
@@ -466,8 +466,8 @@ mod tests {
 
         for i in 0..20 {
             let mut info = create_test_version_info();
-            info.latest = Some(format!("{}.0.0", i));
-            cache.insert(format!("pkg{}", i), info);
+            info.latest = Some(format!("{i}.0.0"));
+            cache.insert(format!("pkg{i}"), info);
         }
 
         let handles: Vec<_> = (0..10)
@@ -475,14 +475,9 @@ mod tests {
                 let cache = Arc::clone(&cache);
                 thread::spawn(move || {
                     for i in 0..20 {
-                        let key = format!("pkg{}", i);
+                        let key = format!("pkg{i}");
                         let result = cache.get(&key);
-                        assert!(
-                            result.is_some(),
-                            "Thread {} failed to read {}",
-                            thread_id,
-                            key
-                        );
+                        assert!(result.is_some(), "Thread {thread_id} failed to read {key}");
                     }
                 })
             })
@@ -505,9 +500,9 @@ mod tests {
                 let cache = Arc::clone(&cache);
                 thread::spawn(move || {
                     for i in 0..10 {
-                        let key = format!("thread{}:pkg{}", thread_id, i);
+                        let key = format!("thread{thread_id}:pkg{i}");
                         let mut info = create_test_version_info();
-                        info.latest = Some(format!("{}.{}.0", thread_id, i));
+                        info.latest = Some(format!("{thread_id}.{i}.0"));
                         cache.insert(key, info);
                     }
                 })
@@ -520,9 +515,9 @@ mod tests {
 
         for thread_id in 0..5 {
             for i in 0..10 {
-                let key = format!("thread{}:pkg{}", thread_id, i);
+                let key = format!("thread{thread_id}:pkg{i}");
                 let result = cache.get(&key);
-                assert!(result.is_some(), "Missing key: {}", key);
+                assert!(result.is_some(), "Missing key: {key}");
             }
         }
     }
@@ -536,8 +531,8 @@ mod tests {
 
         for i in 0..50 {
             let mut info = create_test_version_info();
-            info.latest = Some(format!("{}.0.0", i));
-            cache.insert(format!("pkg{}", i), info);
+            info.latest = Some(format!("{i}.0.0"));
+            cache.insert(format!("pkg{i}"), info);
         }
 
         let handles: Vec<_> = (0..10)
@@ -547,17 +542,17 @@ mod tests {
                     for i in 0..50 {
                         match thread_id % 3 {
                             0 => {
-                                let _ = cache.get(&format!("pkg{}", i));
+                                let _ = cache.get(&format!("pkg{i}"));
                             }
                             1 => {
                                 let mut info = create_test_version_info();
-                                info.latest = Some(format!("updated-{}-{}", thread_id, i));
-                                cache.insert(format!("pkg{}", i), info);
+                                info.latest = Some(format!("updated-{thread_id}-{i}"));
+                                cache.insert(format!("pkg{i}"), info);
                             }
                             _ => {
                                 let mut info = create_test_version_info();
-                                info.latest = Some(format!("new-{}-{}", thread_id, i));
-                                cache.insert(format!("new-pkg-{}-{}", thread_id, i), info);
+                                info.latest = Some(format!("new-{thread_id}-{i}"));
+                                cache.insert(format!("new-pkg-{thread_id}-{i}"), info);
                             }
                         }
                     }

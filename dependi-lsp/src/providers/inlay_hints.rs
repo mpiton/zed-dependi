@@ -1,10 +1,12 @@
 //! Inlay hints provider for dependency versions
 
+use core::fmt::{self, Write};
+
 use tower_lsp::lsp_types::{InlayHint, InlayHintKind, InlayHintLabel, Position};
 
-use crate::parsers::Dependency;
 use crate::registries::{VersionInfo, VulnerabilitySeverity};
-use crate::utils::truncate_string;
+use crate::utils::fmt_truncate_string;
+use crate::{parsers::Dependency, registries::Vulnerability};
 
 /// Result of comparing a dependency version with the latest available
 #[derive(Debug, Clone)]
@@ -42,7 +44,7 @@ pub fn create_inlay_hint(dep: &Dependency, version_info: Option<&VersionInfo>) -
             line: dep.line,
             character: dep.version_end + 1,
         },
-        label: InlayHintLabel::String(format!(" {}", label)),
+        label: InlayHintLabel::String(format!(" {label}")),
         kind: Some(InlayHintKind::PARAMETER),
         text_edits: None,
         tooltip: tooltip.map(tower_lsp::lsp_types::InlayHintTooltip::String),
@@ -59,45 +61,42 @@ fn create_hint_label_and_tooltip(
     dep: &Dependency,
     version_info: Option<&VersionInfo>,
 ) -> (String, Option<String>) {
+    let dep_name = &*dep.name;
+    let dep_version = &*dep.version;
+
     // Handle local dependencies first (highest priority - no registry lookup needed)
-    if is_local_dependency(&dep.version) {
+    if is_local_dependency(dep_version) {
         let tooltip = format!(
             "**Local Dependency**\n\n\
-            \"{}\" is a local/path dependency.\n\n\
+            \"{dep_name}\" is a local/path dependency.\n\n\
             Version info is not available for local packages.\n\n\
             This is expected for dependencies using:\n\
             • path = \"./...\"\n\
             • git = \"https://...\"\n\
             • git = \"git@...\"\n\
             • github:owner/repo",
-            dep.name
         );
         return ("→ Local".to_string(), Some(tooltip));
     }
 
-    tracing::debug!(
-        "Not a local dependency: {} with version '{}'",
-        dep.name,
-        dep.version
-    );
+    tracing::debug!("Not a local dependency: {dep_name} with version '{dep_version}'",);
 
     // Handle yanked versions (highest priority - critical issue)
     if let Some(info) = version_info
-        && info.is_version_yanked(&dep.version)
+        && info.is_version_yanked(dep_version)
     {
-        let yanked_label = "⊘ Yanked".to_string();
-        let yanked_tooltip = format_yanked_tooltip(dep, info);
+        let yanked_label = "⊘ Yanked";
+        let yanked_tooltip = fmt_yanked_tooltip(dep, info);
 
         return match status {
             VersionStatus::UpdateAvailable(latest) => {
-                let label = format!("{} -> {}", yanked_label, latest);
+                let label = format!("{yanked_label} -> {latest}");
                 let tooltip = format!(
-                    "{}\n\n---\n**Update available:** {} -> {}",
-                    yanked_tooltip, dep.version, latest
+                    "{yanked_tooltip}\n\n---\n**Update available:** {dep_version} -> {latest}",
                 );
                 (label, Some(tooltip))
             }
-            _ => (yanked_label, Some(yanked_tooltip)),
+            _ => (yanked_label.to_string(), Some(yanked_tooltip.to_string())),
         };
     }
 
@@ -105,46 +104,46 @@ fn create_hint_label_and_tooltip(
     if let Some(info) = version_info
         && info.deprecated
     {
-        let dep_label = "⚠ Deprecated".to_string();
-        let dep_tooltip = format_deprecation_tooltip(dep, info);
+        let dep_label = "⚠ Deprecated";
+        let dep_tooltip = fmt_deprecation_tooltip(dep, info);
 
         // Combine with update info if available
         return match status {
             VersionStatus::UpdateAvailable(latest) => {
-                let label = format!("{} -> {}", dep_label, latest);
+                let label = format!("{dep_label} -> {latest}");
                 let tooltip = format!(
-                    "{}\n\n---\n**Update available:** {} -> {}",
-                    dep_tooltip, dep.version, latest
+                    "{dep_tooltip}\n\n---\n**Update available:** {dep_version} -> {latest}",
                 );
                 (label, Some(tooltip))
             }
-            _ => (dep_label, Some(dep_tooltip)),
+            _ => (dep_label.to_string(), Some(dep_tooltip.to_string())),
         };
     }
 
     // Handle vulnerabilities (vuln_count > 0 implies version_info is Some)
     if vuln_count > 0 {
-        let vuln_label = format!(
-            "⚠ {} {}",
-            vuln_count,
-            if vuln_count == 1 { "vuln" } else { "vulns" }
-        );
+        let vuln_label = fmt::from_fn(move |f| {
+            write!(f, "⚠ {vuln_count} vuln")?;
+            if vuln_count != 1 {
+                f.write_char('s')?;
+            }
+            Ok(())
+        });
         let Some(info) = version_info else {
-            return (vuln_label, None);
+            return (vuln_label.to_string(), None);
         };
-        let vuln_tooltip = format_vulnerability_tooltip(info);
+        let vuln_tooltip = fmt_vulnerability_tooltip(info);
 
         // Combine with update info if available
         return match status {
             VersionStatus::UpdateAvailable(latest) => {
-                let label = format!("{} -> {}", vuln_label, latest);
+                let label = format!("{vuln_label} -> {latest}");
                 let tooltip = format!(
-                    "{}\n\n---\n**Update available:** {} -> {}",
-                    vuln_tooltip, dep.version, latest
+                    "{vuln_tooltip}\n\n---\n**Update available:** {dep_version} -> {latest}",
                 );
                 (label, Some(tooltip))
             }
-            _ => (vuln_label, Some(vuln_tooltip)),
+            _ => (vuln_label.to_string(), Some(vuln_tooltip.to_string())),
         };
     }
 
@@ -152,8 +151,8 @@ fn create_hint_label_and_tooltip(
     match status {
         VersionStatus::UpToDate => ("✓".to_string(), Some("Up to date".to_string())),
         VersionStatus::UpdateAvailable(latest) => {
-            let label = format!("-> {}", latest);
-            let tooltip = format!("Update available: {} -> {}", dep.version, latest);
+            let label = format!("-> {latest}");
+            let tooltip = format!("Update available: {dep_version} -> {latest}");
             (label, Some(tooltip))
         }
         VersionStatus::Unknown => {
@@ -166,10 +165,9 @@ fn create_hint_label_and_tooltip(
                 • Registry down - try again later\n\n\
                 **Troubleshooting:**\n\
                 1. Check your network connection\n\
-                2. Verify the package name \"{}\" is spelled correctly\n\
+                2. Verify the package name \"{dep_name}\" is spelled correctly\n\
                 3. Search for the package on the registry\n\
                 4. If recently published, wait a few minutes for indexing",
-                dep.name
             );
             ("? Unknown".to_string(), Some(tooltip))
         }
@@ -177,122 +175,134 @@ fn create_hint_label_and_tooltip(
 }
 
 /// Format vulnerability details for tooltip
-fn format_vulnerability_tooltip(info: &VersionInfo) -> String {
+#[must_use = "returns a type implementing Display and Debug, which does not have any effects unless they are used"]
+fn fmt_vulnerability_tooltip(info: &VersionInfo) -> impl fmt::Display + fmt::Debug {
     let count = info.vulnerabilities.len();
-    let mut lines = vec![format!(
-        "**⚠ {} {} Found**\n",
-        count,
-        if count == 1 {
-            "Vulnerability"
-        } else {
-            "Vulnerabilities"
+
+    fmt::from_fn(move |f| {
+        writeln!(
+            f,
+            "**⚠ {count} {} Found**",
+            if count == 1 {
+                "Vulnerability"
+            } else {
+                "Vulnerabilities"
+            }
+        )?;
+        writeln!(f)?;
+
+        for (
+            i,
+            Vulnerability {
+                id,
+                severity,
+                description,
+                url,
+            },
+        ) in info.vulnerabilities.iter().take(5).enumerate()
+        {
+            let severity_icon = match severity {
+                VulnerabilitySeverity::Critical => "⚠ CRITICAL",
+                VulnerabilitySeverity::High => "▲ HIGH",
+                VulnerabilitySeverity::Medium => "● MEDIUM",
+                VulnerabilitySeverity::Low => "○ LOW",
+            };
+
+            writeln!(f, "{n}. **{id}** ({severity_icon})", n = i + 1)?;
+            writeln!(f, "   {}", fmt_truncate_string(description, 100))?;
+
+            if let Some(url) = url.as_deref() {
+                writeln!(f, "   [View Advisory]({url})")?;
+            }
         }
-    )];
 
-    for (i, vuln) in info.vulnerabilities.iter().take(5).enumerate() {
-        let severity_icon = match vuln.severity {
-            VulnerabilitySeverity::Critical => "⚠ CRITICAL",
-            VulnerabilitySeverity::High => "▲ HIGH",
-            VulnerabilitySeverity::Medium => "● MEDIUM",
-            VulnerabilitySeverity::Low => "○ LOW",
-        };
-
-        lines.push(format!(
-            "{}. **{}** ({})\n   {}",
-            i + 1,
-            vuln.id,
-            severity_icon,
-            truncate_string(&vuln.description, 100)
-        ));
-
-        if let Some(url) = &vuln.url {
-            lines.push(format!("   [View Advisory]({})", url));
+        if count > 5 {
+            writeln!(f)?;
+            writeln!(f, "... and {rest} more vulnerabilities", rest = count - 5)?;
         }
-    }
 
-    if info.vulnerabilities.len() > 5 {
-        lines.push(format!(
-            "\n... and {} more vulnerabilities",
-            info.vulnerabilities.len() - 5
-        ));
-    }
-
-    lines.join("\n")
+        Ok(())
+    })
 }
 
 /// Format deprecation warning for tooltip
-fn format_deprecation_tooltip(dep: &Dependency, info: &VersionInfo) -> String {
-    let mut lines = vec![
-        format!(
-            "**⚠ PACKAGE DEPRECATED**\n\nThe package \"{}\" is deprecated.",
-            dep.name
-        ),
-        "".to_string(),
-        "**Why was it deprecated?**".to_string(),
-        "• Superseded by a better alternative".to_string(),
-        "• Has unresolved critical bugs".to_string(),
-        "• Known security vulnerabilities".to_string(),
-        "• No longer maintained".to_string(),
-        "• Has been renamed".to_string(),
-        "".to_string(),
-        "**What should you do?**".to_string(),
-    ];
+#[must_use = "returns a type implementing Display and Debug, which does not have any effects unless they are used"]
+fn fmt_deprecation_tooltip(dep: &Dependency, info: &VersionInfo) -> impl fmt::Display + fmt::Debug {
+    let dep_name = &*dep.name;
+    fmt::from_fn(move |f| {
+        writeln!(
+            f,
+            "**⚠ PACKAGE DEPRECATED**\n\
+             \n\
+             The package \"{dep_name}\" is deprecated.\n\
+             \n\
+             **Why was it deprecated?**\n\
+             • Superseded by a better alternative\n\
+             • Has unresolved critical bugs\n\
+             • Known security vulnerabilities\n\
+             • No longer maintained\n\
+             • Has been renamed\n\
+             \n\
+             **What should you do?**",
+        )?;
 
-    if let Some(homepage) = &info.homepage {
-        lines.push(format!("• Check the package homepage: {}", homepage));
-    }
+        if let Some(homepage) = info.homepage.as_deref() {
+            writeln!(f, "• Check the package homepage: {homepage}")?;
+        }
 
-    if let Some(repo) = &info.repository {
-        lines.push(format!(
-            "• View the repository for more information: {}",
-            repo
-        ));
-    }
+        if let Some(repo) = info.repository.as_deref() {
+            writeln!(f, "• View the repository for more information: {repo}")?;
+        }
 
-    lines.push("• Search for an alternative package on the registry".to_string());
+        writeln!(f, "• Search for an alternative package on the registry")?;
 
-    if let Some(latest) = &info.latest {
-        lines.push(format!(
-            "• Consider the latest version: {} (may not be deprecated)",
-            latest
-        ));
-    }
+        if let Some(latest) = info.latest.as_deref() {
+            writeln!(
+                f,
+                "• Consider the latest version: {latest} (may not be deprecated)"
+            )?;
+        }
 
-    lines.join("\n")
+        Ok(())
+    })
 }
 
 /// Format yanked version warning for tooltip
-fn format_yanked_tooltip(dep: &Dependency, info: &VersionInfo) -> String {
-    let mut lines = vec![
-        format!(
-            "**⊘ YANKED VERSION**\n\nThe version \"{}\" of \"{}\" has been yanked from crates.io.",
-            dep.version, dep.name
-        ),
-        "".to_string(),
-        "**Why was it yanked?**".to_string(),
-        "A yanked version typically has:".to_string(),
-        "• Critical bugs that break functionality".to_string(),
-        "• Security vulnerabilities".to_string(),
-        "• Published by mistake".to_string(),
-        "• Corrupted or incomplete package".to_string(),
-        "".to_string(),
-        "**What should you do?**".to_string(),
-    ];
+#[must_use = "returns a type implementing Display and Debug, which does not have any effects unless they are used"]
+fn fmt_yanked_tooltip(dep: &Dependency, info: &VersionInfo) -> impl fmt::Display + fmt::Debug {
+    let dep_name = &*dep.name;
+    let dep_version = &*dep.version;
 
-    if let Some(latest) = &info.latest {
-        lines.push(format!("• Update to the latest version: {}", latest));
-    }
+    fmt::from_fn(move |f| {
+        writeln!(
+            f,
+            "**⊘ YANKED VERSION**\n\
+             \n\
+             The version \"{dep_version}\" of \"{dep_name}\" has been yanked from crates.io.\n\
+             \n\
+             **Why was it yanked?**\n\
+             A yanked version typically has:\n\
+             • Critical bugs that break functionality\n\
+             • Security vulnerabilities\n\
+             • Published by mistake\n\
+             • Corrupted or incomplete package\n\
+             \n\
+             **What should you do?**"
+        )?;
 
-    if let Some(repo) = &info.repository {
-        lines.push(format!("• Check the repository for more info: {}", repo));
-    }
+        if let Some(latest) = info.latest.as_deref() {
+            writeln!(f, "• Update to the latest version: {latest}")?;
+        }
 
-    lines.push(format!(
-        "• View on crates.io: https://crates.io/crates/{}",
-        dep.name
-    ));
+        if let Some(repo) = info.repository.as_deref() {
+            writeln!(f, "• Check the repository for more info: {repo}")?;
+        }
 
-    lines.join("\n")
+        writeln!(
+            f,
+            "• View on crates.io: https://crates.io/crates/{dep_name}",
+        )
+    })
 }
 
 /// Check if a dependency version string indicates a local/path dependency
@@ -330,25 +340,23 @@ fn strip_python_prerelease(version: &str) -> String {
         .map(|part| {
             let lower = part.to_lowercase();
             // Long patterns first (to avoid partial matches with short ones)
-            for pattern in &["alpha", "beta", "dev", "rc"] {
+            for pattern in ["alpha", "beta", "dev", "rc"] {
                 if let Some(pos) = lower.find(pattern) {
                     return if pos > 0 {
-                        part[..pos].to_string()
+                        &part[..pos]
                     } else {
                         // Pure pre-release segment like "dev1" → "0"
-                        "0".to_string()
+                        "0"
                     };
                 }
             }
             // Short patterns (a, b, c) — only when preceded by a digit
-            for &ch in &['a', 'b', 'c'] {
-                if let Some(pos @ 1..) = lower.find(ch)
-                    && lower.as_bytes()[pos - 1].is_ascii_digit()
-                {
-                    return part[..pos].to_string();
-                }
+            if let Some(pos @ 1..) = lower.find(['a', 'b', 'c'])
+                && lower.as_bytes()[pos - 1].is_ascii_digit()
+            {
+                return &part[..pos];
             }
-            part.to_string()
+            part
         })
         .collect::<Vec<_>>()
         .join(".")
@@ -356,7 +364,7 @@ fn strip_python_prerelease(version: &str) -> String {
 
 /// Compare a dependency version with the latest available
 pub fn compare_versions(current: &str, info: &VersionInfo) -> VersionStatus {
-    let Some(latest) = &info.latest else {
+    let Some(latest) = info.latest.as_deref() else {
         return VersionStatus::Unknown;
     };
 
@@ -407,7 +415,7 @@ pub fn compare_versions(current: &str, info: &VersionInfo) -> VersionStatus {
             if current_ver >= latest_ver {
                 VersionStatus::UpToDate
             } else {
-                VersionStatus::UpdateAvailable(latest.clone())
+                VersionStatus::UpdateAvailable(latest.to_owned())
             }
         }
         _ => {
@@ -415,7 +423,7 @@ pub fn compare_versions(current: &str, info: &VersionInfo) -> VersionStatus {
             if current_normalized == latest_normalized {
                 VersionStatus::UpToDate
             } else {
-                VersionStatus::UpdateAvailable(latest.clone())
+                VersionStatus::UpdateAvailable(latest.to_owned())
             }
         }
     }
@@ -451,17 +459,21 @@ pub fn normalize_version(version: &str) -> String {
         .or_else(|| version.strip_prefix('>'))
         .or_else(|| version.strip_prefix('<'))
         .or_else(|| version.strip_prefix('='))
-        .unwrap_or(version)
-        .trim();
+        .map(str::trim_start) // end was already trimmed
+        .unwrap_or(version);
 
     // Handle version ranges like ">=1.0, <2.0" - take the first part
-    let version = version.split(',').next().unwrap_or(version).trim();
+    let version = version
+        .split(',')
+        .next()
+        .map(str::trim_end) // start was already trimmed
+        .unwrap_or(version);
 
     // Ensure we have at least major.minor.patch
     let parts: Vec<&str> = version.split('.').collect();
-    match parts.len() {
-        1 => format!("{}.0.0", parts[0]),
-        2 => format!("{}.{}.0", parts[0], parts[1]),
+    match *parts.as_slice() {
+        [major] => format!("{major}.0.0"),
+        [major, minor] => format!("{major}.{minor}.0"),
         _ => version.to_string(),
     }
 }
@@ -785,14 +797,9 @@ mod tests {
             InlayHintLabel::String(s) => {
                 assert!(
                     s.contains("⚠ 1 vuln"),
-                    "Expected '⚠ 1 vuln' in label, got: {}",
-                    s
+                    "Expected '⚠ 1 vuln' in label, got: {s}"
                 );
-                assert!(
-                    !s.contains("vulns"),
-                    "Should use singular 'vuln', got: {}",
-                    s
-                );
+                assert!(!s.contains("vulns"), "Should use singular 'vuln', got: {s}");
             }
             _ => panic!("Expected string label"),
         }
@@ -825,8 +832,7 @@ mod tests {
             InlayHintLabel::String(s) => {
                 assert!(
                     s.contains("⚠ 2 vulns"),
-                    "Expected '⚠ 2 vulns' in label, got: {}",
-                    s
+                    "Expected '⚠ 2 vulns' in label, got: {s}"
                 );
             }
             _ => panic!("Expected string label"),
@@ -860,13 +866,11 @@ mod tests {
             InlayHintLabel::String(s) => {
                 assert!(
                     s.contains("⚠ 2 vulns"),
-                    "Expected '⚠ 2 vulns' in label, got: {}",
-                    s
+                    "Expected '⚠ 2 vulns' in label, got: {s}",
                 );
                 assert!(
                     s.contains("-> 2.0.0"),
-                    "Expected '-> 2.0.0' in label, got: {}",
-                    s
+                    "Expected '-> 2.0.0' in label, got: {s}",
                 );
             }
             _ => panic!("Expected string label"),
@@ -1063,7 +1067,7 @@ mod tests {
         for dep in &deps {
             println!("Dep: {} @ '{}'", dep.name, dep.version);
             let is_local = is_local_dependency(&dep.version);
-            println!("  -> is_local: {}", is_local);
+            println!("  -> is_local: {is_local}");
         }
 
         let my_local = deps.iter().find(|d| d.name == "my-local-lib").unwrap();
@@ -1110,8 +1114,7 @@ mod tests {
             InlayHintLabel::String(s) => {
                 assert!(
                     s.contains("→") || s.contains("Local"),
-                    "Expected → Local in label, got: {}",
-                    s
+                    "Expected → Local in label, got: {s}"
                 );
             }
             _ => panic!("Expected string label"),
@@ -1132,7 +1135,7 @@ mod tests {
 
         match hint.label {
             InlayHintLabel::String(s) => {
-                assert!(s.contains("?"), "Expected ? in label, got: {}", s);
+                assert!(s.contains("?"), "Expected ? in label, got: {s}");
                 assert!(!s.contains("Local"));
             }
             _ => panic!("Expected string label"),
@@ -1156,8 +1159,7 @@ mod tests {
             InlayHintLabel::String(s) => {
                 assert!(
                     s.contains("→") || s.contains("Local"),
-                    "Expected → Local in label, got: {}",
-                    s
+                    "Expected → Local in label, got: {s}",
                 );
             }
             _ => panic!("Expected string label"),
@@ -1249,8 +1251,7 @@ mod tests {
         match hint.label {
             InlayHintLabel::String(s) => assert!(
                 s.contains("✓"),
-                "Expected ✓ (up to date) with resolved version, got: {}",
-                s
+                "Expected ✓ (up to date) with resolved version, got: {s}",
             ),
             _ => panic!("Expected string label"),
         }
@@ -1265,8 +1266,7 @@ mod tests {
         match hint.label {
             InlayHintLabel::String(s) => assert!(
                 s.contains("->"),
-                "Expected -> (update available) without resolved version, got: {}",
-                s
+                "Expected -> (update available) without resolved version, got: {s}",
             ),
             _ => panic!("Expected string label"),
         }

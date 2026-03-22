@@ -42,6 +42,7 @@ dependi-lsp/release/
 
 # Local binary for development
 dependi-zed/dependi-lsp*
+dependi-zed/extension.wasm
 
 # Claude Code
 .claude/

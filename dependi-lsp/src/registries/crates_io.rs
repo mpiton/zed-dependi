@@ -182,17 +182,15 @@ impl Registry for CratesIoRegistry {
             limiter.wait().await;
         }
 
-        let url = format!("{}/crates/{}", self.base_url, package_name);
+        let url = format!("{}/crates/{package_name}", self.base_url);
 
         let response = self.client.get(&url).send().await?;
 
-        if !response.status().is_success() {
-            anyhow::bail!(
-                "Failed to fetch crate info for {}: {}",
-                package_name,
-                response.status()
-            );
-        }
+        anyhow::ensure!(
+            response.status().is_success(),
+            "Failed to fetch crate info for {package_name}: {}",
+            response.status()
+        );
 
         let crate_response: CrateResponse = response.json().await?;
 

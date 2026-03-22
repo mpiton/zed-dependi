@@ -26,6 +26,7 @@
 pub mod cargo_credentials;
 pub mod npmrc;
 
+use core::fmt::{self, Write};
 use std::collections::HashMap;
 use std::sync::Arc;
 
@@ -207,25 +208,34 @@ impl TokenProviderManager {
     }
 }
 
-/// Redact a token for safe logging.
+/// Returns an <code>[fmt::Display] + [fmt::Debug]</code> implementation
+/// which redacts the given token for safe logging.
 ///
 /// Shows only the first few characters to help identify which token is in use
 /// without exposing the full secret.
 ///
-/// # Safety
-/// This function is UTF-8 safe and operates on characters, not bytes.
-pub fn redact_token(token: &str) -> String {
-    if token.chars().count() <= 4 {
-        "****".to_string()
-    } else {
-        let prefix: String = token.chars().take(4).collect();
-        format!("{}...", prefix)
-    }
+/// # Unicode Handling
+///
+/// The `fmt` implementation is UTF-8 safe and operates on characters, not bytes.
+#[must_use = "returns a type implementing Display and Debug, which does not have any effects unless they are used"]
+pub fn fmt_redact_token(token: &str) -> impl fmt::Display + fmt::Debug {
+    fmt::from_fn(move |f| {
+        if token.chars().count() <= 4 {
+            f.write_str("****")
+        } else {
+            token.chars().take(4).try_for_each(|c| f.write_char(c))?;
+            f.write_str("...")
+        }
+    })
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn redact_token(token: &str) -> String {
+        fmt_redact_token(token).to_string()
+    }
 
     #[test]
     fn test_redact_token() {

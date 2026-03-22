@@ -32,7 +32,7 @@ async fn main() {
                 info.release_dates.iter().take(3).collect::<Vec<_>>()
             );
         }
-        Err(e) => println!("Error: {}", e),
+        Err(e) => println!("Error: {e}"),
     }
 
     println!("\n=== Testing npm (express) ===");
@@ -49,7 +49,7 @@ async fn main() {
                 info.release_dates.iter().take(3).collect::<Vec<_>>()
             );
         }
-        Err(e) => println!("Error: {}", e),
+        Err(e) => println!("Error: {e}"),
     }
 
     println!("\n=== Testing PyPI (flask) ===");
@@ -66,6 +66,6 @@ async fn main() {
                 info.release_dates.iter().take(3).collect::<Vec<_>>()
             );
         }
-        Err(e) => println!("Error: {}", e),
+        Err(e) => println!("Error: {e}"),
     }
 }

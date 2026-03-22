@@ -1,5 +1,9 @@
-use std::sync::{Arc, RwLock};
+use core::fmt;
 use std::time::Duration;
+use std::{
+    path::PathBuf,
+    sync::{Arc, RwLock},
+};
 
 use dashmap::DashMap;
 use reqwest::Client as HttpClient;
@@ -7,8 +11,6 @@ use tower_lsp::jsonrpc::Result;
 use tower_lsp::lsp_types::*;
 use tower_lsp::{Client, LanguageServer};
 
-use crate::auth::cargo_credentials;
-use crate::auth::{EnvTokenProvider, TokenProviderManager, redact_token};
 use crate::cache::{HybridCache, ReadCache, WriteCache};
 use crate::config::Config;
 use crate::document::DocumentState;
@@ -23,7 +25,7 @@ use crate::parsers::php::PhpParser;
 use crate::parsers::python::PythonParser;
 use crate::parsers::ruby::RubyParser;
 use crate::providers::code_actions::create_code_actions;
-use crate::providers::completion::{format_release_age, get_completions};
+use crate::providers::completion::{fmt_release_age, get_completions};
 use crate::providers::diagnostics::create_diagnostics;
 use crate::providers::document_links::create_document_links;
 use crate::providers::inlay_hints::create_inlay_hint;
@@ -38,19 +40,24 @@ use crate::registries::pub_dev::PubDevRegistry;
 use crate::registries::pypi::PyPiRegistry;
 use crate::registries::rubygems::RubyGemsRegistry;
 use crate::registries::{Registry, VersionInfo, VulnerabilitySeverity};
-use crate::reports::{VulnerabilityReportEntry, VulnerabilitySummary, generate_markdown_report};
+use crate::reports::{VulnerabilityReportEntry, VulnerabilitySummary};
 use crate::vulnerabilities::cache::VulnerabilityCache;
 use crate::vulnerabilities::osv::OsvClient;
 use crate::vulnerabilities::{VulnerabilityQuery, normalize_version_for_osv};
+use crate::{
+    auth::{EnvTokenProvider, TokenProviderManager, cargo_credentials, fmt_redact_token},
+    reports::fmt_markdown_report,
+};
 
 /// Compute cache key for a dependency, including registry for Cargo alternative registries.
 ///
 /// For Cargo deps with `registry = "name"`, the key is `crates:{registry}:{name}` to avoid
 /// collisions between crates.io and private registries. All other deps use the standard key.
 fn dep_cache_key(dep: &crate::parsers::Dependency, file_type: FileType) -> String {
-    match (&dep.registry, file_type) {
-        (Some(registry), FileType::Cargo) => format!("crates:{}:{}", registry, dep.name),
-        _ => file_type.cache_key(&dep.name),
+    let dep_name = &*dep.name;
+    match (dep.registry.as_deref(), file_type) {
+        (Some(registry), FileType::Cargo) => format!("crates:{registry}:{dep_name}"),
+        _ => file_type.cache_key(dep_name),
     }
 }
 
@@ -424,10 +431,10 @@ impl ProcessingContext {
                 async move {
                     // Check cache first
                     if cache.get(&cache_key).is_some() {
-                        tracing::debug!("Cache hit for '{}' (key: {})", name, cache_key);
+                        tracing::debug!("Cache hit for '{name}' (key: {cache_key})");
                         return;
                     }
-                    tracing::debug!("Cache miss for '{}' (key: {}), fetching from registry {:?}", name, cache_key, registry);
+                    tracing::debug!("Cache miss for '{name}' (key: {cache_key}), fetching from registry {registry:?}");
                     // Fetch from appropriate registry
                     let result = match file_type {
                         FileType::Cargo => {
@@ -436,8 +443,7 @@ impl ProcessingContext {
                                     reg.get_version_info(&name).await
                                 } else {
                                     tracing::warn!(
-                                        "Unknown Cargo registry '{}' for package '{}', falling back to crates.io",
-                                        reg_name, name
+                                        "Unknown Cargo registry '{reg_name}' for package '{name}', falling back to crates.io",
                                     );
                                     crates_io.get_version_info(&name).await
                                 }
@@ -459,8 +465,7 @@ impl ProcessingContext {
                         }
                         Err(e) => {
                             tracing::error!(
-                                "Failed to fetch version info for '{}' (registry: {:?}): {}",
-                                name, registry, e
+                                "Failed to fetch version info for '{name}' (registry: {registry:?}): {e}",
                             );
                         }
                     }
@@ -714,7 +719,7 @@ impl DependiBackend {
     ) -> Option<VersionInfo> {
         let cache_key = match (cargo_registry, file_type) {
             (Some(registry), FileType::Cargo) => {
-                format!("crates:{}:{}", registry, package_name)
+                format!("crates:{registry}:{package_name}")
             }
             _ => file_type.cache_key(package_name),
         };
@@ -964,7 +969,7 @@ impl DependiBackend {
         // Generate report based on format
         match format {
             "markdown" => {
-                let md = generate_markdown_report(&uri, &summary, &vulnerabilities);
+                let md = fmt_markdown_report(&uri, &summary, &vulnerabilities).to_string();
                 serde_json::json!({
                     "format": "markdown",
                     "content": md
@@ -975,7 +980,7 @@ impl DependiBackend {
                 serde_json::json!({
                     "summary": summary,
                     "vulnerabilities": vulnerabilities,
-                    "file": uri.to_string()
+                    "file": String::from(uri) // .to_string() clones the inner String of the Url
                 })
             }
         }
@@ -987,7 +992,7 @@ impl LanguageServer for DependiBackend {
     async fn initialize(&self, params: InitializeParams) -> Result<InitializeResult> {
         // Parse configuration from initialization options
         let config = Config::from_init_options(params.initialization_options);
-        tracing::info!("Configuration: {:?}", config);
+        tracing::info!("Configuration: {config:?}");
 
         // Register token providers from npm scoped registry config
         for (scope, scoped_config) in &config.registries.npm.scoped {
@@ -1000,15 +1005,13 @@ impl LanguageServer for DependiBackend {
                         .register(scoped_config.url.clone(), provider)
                         .await;
                     tracing::info!(
-                        "Registered auth provider for npm scope @{} -> {} (token: {})",
-                        scope,
+                        "Registered auth provider for npm scope @{scope} -> {} (token: {})",
                         scoped_config.url,
-                        redact_token(&token)
+                        fmt_redact_token(&token)
                     );
                 } else {
                     tracing::warn!(
-                        "Auth configured for npm scope @{} but token not found in env var {}",
-                        scope,
+                        "Auth configured for npm scope @{scope} but token not found in env var {}",
                         auth.variable
                     );
                 }
@@ -1070,11 +1073,10 @@ impl LanguageServer for DependiBackend {
                     .and_then(|auth| auth.get_token())
                     .or_else(|| credential_tokens.get(registry_name).cloned());
 
-                if let Some(ref t) = token {
+                if let Some(t) = token.as_deref() {
                     tracing::info!(
-                        "Using auth token for Cargo registry '{}' (token: {})",
-                        registry_name,
-                        redact_token(t)
+                        "Using auth token for Cargo registry '{registry_name}' (token: {})",
+                        fmt_redact_token(t)
                     );
                 }
 
@@ -1087,8 +1089,7 @@ impl LanguageServer for DependiBackend {
                 self.cargo_custom_registries
                     .insert(registry_name.clone(), registry);
                 tracing::info!(
-                    "Configured Cargo alternative registry: {} -> {}",
-                    registry_name,
+                    "Configured Cargo alternative registry: {registry_name} -> {}",
                     registry_config.index_url
                 );
             }
@@ -1361,104 +1362,89 @@ impl LanguageServer for DependiBackend {
         let Some(dep) = dep.cloned() else {
             return Ok(None);
         };
+        let dep_name = &*dep.name;
+        let dep_version = &*dep.version;
 
         // Drop the lock before async call
         drop(doc);
 
         // Get version info
         let version_info = self
-            .get_version_info(file_type, &dep.name, dep.registry.as_deref())
+            .get_version_info(file_type, dep_name, dep.registry.as_deref())
             .await;
 
         let content = match version_info {
-            Some(info) => {
-                let mut parts = vec![format!("## {}\n", dep.name)];
+            Some(info) => fmt::from_fn(|f| {
+                writeln!(f, "## {dep_name}\n")?;
 
                 if let Some(desc) = &info.description {
-                    parts.push(format!("{}\n", desc));
+                    writeln!(f, "{desc}\n")?;
                 }
 
                 // Current version with release date
                 let current_date_str = info
                     .get_release_date(&dep.version)
-                    .map(|dt| format!(" ({})", format_release_age(dt)))
+                    .map(|dt| format!(" ({})", fmt_release_age(dt)))
                     .unwrap_or_default();
-                parts.push(format!("**Current:** {}{}", dep.version, current_date_str));
+                writeln!(f, "**Current:** {dep_version}{current_date_str}")?;
 
-                if let Some(latest) = &info.latest {
+                if let Some(latest) = info.latest.as_deref() {
                     let latest_date_str = info
                         .get_release_date(latest)
-                        .map(|dt| format!(" ({})", format_release_age(dt)))
+                        .map(|dt| format!(" ({})", fmt_release_age(dt)))
                         .unwrap_or_default();
-                    parts.push(format!("**Latest:** {}{}", latest, latest_date_str));
+                    writeln!(f, "**Latest:** {latest}{latest_date_str}")?;
                 }
 
-                if let Some(license) = &info.license {
-                    parts.push(format!("**License:** {}", license));
+                if let Some(license) = info.license.as_deref() {
+                    writeln!(f, "**License:** {license}")?;
                 }
 
-                if let Some(repo) = &info.repository {
-                    parts.push(format!("\n[Repository]({})", repo));
+                if let Some(repo) = info.repository.as_deref() {
+                    writeln!(f, "\n[Repository]({repo})")?;
                 }
 
-                if let Some(homepage) = &info.homepage {
-                    parts.push(format!("[Homepage]({})", homepage));
+                if let Some(homepage) = info.homepage.as_deref() {
+                    writeln!(f, "[Homepage]({homepage})")?;
                 }
 
-                if dep.registry.is_none()
-                    && let Some(registry_url) = file_type.registry_package_url(&dep.name)
-                {
-                    parts.push(format!(
-                        "[View on {}]({})",
-                        file_type.registry_name(),
-                        registry_url
-                    ));
+                if dep.registry.is_none() {
+                    let registry_url = file_type.fmt_registry_package_url(dep_name);
+                    writeln!(f, "[View on {}]({registry_url})", file_type.registry_name())?;
                 }
 
                 // Add vulnerability information if present
                 if !info.vulnerabilities.is_empty() {
-                    parts.push(format!(
-                        "\n### ⚠ {} Security {}",
-                        info.vulnerabilities.len(),
-                        if info.vulnerabilities.len() == 1 {
-                            "Vulnerability"
-                        } else {
-                            "Vulnerabilities"
-                        }
-                    ));
+                    let vulns_count = info.vulnerabilities.len();
+                    let suffix = if vulns_count == 1 {
+                        "Vulnerability"
+                    } else {
+                        "Vulnerabilities"
+                    };
+                    writeln!(f, "\n### ⚠ {vulns_count} Security {suffix}")?;
 
                     for vuln in &info.vulnerabilities {
-                        let severity_icon = match vuln.severity {
-                            VulnerabilitySeverity::Critical => "⚠",
-                            VulnerabilitySeverity::High => "▲",
-                            VulnerabilitySeverity::Medium => "●",
-                            VulnerabilitySeverity::Low => "○",
-                        };
-                        let severity_str = match vuln.severity {
-                            VulnerabilitySeverity::Critical => "CRITICAL",
-                            VulnerabilitySeverity::High => "HIGH",
-                            VulnerabilitySeverity::Medium => "MEDIUM",
-                            VulnerabilitySeverity::Low => "LOW",
+                        let (severity_icon, severity_str) = match vuln.severity {
+                            VulnerabilitySeverity::Critical => ("⚠", "CRITICAL"),
+                            VulnerabilitySeverity::High => ("▲", "HIGH"),
+                            VulnerabilitySeverity::Medium => ("●", "MEDIUM"),
+                            VulnerabilitySeverity::Low => ("○", "LOW"),
                         };
 
-                        if let Some(url) = &vuln.url {
-                            parts.push(format!(
-                                "\n#### [{}]({}) - {} {}",
-                                vuln.id, url, severity_icon, severity_str
-                            ));
+                        let id = &*vuln.id;
+                        if let Some(url) = vuln.url.as_deref() {
+                            writeln!(f, "\n#### [{id}]({url}) - {severity_icon} {severity_str}")?;
                         } else {
-                            parts.push(format!(
-                                "\n#### {} - {} {}",
-                                vuln.id, severity_icon, severity_str
-                            ));
+                            writeln!(f, "\n#### {id} - {severity_icon} {severity_str}")?;
                         }
-                        parts.push(vuln.description.clone());
+                        f.write_str(&vuln.description)?;
                     }
                 }
 
-                parts.join("\n")
-            }
-            None => format!("## {}\n\nCould not fetch package information.", dep.name),
+                Ok(())
+            })
+            .to_string(),
+            None => format!("## {dep_name}\n\nCould not fetch package information."),
         };
 
         Ok(Some(Hover {

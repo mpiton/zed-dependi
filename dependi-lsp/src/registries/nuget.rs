@@ -174,19 +174,17 @@ impl Registry for NuGetRegistry {
 
         // Get registration index
         let url = format!(
-            "{}/registration5-semver1/{}/index.json",
-            self.base_url, package_id
+            "{}/registration5-semver1/{package_id}/index.json",
+            self.base_url
         );
 
         let response = self.client.get(&url).send().await?;
 
-        if !response.status().is_success() {
-            anyhow::bail!(
-                "Failed to fetch package info for {}: {}",
-                package_name,
-                response.status()
-            );
-        }
+        anyhow::ensure!(
+            response.status().is_success(),
+            "Failed to fetch package info for {package_name}: {}",
+            response.status(),
+        );
 
         let registration: NuGetRegistrationResponse = response.json().await?;
 

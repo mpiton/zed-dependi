@@ -130,7 +130,8 @@ fn create_update_action(
     file_type: FileType,
     cache_key_fn: impl Fn(&str) -> String,
 ) -> Option<CodeActionOrCommand> {
-    let cache_key = cache_key_fn(&dep.name);
+    let dep_name = &*dep.name;
+    let cache_key = cache_key_fn(dep_name);
     let version_info = cache.get(&cache_key)?;
 
     match compare_versions(dep.effective_version(), &version_info) {
@@ -156,10 +157,8 @@ fn create_update_action(
             changes.insert(uri.clone(), vec![edit]);
 
             let title = format!(
-                "{}: Update {} to {}",
-                update_type.prefix(),
-                dep.name,
-                new_version
+                "{}: Update {dep_name} to {new_version}",
+                update_type.prefix()
             );
 
             Some(CodeActionOrCommand::CodeAction(CodeAction {
@@ -230,7 +229,7 @@ fn create_update_all_action(
     changes.insert(uri.clone(), edits);
 
     let count = outdated_deps.len();
-    let title = format!("Update all {} dependencies", count);
+    let title = format!("Update all {count} dependencies");
 
     Some(CodeActionOrCommand::CodeAction(CodeAction {
         title,
@@ -265,7 +264,7 @@ fn format_version(version: &str, file_type: FileType) -> String {
             if version.starts_with('v') {
                 version.to_string()
             } else {
-                format!("v{}", version)
+                format!("v{version}")
             }
         }
         FileType::Dart => {
@@ -344,7 +343,7 @@ mod tests {
         };
 
         let actions = create_code_actions(&deps, &cache, &uri, range, FileType::Cargo, |name| {
-            format!("test:{}", name)
+            format!("test:{name}")
         });
 
         assert_eq!(actions.len(), 1);
@@ -382,7 +381,7 @@ mod tests {
         };
 
         let actions = create_code_actions(&deps, &cache, &uri, range, FileType::Cargo, |name| {
-            format!("test:{}", name)
+            format!("test:{name}")
         });
 
         assert_eq!(actions.len(), 0);
@@ -440,7 +439,7 @@ mod tests {
         };
 
         let actions = create_code_actions(&deps, &cache, &uri, range, FileType::Cargo, |name| {
-            format!("test:{}", name)
+            format!("test:{name}")
         });
 
         assert_eq!(actions.len(), 4);
@@ -500,7 +499,7 @@ mod tests {
         };
 
         let actions = create_code_actions(&deps, &cache, &uri, range, FileType::Cargo, |name| {
-            format!("test:{}", name)
+            format!("test:{name}")
         });
 
         assert_eq!(actions.len(), 1);
@@ -548,7 +547,7 @@ mod tests {
         };
 
         let actions = create_code_actions(&deps, &cache, &uri, range, FileType::Cargo, |name| {
-            format!("test:{}", name)
+            format!("test:{name}")
         });
 
         assert_eq!(actions.len(), 0);
@@ -642,7 +641,7 @@ mod tests {
         };
 
         let actions = create_code_actions(&deps, &cache, &uri, range, FileType::Cargo, |name| {
-            format!("test:{}", name)
+            format!("test:{name}")
         });
 
         assert_eq!(actions.len(), 1);
@@ -681,7 +680,7 @@ mod tests {
         };
 
         let actions = create_code_actions(&deps, &cache, &uri, range, FileType::Cargo, |name| {
-            format!("test:{}", name)
+            format!("test:{name}")
         });
 
         assert_eq!(actions.len(), 1);
@@ -720,7 +719,7 @@ mod tests {
         };
 
         let actions = create_code_actions(&deps, &cache, &uri, range, FileType::Cargo, |name| {
-            format!("test:{}", name)
+            format!("test:{name}")
         });
 
         assert_eq!(actions.len(), 1);
@@ -882,7 +881,7 @@ mod tests {
         };
 
         let actions = create_code_actions(&deps, &cache, &uri, range, FileType::Python, |name| {
-            format!("test:{}", name)
+            format!("test:{name}")
         });
 
         assert_eq!(actions.len(), 0);
@@ -913,7 +912,7 @@ mod tests {
         };
 
         let actions = create_code_actions(&deps, &cache, &uri, range, FileType::Cargo, |name| {
-            format!("test:{}", name)
+            format!("test:{name}")
         });
 
         assert_eq!(actions.len(), 0);
@@ -937,7 +936,7 @@ mod tests {
         };
 
         let actions = create_code_actions(&deps, &cache, &uri, range, FileType::Cargo, |name| {
-            format!("test:{}", name)
+            format!("test:{name}")
         });
 
         assert_eq!(actions.len(), 0);

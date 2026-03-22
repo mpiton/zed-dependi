@@ -43,3 +43,7 @@ criterion = { version = "0.8.2", features = ["html_reports"] }
 [[bench]]
 name = "benchmarks"
 harness = false
+
+[lints.clippy]
+uninlined_format_args = "warn"
+unnecessary_debug_formatting = "warn"

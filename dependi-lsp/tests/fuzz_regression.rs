@@ -7,49 +7,38 @@ use std::panic::AssertUnwindSafe;
 
 fn validate_deps(deps: &[dependi_lsp::parsers::Dependency], content: &str, parser_name: &str) {
     let lines: Vec<&str> = content.lines().collect();
+    let lines_len = lines.len();
     for dep in deps {
+        let dep_line = dep.line;
         assert!(
-            (dep.line as usize) < lines.len(),
-            "{}: dep.line {} >= lines.len() {}",
-            parser_name,
-            dep.line,
-            lines.len()
+            (dep_line as usize) < lines_len,
+            "{parser_name}: dep.line {dep_line} >= lines.len() {lines_len}"
         );
 
         let line = lines[dep.line as usize];
         let line_len = line.len() as u32;
 
+        let dep_name = &*dep.name;
+        let dep_name_start = dep.name_start;
+        let dep_name_end = dep.name_end;
         assert!(
-            dep.name_start <= dep.name_end,
-            "{}: name_start {} > name_end {}",
-            parser_name,
-            dep.name_start,
-            dep.name_end
+            dep_name_start <= dep_name_end,
+            "{parser_name}: name_start {dep_name_start} > name_end {dep_name_end}"
         );
         assert!(
-            dep.name_end <= line_len,
-            "{}: name_end {} > line_len {} for dep {} on line '{}'",
-            parser_name,
-            dep.name_end,
-            line_len,
-            dep.name,
-            line
+            dep_name_end <= line_len,
+            "{parser_name}: name_end {dep_name_end} > line_len {line_len} for dep {dep_name} on line '{line}'"
+        );
+
+        let dep_version_start = dep.version_start;
+        let dep_version_end = dep.version_end;
+        assert!(
+            dep_version_start <= dep_version_end,
+            "{parser_name}: version_start {dep_version_start} > version_end {dep_version_end}"
         );
         assert!(
-            dep.version_start <= dep.version_end,
-            "{}: version_start {} > version_end {}",
-            parser_name,
-            dep.version_start,
-            dep.version_end
-        );
-        assert!(
-            dep.version_end <= line_len,
-            "{}: version_end {} > line_len {} for dep {} on line '{}'",
-            parser_name,
-            dep.version_end,
-            line_len,
-            dep.name,
-            line
+            dep_version_end <= line_len,
+            "{parser_name}: version_end {dep_version_end} > line_len {line_len} for dep {dep_name} on line '{line}'"
         );
     }
 }

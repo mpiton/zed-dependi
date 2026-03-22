@@ -1,53 +1,74 @@
 //! Completion provider for version suggestions
 
+use core::fmt::{self, Write};
+
 use chrono::{DateTime, Utc};
 use tower_lsp::lsp_types::*;
 
 use crate::cache::ReadCache;
 use crate::parsers::Dependency;
 
-/// Format a release date as a human-readable age string
-pub fn format_release_age(released_at: DateTime<Utc>) -> String {
-    let now = Utc::now();
-    let duration = now.signed_duration_since(released_at);
+/// Returns an <code>[fmt::Display] + [fmt::Debug]</code> implementation
+/// which formats a release date as a human-readable age string.
+///
+/// # Side Effects
+///
+/// The `fmt` implementation calls [`chrono::Utc::now`] to get the current time,
+/// so its result is not idempotent.
+#[must_use = "returns a type implementing Display and Debug, which does not have any effects unless they are used"]
+pub fn fmt_release_age(released_at: DateTime<Utc>) -> impl fmt::Display + fmt::Debug {
+    fmt::from_fn(move |f| {
+        let now = Utc::now();
+        let duration = now.signed_duration_since(released_at);
 
-    let days = duration.num_days();
-    if days < 0 {
-        return "just now".to_string();
-    }
+        let plural_suffix = |amount| {
+            fmt::from_fn(move |f| {
+                if amount == 1 {
+                    Ok(())
+                } else {
+                    f.write_char('s')
+                }
+            })
+        };
 
-    if days == 0 {
-        let hours = duration.num_hours();
-        if hours == 0 {
-            let mins = duration.num_minutes();
-            if mins < 1 {
-                return "just now".to_string();
-            }
-            return format!("{} min{} ago", mins, if mins == 1 { "" } else { "s" });
+        let days = duration.num_days();
+        if days < 0 {
+            return f.write_str("just now");
         }
-        return format!("{} hour{} ago", hours, if hours == 1 { "" } else { "s" });
-    }
 
-    if days == 1 {
-        return "yesterday".to_string();
-    }
+        if days == 0 {
+            let hours = duration.num_hours();
+            if hours == 0 {
+                let mins = duration.num_minutes();
+                if mins < 1 {
+                    return f.write_str("just now");
+                }
+                return write!(f, "{mins} min{s} ago", s = plural_suffix(mins));
+            }
+            return write!(f, "{hours} hour{s} ago", s = plural_suffix(hours));
+        }
 
-    if days < 7 {
-        return format!("{} days ago", days);
-    }
+        if days == 1 {
+            return f.write_str("yesterday");
+        }
 
-    if days < 30 {
-        let weeks = days / 7;
-        return format!("{} week{} ago", weeks, if weeks == 1 { "" } else { "s" });
-    }
+        if days < 7 {
+            return write!(f, "{days} days ago");
+        }
 
-    if days < 365 {
-        let months = days / 30;
-        return format!("{} month{} ago", months, if months == 1 { "" } else { "s" });
-    }
+        if days < 30 {
+            let weeks = days / 7;
+            return write!(f, "{weeks} week{s} ago", s = plural_suffix(weeks));
+        }
 
-    let years = days / 365;
-    format!("{} year{} ago", years, if years == 1 { "" } else { "s" })
+        if days < 365 {
+            let months = days / 30;
+            return write!(f, "{months} month{s} ago", s = plural_suffix(months));
+        }
+
+        let years = days / 365;
+        write!(f, "{years} year{s} ago", s = plural_suffix(years))
+    })
 }
 
 /// Get completions for a position in the document
@@ -80,33 +101,37 @@ pub fn get_completions(
             // Build detail string with version and optional release age
             let detail = match release_date {
                 Some(dt) => {
-                    let age = format_release_age(dt);
+                    let age = fmt_release_age(dt);
                     if is_latest {
-                        format!("{} [Latest] - {}", version, age)
+                        format!("{version} [Latest] - {age}")
                     } else {
-                        format!("{} - {}", version, age)
+                        format!("{version} - {age}")
                     }
                 }
                 None => {
                     if is_latest {
-                        format!("{} [Latest]", version)
+                        format!("{version} [Latest]")
                     } else {
-                        format!("Version {}", version)
+                        format!("Version {version}")
                     }
                 }
             };
 
             // Build documentation with more details
             let documentation = {
-                let mut doc = String::new();
-                if is_latest {
-                    doc.push_str("**Latest stable version**\n\n");
-                }
-                if let Some(dt) = release_date {
-                    let date_str = dt.format("%Y-%m-%d").to_string();
-                    let age = format_release_age(dt);
-                    doc.push_str(&format!("Released: {} ({})", date_str, age));
-                }
+                let doc = fmt::from_fn(|f| {
+                    if is_latest {
+                        write!(f, "**Latest stable version**\n\n")?;
+                    }
+                    if let Some(dt) = release_date {
+                        let date_str = dt.format("%Y-%m-%d");
+                        let age = fmt_release_age(dt);
+                        write!(f, "Released: {date_str} ({age})")?;
+                    }
+                    Ok(())
+                })
+                .to_string();
+
                 if doc.is_empty() {
                     None
                 } else {
@@ -122,7 +147,7 @@ pub fn get_completions(
                 kind: Some(CompletionItemKind::CONSTANT),
                 detail: Some(detail),
                 documentation,
-                sort_text: Some(format!("{:04}", i)), // Ensures correct ordering
+                sort_text: Some(format!("{i:04}")), // Ensures correct ordering
                 insert_text: Some(version.clone()),
                 insert_text_format: Some(InsertTextFormat::PLAIN_TEXT),
                 ..Default::default()
@@ -155,6 +180,10 @@ mod tests {
             registry: None,
             resolved_version: None,
         }
+    }
+
+    fn format_release_age(released_at: DateTime<Utc>) -> String {
+        fmt_release_age(released_at).to_string()
     }
 
     #[test]
@@ -243,7 +272,7 @@ mod tests {
             character: 13, // Within version_start to version_end
         };
 
-        let completions = get_completions(&deps, position, &cache, |name| format!("test:{}", name));
+        let completions = get_completions(&deps, position, &cache, |name| format!("test:{name}"));
 
         assert!(completions.is_some());
         let items = completions.unwrap();
@@ -280,7 +309,7 @@ mod tests {
             character: 13,
         };
 
-        let completions = get_completions(&deps, position, &cache, |name| format!("test:{}", name));
+        let completions = get_completions(&deps, position, &cache, |name| format!("test:{name}"));
 
         assert!(completions.is_some());
         let items = completions.unwrap();
@@ -318,7 +347,7 @@ mod tests {
             character: 0, // At the start, not in version
         };
 
-        let completions = get_completions(&deps, position, &cache, |name| format!("test:{}", name));
+        let completions = get_completions(&deps, position, &cache, |name| format!("test:{name}"));
 
         assert!(completions.is_none());
     }
@@ -341,7 +370,7 @@ mod tests {
             character: 13,
         };
 
-        let completions = get_completions(&deps, position, &cache, |name| format!("test:{}", name));
+        let completions = get_completions(&deps, position, &cache, |name| format!("test:{name}"));
 
         assert!(completions.is_none());
     }
@@ -355,7 +384,7 @@ mod tests {
             character: 13,
         };
 
-        let completions = get_completions(&deps, position, &cache, |name| format!("test:{}", name));
+        let completions = get_completions(&deps, position, &cache, |name| format!("test:{name}"));
 
         assert!(completions.is_none());
     }
@@ -419,7 +448,7 @@ mod tests {
             character: 13,
         };
 
-        let completions = get_completions(&deps, position, &cache, |name| format!("test:{}", name));
+        let completions = get_completions(&deps, position, &cache, |name| format!("test:{name}"));
 
         assert!(completions.is_some());
         let items = completions.unwrap();

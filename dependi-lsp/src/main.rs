@@ -164,7 +164,7 @@ async fn run_scan(
     let content = match tokio::fs::read_to_string(&file).await {
         Ok(c) => c,
         Err(e) => {
-            eprintln!("Error reading file: {}", e);
+            eprintln!("Error reading file: {e}");
             return ExitCode::FAILURE;
         }
     };
@@ -187,7 +187,7 @@ async fn run_scan(
     } else if file_name.ends_with(".csproj") {
         (CsharpParser::new().parse(&content), Ecosystem::NuGet)
     } else {
-        eprintln!("Unsupported file type: {}", file_name);
+        eprintln!("Unsupported file type: {file_name}");
         return ExitCode::FAILURE;
     };
 
@@ -217,7 +217,7 @@ async fn run_scan(
     let results = match osv_client.query_batch(&queries).await {
         Ok(r) => r,
         Err(e) => {
-            eprintln!("Error querying OSV.dev: {}", e);
+            eprintln!("Error querying OSV.dev: {e}");
             return ExitCode::FAILURE;
         }
     };
@@ -274,8 +274,8 @@ async fn run_scan(
                 "vulnerabilities": vuln_details
             });
             match serde_json::to_string_pretty(&report) {
-                Ok(json) => println!("{}", json),
-                Err(e) => eprintln!("Failed to serialize report: {}", e),
+                Ok(json) => println!("{json}"),
+                Err(e) => eprintln!("Failed to serialize report: {e}"),
             }
         }
         "markdown" => {
@@ -285,16 +285,17 @@ async fn run_scan(
             println!("## Summary\n");
             println!("| Severity | Count |");
             println!("|----------|-------|");
-            println!("| ⚠ Critical | {} |", critical_count);
-            println!("| ▲ High | {} |", high_count);
-            println!("| ● Medium | {} |", medium_count);
-            println!("| ○ Low | {} |", low_count);
-            println!("| **Total** | **{}** |\n", total_vulns);
+            println!("| ⚠ Critical | {critical_count} |");
+            println!("| ▲ High | {high_count} |");
+            println!("| ● Medium | {medium_count} |");
+            println!("| ○ Low | {low_count} |");
+            println!("| **Total** | **{total_vulns}** |\n");
 
             if !vuln_details.is_empty() {
                 println!("## Vulnerabilities\n");
                 for vuln in &vuln_details {
-                    let severity_icon = match vuln["severity"].as_str().unwrap_or("low") {
+                    let severity = vuln["severity"].as_str();
+                    let severity_icon = match severity.unwrap_or("low") {
                         "critical" => "⚠",
                         "high" => "▲",
                         "medium" => "●",
@@ -307,19 +308,16 @@ async fn run_scan(
                     );
                     if let Some(url) = vuln["url"].as_str() {
                         println!(
-                            "- **[{}]({})** ({} {}): {}",
+                            "- **[{}]({url})** ({severity_icon} {}): {}",
                             vuln["id"].as_str().unwrap_or(""),
-                            url,
-                            severity_icon,
-                            vuln["severity"].as_str().unwrap_or("").to_uppercase(),
+                            severity.unwrap_or("").to_uppercase(),
                             vuln["description"].as_str().unwrap_or("")
                         );
                     } else {
                         println!(
-                            "- **{}** ({} {}): {}",
+                            "- **{}** ({severity_icon} {}): {}",
                             vuln["id"].as_str().unwrap_or(""),
-                            severity_icon,
-                            vuln["severity"].as_str().unwrap_or("").to_uppercase(),
+                            severity.unwrap_or("").to_uppercase(),
                             vuln["description"].as_str().unwrap_or("")
                         );
                     }
@@ -330,17 +328,17 @@ async fn run_scan(
         _ => {
             // Summary format
             println!("Vulnerability Scan Results for {}\n", file.display());
-            println!("  ⚠ Critical: {}", critical_count);
-            println!("  ▲ High:     {}", high_count);
-            println!("  ● Medium:   {}", medium_count);
-            println!("  ○ Low:      {}", low_count);
+            println!("  ⚠ Critical: {critical_count}");
+            println!("  ▲ High:     {high_count}");
+            println!("  ● Medium:   {medium_count}");
+            println!("  ○ Low:      {low_count}");
             println!("  ─────────────");
-            println!("  Total:      {}\n", total_vulns);
+            println!("  Total:      {total_vulns}\n");
 
             if total_vulns == 0 {
                 println!("[OK] No vulnerabilities found!");
             } else {
-                println!("⚠ {} vulnerabilities found!", total_vulns);
+                println!("⚠ {total_vulns} vulnerabilities found!");
             }
         }
     }
@@ -362,7 +360,7 @@ async fn run_profile_parse(file: PathBuf, iterations: u32) -> ExitCode {
     let content = match tokio::fs::read_to_string(&file).await {
         Ok(c) => c,
         Err(e) => {
-            eprintln!("Error reading file: {}", e);
+            eprintln!("Error reading file: {e}");
             return ExitCode::FAILURE;
         }
     };
@@ -370,7 +368,7 @@ async fn run_profile_parse(file: PathBuf, iterations: u32) -> ExitCode {
     let file_name = file.file_name().and_then(|n| n.to_str()).unwrap_or("");
 
     eprintln!("Profiling parse operations for: {}", file.display());
-    eprintln!("Iterations: {}", iterations);
+    eprintln!("Iterations: {iterations}");
     eprintln!("File size: {} bytes", content.len());
 
     enum ParserKind {
@@ -405,7 +403,7 @@ async fn run_profile_parse(file: PathBuf, iterations: u32) -> ExitCode {
     } else if file_name.ends_with("Gemfile") {
         ParserKind::Ruby(RubyParser::new())
     } else {
-        eprintln!("Unsupported file type: {}", file_name);
+        eprintln!("Unsupported file type: {file_name}");
         return ExitCode::FAILURE;
     };
 
@@ -428,8 +426,8 @@ async fn run_profile_parse(file: PathBuf, iterations: u32) -> ExitCode {
     let avg = elapsed.checked_div(iterations).unwrap_or_default();
 
     eprintln!("\nProfiling complete!");
-    eprintln!("Total time: {:?}", elapsed);
-    eprintln!("Average per iteration: {:?}", avg);
+    eprintln!("Total time: {elapsed:?}");
+    eprintln!("Average per iteration: {avg:?}");
 
     ExitCode::SUCCESS
 }
@@ -458,9 +456,9 @@ async fn run_profile_registry(
         return ExitCode::FAILURE;
     }
 
-    eprintln!("Profiling registry requests for: {:?}", registry);
-    eprintln!("Packages: {:?}", package_list);
-    eprintln!("Iterations: {}", iterations);
+    eprintln!("Profiling registry requests for: {registry:?}");
+    eprintln!("Packages: {package_list:?}");
+    eprintln!("Iterations: {iterations}");
     if verbose {
         eprintln!("Verbose mode enabled (may affect timing accuracy)");
     }
@@ -468,7 +466,7 @@ async fn run_profile_registry(
     let http_client = match dependi_lsp::registries::http_client::create_shared_client() {
         Ok(client) => client,
         Err(e) => {
-            eprintln!("Error creating HTTP client: {}", e);
+            eprintln!("Error creating HTTP client: {e}");
             return ExitCode::FAILURE;
         }
     };
@@ -506,7 +504,7 @@ async fn run_profile_registry(
 
     for i in 0..iterations {
         if verbose {
-            eprintln!("Iteration {}/{}", i + 1, iterations);
+            eprintln!("Iteration {}/{iterations}", i + 1);
         }
         for pkg in &package_list {
             let result = match &reg {
@@ -523,11 +521,10 @@ async fn run_profile_registry(
             if verbose {
                 match result {
                     Ok(info) => eprintln!(
-                        "  {} -> latest: {:?}",
-                        pkg,
+                        "  {pkg} -> latest: {:?}",
                         info.latest.as_deref().unwrap_or("N/A")
                     ),
-                    Err(e) => eprintln!("  {} -> error: {}", pkg, e),
+                    Err(e) => eprintln!("  {pkg} -> error: {e}"),
                 }
             }
         }
@@ -545,9 +542,9 @@ async fn run_profile_registry(
     let avg = std::time::Duration::from_nanos(avg_nanos as u64);
 
     eprintln!("\nProfiling complete!");
-    eprintln!("Total time: {:?}", elapsed);
-    eprintln!("Total fetches: {}", total_fetches);
-    eprintln!("Average per package fetch: {:?}", avg);
+    eprintln!("Total time: {elapsed:?}");
+    eprintln!("Total fetches: {total_fetches}");
+    eprintln!("Average per package fetch: {avg:?}");
 
     ExitCode::SUCCESS
 }
@@ -569,7 +566,7 @@ async fn run_profile_full(file: PathBuf, iterations: u32, verbose: bool) -> Exit
     let content = match tokio::fs::read_to_string(&file).await {
         Ok(c) => c,
         Err(e) => {
-            eprintln!("Error reading file: {}", e);
+            eprintln!("Error reading file: {e}");
             return ExitCode::FAILURE;
         }
     };
@@ -577,7 +574,7 @@ async fn run_profile_full(file: PathBuf, iterations: u32, verbose: bool) -> Exit
     let file_name = file.file_name().and_then(|n| n.to_str()).unwrap_or("");
 
     eprintln!("Profiling full workflow for: {}", file.display());
-    eprintln!("Iterations: {}", iterations);
+    eprintln!("Iterations: {iterations}");
     if verbose {
         eprintln!("Verbose mode enabled (may affect timing accuracy)");
     }
@@ -585,7 +582,7 @@ async fn run_profile_full(file: PathBuf, iterations: u32, verbose: bool) -> Exit
     let http_client = match dependi_lsp::registries::http_client::create_shared_client() {
         Ok(client) => client,
         Err(e) => {
-            eprintln!("Error creating HTTP client: {}", e);
+            eprintln!("Error creating HTTP client: {e}");
             return ExitCode::FAILURE;
         }
     };
@@ -611,7 +608,7 @@ async fn run_profile_full(file: PathBuf, iterations: u32, verbose: bool) -> Exit
     } else if file_name.ends_with("Gemfile") {
         Ecosystem::RubyGems
     } else {
-        eprintln!("Unsupported file type: {}", file_name);
+        eprintln!("Unsupported file type: {file_name}");
         return ExitCode::FAILURE;
     };
 
@@ -619,7 +616,7 @@ async fn run_profile_full(file: PathBuf, iterations: u32, verbose: bool) -> Exit
 
     for i in 0..iterations {
         if verbose {
-            eprintln!("Iteration {}/{}", i + 1, iterations);
+            eprintln!("Iteration {}/{iterations}", i + 1);
         }
 
         // Step 1: Parse
@@ -644,7 +641,7 @@ async fn run_profile_full(file: PathBuf, iterations: u32, verbose: bool) -> Exit
         }
 
         if verbose {
-            eprintln!("  Parse: {:?} ({} deps)", parse_elapsed, dependencies.len());
+            eprintln!("  Parse: {parse_elapsed:?} ({} deps)", dependencies.len());
         }
 
         // Step 2: Fetch registry info (parallel, limited to first 10 for profiling)
@@ -701,7 +698,7 @@ async fn run_profile_full(file: PathBuf, iterations: u32, verbose: bool) -> Exit
         let _results = join_all(futures).await;
         let registry_elapsed = registry_start.elapsed();
         if verbose {
-            eprintln!("  Registry: {:?}", registry_elapsed);
+            eprintln!("  Registry: {registry_elapsed:?}");
         }
 
         // Step 3: Vulnerability check
@@ -719,7 +716,7 @@ async fn run_profile_full(file: PathBuf, iterations: u32, verbose: bool) -> Exit
         let _ = osv_client.query_batch(&queries).await;
         let vuln_elapsed = vuln_start.elapsed();
         if verbose {
-            eprintln!("  Vulns: {:?}", vuln_elapsed);
+            eprintln!("  Vulns: {vuln_elapsed:?}");
         }
     }
 
@@ -727,8 +724,8 @@ async fn run_profile_full(file: PathBuf, iterations: u32, verbose: bool) -> Exit
     let avg = elapsed.checked_div(iterations).unwrap_or_default();
 
     eprintln!("\nProfiling complete!");
-    eprintln!("Total time: {:?}", elapsed);
-    eprintln!("Average per iteration: {:?}", avg);
+    eprintln!("Total time: {elapsed:?}");
+    eprintln!("Average per iteration: {avg:?}");
 
     ExitCode::SUCCESS
 }

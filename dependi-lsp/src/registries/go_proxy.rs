@@ -175,7 +175,7 @@ impl Registry for GoProxyRegistry {
         // Build repository URL for common hosts
         let repository =
             if module_path.starts_with("github.com/") || module_path.starts_with("gitlab.com/") {
-                Some(format!("https://{}", module_path))
+                Some(format!("https://{module_path}"))
             } else {
                 None
             };
@@ -205,17 +205,15 @@ impl Registry for GoProxyRegistry {
 impl GoProxyRegistry {
     /// Fetch list of available versions
     async fn fetch_versions(&self, encoded_path: &str) -> anyhow::Result<Vec<String>> {
-        let url = format!("{}/{}/@v/list", self.base_url, encoded_path);
+        let url = format!("{}/{encoded_path}/@v/list", self.base_url);
 
         let response = self.client.get(&url).send().await?;
 
-        if !response.status().is_success() {
-            anyhow::bail!(
-                "Failed to fetch versions for {}: {}",
-                encoded_path,
-                response.status()
-            );
-        }
+        anyhow::ensure!(
+            response.status().is_success(),
+            "Failed to fetch versions for {encoded_path}: {}",
+            response.status(),
+        );
 
         let text = response.text().await?;
         let versions: Vec<String> = text.lines().map(|s| s.trim().to_string()).collect();
@@ -225,17 +223,15 @@ impl GoProxyRegistry {
 
     /// Fetch latest version info
     async fn fetch_latest(&self, encoded_path: &str) -> anyhow::Result<VersionInfoResponse> {
-        let url = format!("{}/{}/@latest", self.base_url, encoded_path);
+        let url = format!("{}/{encoded_path}/@latest", self.base_url);
 
         let response = self.client.get(&url).send().await?;
 
-        if !response.status().is_success() {
-            anyhow::bail!(
-                "Failed to fetch latest for {}: {}",
-                encoded_path,
-                response.status()
-            );
-        }
+        anyhow::ensure!(
+            response.status().is_success(),
+            "Failed to fetch latest for {encoded_path}: {}",
+            response.status(),
+        );
 
         let info: VersionInfoResponse = response.json().await?;
         Ok(info)
@@ -247,7 +243,7 @@ impl GoProxyRegistry {
         encoded_path: &str,
         version: &str,
     ) -> Option<VersionInfoResponse> {
-        let url = format!("{}/{}/@v/{}.info", self.base_url, encoded_path, version);
+        let url = format!("{}/{encoded_path}/@v/{version}.info", self.base_url);
 
         let response = self.client.get(&url).send().await.ok()?;
 

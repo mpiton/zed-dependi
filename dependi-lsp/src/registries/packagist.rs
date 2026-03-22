@@ -149,23 +149,18 @@ impl Registry for PackagistRegistry {
     async fn get_version_info(&self, package_name: &str) -> anyhow::Result<VersionInfo> {
         // Package name format: vendor/package
         if !package_name.contains('/') {
-            anyhow::bail!(
-                "Invalid package name: {} (expected vendor/package)",
-                package_name
-            );
+            anyhow::bail!("Invalid package name: {package_name} (expected vendor/package)");
         }
 
-        let url = format!("{}/p2/{}.json", self.base_url, package_name);
+        let url = format!("{}/p2/{package_name}.json", self.base_url);
 
         let response = self.client.get(&url).send().await?;
 
-        if !response.status().is_success() {
-            anyhow::bail!(
-                "Failed to fetch package info for {}: {}",
-                package_name,
-                response.status()
-            );
-        }
+        anyhow::ensure!(
+            response.status().is_success(),
+            "Failed to fetch package info for {package_name}: {}",
+            response.status(),
+        );
 
         let packagist_response: PackagistResponse = response.json().await?;
 

@@ -3,6 +3,8 @@
 //! This module handles detection of dependency file types from URIs
 //! and provides mappings to ecosystems and cache keys.
 
+use core::fmt;
+
 use tower_lsp::lsp_types::Url;
 
 use crate::vulnerabilities::Ecosystem;
@@ -79,22 +81,24 @@ impl FileType {
         }
     }
 
-    /// Return the registry URL for a given package name.
-    pub fn registry_package_url(&self, name: &str) -> Option<String> {
-        match self {
-            FileType::Cargo => Some(format!("https://crates.io/crates/{name}")),
-            FileType::Npm => Some(format!("https://www.npmjs.com/package/{name}")),
-            FileType::Python => Some(format!("https://pypi.org/project/{name}")),
-            FileType::Go => Some(format!("https://pkg.go.dev/{name}")),
-            FileType::Php => Some(format!("https://packagist.org/packages/{name}")),
-            FileType::Dart => Some(format!("https://pub.dev/packages/{name}")),
-            FileType::Ruby => Some(format!("https://rubygems.org/gems/{name}")),
-            FileType::Csharp => Some(format!("https://www.nuget.org/packages/{name}")),
-        }
+    /// Returns an <code>[fmt::Display] + [fmt::Debug]</code> implementation
+    /// which formats the given package `name` as a registry URL.
+    #[must_use = "returns a type implementing Display and Debug, which does not have any effects unless they are used"]
+    pub fn fmt_registry_package_url(self, name: &str) -> impl fmt::Display + fmt::Debug {
+        fmt::from_fn(move |f| match self {
+            FileType::Cargo => write!(f, "https://crates.io/crates/{name}"),
+            FileType::Npm => write!(f, "https://www.npmjs.com/package/{name}"),
+            FileType::Python => write!(f, "https://pypi.org/project/{name}"),
+            FileType::Go => write!(f, "https://pkg.go.dev/{name}"),
+            FileType::Php => write!(f, "https://packagist.org/packages/{name}"),
+            FileType::Dart => write!(f, "https://pub.dev/packages/{name}"),
+            FileType::Ruby => write!(f, "https://rubygems.org/gems/{name}"),
+            FileType::Csharp => write!(f, "https://www.nuget.org/packages/{name}"),
+        })
     }
 
     /// Return a human-readable registry name for tooltips.
-    pub fn registry_name(&self) -> &str {
+    pub fn registry_name(self) -> &'static str {
         match self {
             FileType::Cargo => "crates.io",
             FileType::Npm => "npm",
@@ -107,27 +111,45 @@ impl FileType {
         }
     }
 
-    /// Generate a cache key for a package.
+    /// Generate a cache key for the given `package_name`.
     ///
     /// The cache key includes the registry prefix (e.g., "crates:", "npm:")
     /// to avoid collisions between packages with the same name in different ecosystems.
+    #[inline]
+    #[must_use]
     pub fn cache_key(self, package_name: &str) -> String {
-        match self {
-            FileType::Cargo => format!("crates:{}", package_name),
-            FileType::Npm => format!("npm:{}", package_name),
-            FileType::Python => format!("pypi:{}", package_name),
-            FileType::Go => format!("go:{}", package_name),
-            FileType::Php => format!("packagist:{}", package_name),
-            FileType::Dart => format!("pub:{}", package_name),
-            FileType::Csharp => format!("nuget:{}", package_name),
-            FileType::Ruby => format!("rubygems:{}", package_name),
-        }
+        self.fmt_cache_key(package_name).to_string()
+    }
+
+    /// Returns an <code>[fmt::Display] + [fmt::Debug]</code> implementation
+    /// which produces a cache key for the given `package_name`.
+    ///
+    /// The cache key includes the registry prefix (e.g., "crates:", "npm:")
+    /// to avoid collisions between packages with the same name in different ecosystems.
+    #[must_use = "returns a type implementing Display and Debug, which does not have any effects unless they are used"]
+    pub fn fmt_cache_key(self, package_name: &str) -> impl fmt::Display + fmt::Debug {
+        fmt::from_fn(move |f| match self {
+            FileType::Cargo => write!(f, "crates:{package_name}"),
+            FileType::Npm => write!(f, "npm:{package_name}"),
+            FileType::Python => write!(f, "pypi:{package_name}"),
+            FileType::Go => write!(f, "go:{package_name}"),
+            FileType::Php => write!(f, "packagist:{package_name}"),
+            FileType::Dart => write!(f, "pub:{package_name}"),
+            FileType::Csharp => write!(f, "nuget:{package_name}"),
+            FileType::Ruby => write!(f, "rubygems:{package_name}"),
+        })
     }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    impl FileType {
+        fn registry_package_url(self, name: &str) -> String {
+            self.fmt_registry_package_url(name).to_string()
+        }
+    }
 
     #[test]
     fn test_detect_cargo() {
@@ -243,35 +265,35 @@ mod tests {
     fn test_registry_package_url() {
         assert_eq!(
             FileType::Dart.registry_package_url("http"),
-            Some("https://pub.dev/packages/http".to_string())
+            "https://pub.dev/packages/http"
         );
         assert_eq!(
             FileType::Cargo.registry_package_url("serde"),
-            Some("https://crates.io/crates/serde".to_string())
+            "https://crates.io/crates/serde"
         );
         assert_eq!(
             FileType::Npm.registry_package_url("express"),
-            Some("https://www.npmjs.com/package/express".to_string())
+            "https://www.npmjs.com/package/express"
         );
         assert_eq!(
             FileType::Python.registry_package_url("requests"),
-            Some("https://pypi.org/project/requests".to_string())
+            "https://pypi.org/project/requests"
         );
         assert_eq!(
             FileType::Go.registry_package_url("github.com/gin-gonic/gin"),
-            Some("https://pkg.go.dev/github.com/gin-gonic/gin".to_string())
+            "https://pkg.go.dev/github.com/gin-gonic/gin"
         );
         assert_eq!(
             FileType::Php.registry_package_url("laravel/framework"),
-            Some("https://packagist.org/packages/laravel/framework".to_string())
+            "https://packagist.org/packages/laravel/framework"
         );
         assert_eq!(
             FileType::Ruby.registry_package_url("rails"),
-            Some("https://rubygems.org/gems/rails".to_string())
+            "https://rubygems.org/gems/rails"
         );
         assert_eq!(
             FileType::Csharp.registry_package_url("Newtonsoft.Json"),
-            Some("https://www.nuget.org/packages/Newtonsoft.Json".to_string())
+            "https://www.nuget.org/packages/Newtonsoft.Json"
         );
     }
 

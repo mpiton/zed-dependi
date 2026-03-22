@@ -196,14 +196,14 @@ fn parse_quoted_string(bytes: &[u8], start: usize) -> Option<(String, usize)> {
 /// Find the position of a quoted string in a line
 fn find_quoted_position(line: &str, needle: &str) -> Option<(u32, u32)> {
     // Look for the string within single quotes first (more common in Ruby)
-    let single_quoted = format!("'{}'", needle);
+    let single_quoted = format!("'{needle}'");
     if let Some(pos) = line.find(&single_quoted) {
         let start = (pos + 1) as u32;
         return Some((start, start + needle.len() as u32));
     }
 
     // Try double quotes
-    let double_quoted = format!("\"{}\"", needle);
+    let double_quoted = format!(r#""{needle}""#);
     if let Some(pos) = line.find(&double_quoted) {
         let start = (pos + 1) as u32;
         return Some((start, start + needle.len() as u32));

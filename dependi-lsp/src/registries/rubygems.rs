@@ -150,21 +150,19 @@ impl Registry for RubyGemsRegistry {
 
     async fn get_version_info(&self, package_name: &str) -> anyhow::Result<VersionInfo> {
         // Fetch gem info (contains latest version)
-        let gem_url = format!("{}/gems/{}.json", self.base_url, package_name);
+        let gem_url = format!("{}/gems/{package_name}.json", self.base_url);
         let gem_response = self.client.get(&gem_url).send().await?;
 
-        if !gem_response.status().is_success() {
-            anyhow::bail!(
-                "Failed to fetch gem info for {}: {}",
-                package_name,
-                gem_response.status()
-            );
-        }
+        anyhow::ensure!(
+            gem_response.status().is_success(),
+            "Failed to fetch gem info for {package_name}: {}",
+            gem_response.status(),
+        );
 
         let gem: GemResponse = gem_response.json().await?;
 
         // Fetch all versions with dates
-        let versions_url = format!("{}/versions/{}.json", self.base_url, package_name);
+        let versions_url = format!("{}/versions/{package_name}.json", self.base_url);
         let (versions, release_dates) = match self.client.get(&versions_url).send().await {
             Ok(response) if response.status().is_success() => {
                 let version_list: Vec<VersionResponse> = response.json().await.unwrap_or_default();
@@ -225,7 +223,7 @@ mod tests {
     fn test_rubygems_url_format() {
         let base_url = "https://rubygems.org/api/v1";
         let name = "rails";
-        let url = format!("{}/gems/{}.json", base_url, name);
+        let url = format!("{base_url}/gems/{name}.json");
         assert_eq!(url, "https://rubygems.org/api/v1/gems/rails.json");
     }
 }

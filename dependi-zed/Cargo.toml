@@ -14,3 +14,7 @@ crate-type = ["cdylib"]
 zed_extension_api = "0.7"
 sha2 = "0.10"
 hex = "0.4"
+
+[lints.clippy]
+uninlined_format_args = "warn"
+unnecessary_debug_formatting = "warn"
