@@ -1038,18 +1038,17 @@ impl LanguageServer for DependiBackend {
         if !config.registries.cargo.registries.is_empty() {
             // Read tokens from ~/.cargo/credentials.toml (fallback auth source)
             let credential_tokens = {
-                let cargo_home = std::env::var("CARGO_HOME").ok().or_else(|| {
-                    dirs::home_dir().map(|h| h.join(".cargo").to_string_lossy().to_string())
-                });
+                let cargo_home = std::env::var_os("CARGO_HOME")
+                    .map(PathBuf::from)
+                    .or_else(|| dirs::home_dir().map(|h| h.join(".cargo")));
 
                 let mut tokens = std::collections::HashMap::new();
                 if let Some(cargo_home) = cargo_home {
-                    let cred_path = std::path::PathBuf::from(&cargo_home).join("credentials.toml");
-                    let alt_path = std::path::PathBuf::from(&cargo_home).join("credentials");
-
+                    let cred_path = cargo_home.join("credentials.toml");
                     let content = if let Ok(c) = tokio::fs::read_to_string(&cred_path).await {
                         c
                     } else {
+                        let alt_path = cargo_home.join("credentials");
                         tokio::fs::read_to_string(&alt_path)
                             .await
                             .unwrap_or_default()
