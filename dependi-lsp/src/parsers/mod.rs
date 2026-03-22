@@ -53,6 +53,7 @@ pub mod go;
 pub mod go_sum;
 pub mod npm;
 pub mod npm_lock;
+pub mod packages_lock_json;
 pub mod php;
 pub mod pubspec_lock;
 pub mod python;
