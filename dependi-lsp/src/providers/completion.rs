@@ -119,27 +119,25 @@ pub fn get_completions(
 
             // Build documentation with more details
             let documentation = {
-                let doc = fmt::from_fn(|f| {
-                    if is_latest {
-                        write!(f, "**Latest stable version**\n\n")?;
-                    }
-                    if let Some(dt) = release_date {
-                        let date_str = dt.format("%Y-%m-%d");
-                        let age = fmt_release_age(dt);
-                        write!(f, "Released: {date_str} ({age})")?;
-                    }
-                    Ok(())
-                })
-                .to_string();
-
-                if doc.is_empty() {
-                    None
-                } else {
-                    Some(Documentation::MarkupContent(MarkupContent {
+                let has_content = is_latest || release_date.is_some();
+                has_content.then(|| {
+                    let doc = fmt::from_fn(|f| {
+                        if is_latest {
+                            write!(f, "**Latest stable version**\n\n")?;
+                        }
+                        if let Some(dt) = release_date {
+                            let date_str = dt.format("%Y-%m-%d");
+                            let age = fmt_release_age(dt);
+                            write!(f, "Released: {date_str} ({age})")?;
+                        }
+                        Ok(())
+                    })
+                    .to_string();
+                    Documentation::MarkupContent(MarkupContent {
                         kind: MarkupKind::Markdown,
                         value: doc,
-                    }))
-                }
+                    })
+                })
             };
 
             CompletionItem {
