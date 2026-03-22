@@ -30,12 +30,50 @@ const LOCKFILE_CANDIDATES: &[(&str, PythonLockfileType)] = &[
     ("Pipfile.lock", PythonLockfileType::PipfileLock),
 ];
 
+/// Detect which Python tool manages the project by inspecting pyproject.toml content.
+///
+/// Looks for `[tool.poetry]`, `[tool.uv]`, or `[tool.pdm]` section headers to determine
+/// which lockfile should be preferred. Returns `None` for requirements.txt or when no
+/// tool-specific section is found (falls back to filename-priority discovery).
+pub fn detect_python_tool(manifest_content: &str) -> Option<PythonLockfileType> {
+    for line in manifest_content.lines() {
+        let trimmed = line.trim();
+        if is_tool_section(trimmed, "poetry") {
+            return Some(PythonLockfileType::PoetryLock);
+        }
+        if is_tool_section(trimmed, "uv") {
+            return Some(PythonLockfileType::UvLock);
+        }
+        if is_tool_section(trimmed, "pdm") {
+            return Some(PythonLockfileType::PdmLock);
+        }
+    }
+    None
+}
+
+/// Check if a line is a `[tool.<name>]` or `[tool.<name>.*]` TOML section header.
+fn is_tool_section(line: &str, tool: &str) -> bool {
+    let Some(after) = line.strip_prefix("[tool.") else {
+        return false;
+    };
+    let Some(after_tool) = after.strip_prefix(tool) else {
+        return false;
+    };
+    after_tool.starts_with(']') || after_tool.starts_with('.')
+}
+
 /// Find the Python lockfile by walking up from a manifest path (pyproject.toml or requirements.txt).
 ///
-/// Checks for lockfiles in priority order: poetry.lock > uv.lock > pdm.lock > Pipfile.lock.
+/// When `preferred` is `Some`, that lockfile type is checked first at each directory level,
+/// then the remaining candidates are checked in default priority order. This allows
+/// manifest-derived tool detection to override the static priority list.
+///
 /// Uses async I/O to avoid blocking the Tokio executor on slow or networked filesystems.
 /// Stops after 10 levels to prevent infinite traversal on unusual file systems.
-pub async fn find_python_lockfile(manifest_path: &Path) -> Option<(PathBuf, PythonLockfileType)> {
+pub async fn find_python_lockfile(
+    manifest_path: &Path,
+    preferred: Option<PythonLockfileType>,
+) -> Option<(PathBuf, PythonLockfileType)> {
     let start_dir = manifest_path.parent()?;
 
     let mut current = start_dir.to_path_buf();
@@ -43,7 +81,24 @@ pub async fn find_python_lockfile(manifest_path: &Path) -> Option<(PathBuf, Pyth
     const MAX_DEPTH: usize = 10;
 
     loop {
+        // Check preferred lockfile first at this directory level
+        if let Some(pref) = preferred {
+            for &(filename, lockfile_type) in LOCKFILE_CANDIDATES {
+                if lockfile_type == pref {
+                    let candidate = current.join(filename);
+                    if tokio::fs::try_exists(&candidate).await.unwrap_or(false) {
+                        return Some((candidate, lockfile_type));
+                    }
+                    break;
+                }
+            }
+        }
+
+        // Then check all other candidates in priority order
         for &(filename, lockfile_type) in LOCKFILE_CANDIDATES {
+            if preferred.is_some_and(|p| p == lockfile_type) {
+                continue; // Already checked above
+            }
             let candidate = current.join(filename);
             if tokio::fs::try_exists(&candidate).await.unwrap_or(false) {
                 return Some((candidate, lockfile_type));
@@ -190,6 +245,69 @@ fn parse_pipfile_lock(content: &str) -> HashMap<String, String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    // -- detect_python_tool ---------------------------------------------------
+
+    #[test]
+    fn detect_poetry_project() {
+        let content = r#"
+[tool.poetry]
+name = "my-app"
+version = "0.1.0"
+
+[tool.poetry.dependencies]
+python = "^3.11"
+requests = "^2.31"
+"#;
+        assert_eq!(detect_python_tool(content), Some(PythonLockfileType::PoetryLock));
+    }
+
+    #[test]
+    fn detect_poetry_nested_section() {
+        let content = "[tool.poetry.dependencies]\nrequests = \"^2.31\"\n";
+        assert_eq!(detect_python_tool(content), Some(PythonLockfileType::PoetryLock));
+    }
+
+    #[test]
+    fn detect_uv_project() {
+        let content = r#"
+[project]
+name = "my-app"
+
+[tool.uv]
+dev-dependencies = ["pytest"]
+"#;
+        assert_eq!(detect_python_tool(content), Some(PythonLockfileType::UvLock));
+    }
+
+    #[test]
+    fn detect_pdm_project() {
+        let content = "[tool.pdm]\n";
+        assert_eq!(detect_python_tool(content), Some(PythonLockfileType::PdmLock));
+    }
+
+    #[test]
+    fn detect_no_tool_section() {
+        let content = r#"
+[project]
+name = "my-app"
+dependencies = ["requests>=2.31"]
+"#;
+        assert_eq!(detect_python_tool(content), None);
+    }
+
+    #[test]
+    fn detect_requirements_txt_returns_none() {
+        let content = "requests>=2.31.0\nflask==3.0.2\n";
+        assert_eq!(detect_python_tool(content), None);
+    }
+
+    #[test]
+    fn detect_rejects_similar_tool_names() {
+        // [tool.poetryx] should NOT match poetry
+        let content = "[tool.poetryx]\n";
+        assert_eq!(detect_python_tool(content), None);
+    }
 
     // -- normalize_python_name ------------------------------------------------
 

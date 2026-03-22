@@ -183,8 +183,10 @@ impl ProcessingContext {
         // Resolve versions from lockfile for Python dependencies
         if file_type == FileType::Python {
             if let Ok(manifest_path) = uri.to_file_path() {
+                let preferred = crate::parsers::python_lock::detect_python_tool(content);
                 if let Some((lock_path, lockfile_type)) =
-                    crate::parsers::python_lock::find_python_lockfile(&manifest_path).await
+                    crate::parsers::python_lock::find_python_lockfile(&manifest_path, preferred)
+                        .await
                 {
                     match tokio::fs::read_to_string(&lock_path).await {
                         Ok(lock_content) => {
