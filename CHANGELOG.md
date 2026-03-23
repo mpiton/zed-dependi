@@ -7,6 +7,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Security
+
+- Update `rustls-webpki` 0.103.9 → 0.103.10 in fuzz lockfile (fixes certificate revocation enforcement bug, [GHSA-pwjx-qhcg-rvj4](https://github.com/rustls/webpki/security/advisories/GHSA-pwjx-qhcg-rvj4))
+- Update `aws-lc-sys` 0.38.0 → 0.39.0 in fuzz lockfile (fixes CRL Distribution Point scope check and X.509 Name Constraints bypass)
+
+### Changed
+
+- Update `toml` 1.0.6 → 1.0.7
+- Update transitive dependencies via `cargo update`
+
 ### Added
 
 - Add Node.js lockfile version resolution to eliminate false-positive "update available" warnings for `package.json` dependencies ([#186](https://github.com/mpiton/zed-dependi/issues/186))
