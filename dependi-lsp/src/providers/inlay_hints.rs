@@ -4,6 +4,7 @@ use core::fmt::{self, Write};
 
 use tower_lsp::lsp_types::{InlayHint, InlayHintKind, InlayHintLabel, Position};
 
+use crate::file_types::FileType;
 use crate::registries::{VersionInfo, VulnerabilitySeverity};
 use crate::utils::fmt_truncate_string;
 use crate::{parsers::Dependency, registries::Vulnerability};
@@ -20,7 +21,11 @@ pub enum VersionStatus {
 }
 
 /// Generate an inlay hint for a dependency
-pub fn create_inlay_hint(dep: &Dependency, version_info: Option<&VersionInfo>) -> InlayHint {
+pub fn create_inlay_hint(
+    dep: &Dependency,
+    version_info: Option<&VersionInfo>,
+    file_type: FileType,
+) -> InlayHint {
     let status = match version_info {
         Some(info) => compare_versions(dep.effective_version(), info),
         None => VersionStatus::Unknown,
@@ -37,7 +42,8 @@ pub fn create_inlay_hint(dep: &Dependency, version_info: Option<&VersionInfo>) -
         tracing::debug!("Package {} {} is deprecated", dep.name, dep.version);
     }
 
-    let (label, tooltip) = create_hint_label_and_tooltip(&status, vuln_count, dep, version_info);
+    let (label, tooltip) =
+        create_hint_label_and_tooltip(&status, vuln_count, dep, version_info, file_type);
 
     InlayHint {
         position: Position {
@@ -60,12 +66,12 @@ fn create_hint_label_and_tooltip(
     vuln_count: usize,
     dep: &Dependency,
     version_info: Option<&VersionInfo>,
+    file_type: FileType,
 ) -> (String, Option<String>) {
     let dep_name = &*dep.name;
-    let dep_version = &*dep.version;
 
     // Handle local dependencies first (highest priority - no registry lookup needed)
-    if is_local_dependency(dep_version) {
+    if is_local_dependency(&dep.version) {
         let tooltip = format!(
             "**Local Dependency**\n\n\
             \"{dep_name}\" is a local/path dependency.\n\n\
@@ -79,6 +85,7 @@ fn create_hint_label_and_tooltip(
         return ("→ Local".to_string(), Some(tooltip));
     }
 
+    let dep_version = dep.effective_version();
     tracing::debug!("Not a local dependency: {dep_name} with version '{dep_version}'",);
 
     // Handle yanked versions (highest priority - critical issue)
@@ -86,7 +93,7 @@ fn create_hint_label_and_tooltip(
         && info.is_version_yanked(dep_version)
     {
         let yanked_label = "⊘ Yanked";
-        let yanked_tooltip = fmt_yanked_tooltip(dep, info);
+        let yanked_tooltip = fmt_yanked_tooltip(dep, info, file_type);
 
         return match status {
             VersionStatus::UpdateAvailable(latest) => {
@@ -269,16 +276,21 @@ fn fmt_deprecation_tooltip(dep: &Dependency, info: &VersionInfo) -> impl fmt::Di
 
 /// Format yanked version warning for tooltip
 #[must_use = "returns a type implementing Display and Debug, which does not have any effects unless they are used"]
-fn fmt_yanked_tooltip(dep: &Dependency, info: &VersionInfo) -> impl fmt::Display + fmt::Debug {
+fn fmt_yanked_tooltip(
+    dep: &Dependency,
+    info: &VersionInfo,
+    file_type: FileType,
+) -> impl fmt::Display + fmt::Debug {
     let dep_name = &*dep.name;
-    let dep_version = &*dep.version;
+    let dep_version = dep.effective_version();
 
     fmt::from_fn(move |f| {
+        let registry = file_type.registry_name();
         writeln!(
             f,
             "**⊘ YANKED VERSION**\n\
              \n\
-             The version \"{dep_version}\" of \"{dep_name}\" has been yanked from crates.io.\n\
+             The version \"{dep_version}\" of \"{dep_name}\" has been yanked from {registry}.\n\
              \n\
              **Why was it yanked?**\n\
              A yanked version typically has:\n\
@@ -300,7 +312,8 @@ fn fmt_yanked_tooltip(dep: &Dependency, info: &VersionInfo) -> impl fmt::Display
 
         writeln!(
             f,
-            "• View on crates.io: https://crates.io/crates/{dep_name}",
+            "• View on {registry}: {}",
+            file_type.fmt_registry_package_url(dep_name),
         )
     })
 }
@@ -481,6 +494,7 @@ pub fn normalize_version(version: &str) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::file_types::FileType;
     use crate::registries::Vulnerability;
 
     fn make_version_info(latest: &str) -> VersionInfo {
@@ -693,7 +707,7 @@ mod tests {
     fn test_create_inlay_hint_up_to_date() {
         let dep = make_test_dep("serde", "1.0.0");
         let info = make_version_info("1.0.0");
-        let hint = create_inlay_hint(&dep, Some(&info));
+        let hint = create_inlay_hint(&dep, Some(&info), FileType::Cargo);
 
         assert_eq!(hint.position.line, 5);
         match hint.label {
@@ -706,7 +720,7 @@ mod tests {
     fn test_create_inlay_hint_update_available() {
         let dep = make_test_dep("serde", "1.0.0");
         let info = make_version_info("2.0.0");
-        let hint = create_inlay_hint(&dep, Some(&info));
+        let hint = create_inlay_hint(&dep, Some(&info), FileType::Cargo);
 
         match hint.label {
             InlayHintLabel::String(s) => {
@@ -727,7 +741,7 @@ mod tests {
             homepage: Some("https://example.com".to_string()),
             ..Default::default()
         };
-        let hint = create_inlay_hint(&dep, Some(&info));
+        let hint = create_inlay_hint(&dep, Some(&info), FileType::Cargo);
 
         match hint.label {
             InlayHintLabel::String(s) => {
@@ -746,7 +760,7 @@ mod tests {
             latest: Some("2.0.0".to_string()),
             ..Default::default()
         };
-        let hint = create_inlay_hint(&dep, Some(&info));
+        let hint = create_inlay_hint(&dep, Some(&info), FileType::Cargo);
 
         match hint.label {
             InlayHintLabel::String(s) => {
@@ -766,7 +780,7 @@ mod tests {
             latest: Some("1.0.0".to_string()),
             ..Default::default()
         };
-        let hint = create_inlay_hint(&dep, Some(&info));
+        let hint = create_inlay_hint(&dep, Some(&info), FileType::Cargo);
 
         match hint.label {
             InlayHintLabel::String(s) => {
@@ -791,7 +805,7 @@ mod tests {
             }],
             ..Default::default()
         };
-        let hint = create_inlay_hint(&dep, Some(&info));
+        let hint = create_inlay_hint(&dep, Some(&info), FileType::Cargo);
 
         match hint.label {
             InlayHintLabel::String(s) => {
@@ -826,7 +840,7 @@ mod tests {
             ],
             ..Default::default()
         };
-        let hint = create_inlay_hint(&dep, Some(&info));
+        let hint = create_inlay_hint(&dep, Some(&info), FileType::Cargo);
 
         match hint.label {
             InlayHintLabel::String(s) => {
@@ -860,7 +874,7 @@ mod tests {
             ],
             ..Default::default()
         };
-        let hint = create_inlay_hint(&dep, Some(&info));
+        let hint = create_inlay_hint(&dep, Some(&info), FileType::Cargo);
 
         match hint.label {
             InlayHintLabel::String(s) => {
@@ -891,7 +905,7 @@ mod tests {
             }],
             ..Default::default()
         };
-        let hint = create_inlay_hint(&dep, Some(&info));
+        let hint = create_inlay_hint(&dep, Some(&info), FileType::Cargo);
 
         match hint.label {
             InlayHintLabel::String(s) => {
@@ -910,7 +924,7 @@ mod tests {
             latest: Some("2.0.0".to_string()),
             ..Default::default()
         };
-        let hint = create_inlay_hint(&dep, Some(&info));
+        let hint = create_inlay_hint(&dep, Some(&info), FileType::Cargo);
 
         match hint.label {
             InlayHintLabel::String(s) => {
@@ -928,7 +942,7 @@ mod tests {
             latest: Some("2.0.0".to_string()),
             ..Default::default()
         };
-        let hint = create_inlay_hint(&dep, Some(&info));
+        let hint = create_inlay_hint(&dep, Some(&info), FileType::Cargo);
 
         match hint.label {
             InlayHintLabel::String(s) => {
@@ -948,7 +962,7 @@ mod tests {
             latest: Some("1.0.0".to_string()),
             ..Default::default()
         };
-        let hint = create_inlay_hint(&dep, Some(&info));
+        let hint = create_inlay_hint(&dep, Some(&info), FileType::Cargo);
 
         match hint.label {
             InlayHintLabel::String(s) => {
@@ -968,7 +982,7 @@ mod tests {
             latest: Some("2.0.0".to_string()),
             ..Default::default()
         };
-        let hint = create_inlay_hint(&dep, Some(&info));
+        let hint = create_inlay_hint(&dep, Some(&info), FileType::Cargo);
 
         match hint.label {
             InlayHintLabel::String(s) => {
@@ -993,7 +1007,7 @@ mod tests {
             latest: Some("2.0.0".to_string()),
             ..Default::default()
         };
-        let hint = create_inlay_hint(&dep, Some(&info));
+        let hint = create_inlay_hint(&dep, Some(&info), FileType::Cargo);
 
         match hint.label {
             InlayHintLabel::String(s) => {
@@ -1108,7 +1122,7 @@ mod tests {
     #[test]
     fn test_unknown_status_local_dependency() {
         let dep = make_test_dep("my-local-lib", "./my-local-lib");
-        let hint = create_inlay_hint(&dep, None);
+        let hint = create_inlay_hint(&dep, None, FileType::Cargo);
 
         match hint.label {
             InlayHintLabel::String(s) => {
@@ -1131,7 +1145,7 @@ mod tests {
     #[test]
     fn test_unknown_status_network_error() {
         let dep = make_test_dep("unknown-package", "1.0.0");
-        let hint = create_inlay_hint(&dep, None);
+        let hint = create_inlay_hint(&dep, None, FileType::Cargo);
 
         match hint.label {
             InlayHintLabel::String(s) => {
@@ -1153,7 +1167,7 @@ mod tests {
     #[test]
     fn test_unknown_status_git_dependency() {
         let dep = make_test_dep("git-dep", "git@github.com:user/repo.git");
-        let hint = create_inlay_hint(&dep, None);
+        let hint = create_inlay_hint(&dep, None, FileType::Cargo);
 
         match hint.label {
             InlayHintLabel::String(s) => {
@@ -1247,7 +1261,7 @@ mod tests {
         // End-to-end: create_inlay_hint should show UpToDate when resolved matches latest
         let dep = make_test_dep_with_resolved("bon", "3.9", "3.9.1");
         let info = make_version_info("3.9.1");
-        let hint = create_inlay_hint(&dep, Some(&info));
+        let hint = create_inlay_hint(&dep, Some(&info), FileType::Cargo);
         match hint.label {
             InlayHintLabel::String(s) => assert!(
                 s.contains("✓"),
@@ -1262,7 +1276,7 @@ mod tests {
         // Without resolved_version, minimal syntax shows update available (original behavior)
         let dep = make_test_dep("bon", "3.9");
         let info = make_version_info("3.9.1");
-        let hint = create_inlay_hint(&dep, Some(&info));
+        let hint = create_inlay_hint(&dep, Some(&info), FileType::Cargo);
         match hint.label {
             InlayHintLabel::String(s) => assert!(
                 s.contains("->"),

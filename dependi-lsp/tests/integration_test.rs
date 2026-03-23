@@ -1,6 +1,7 @@
 //! Integration tests for dependi-lsp
 
 use dependi_lsp::cache::{MemoryCache, ReadCache, WriteCache};
+use dependi_lsp::file_types::FileType;
 use dependi_lsp::parsers::Parser;
 use dependi_lsp::parsers::cargo::CargoParser;
 use dependi_lsp::parsers::npm::NpmParser;
@@ -184,7 +185,7 @@ fn test_inlay_hint_generation() {
         ..Default::default()
     };
 
-    let hint = create_inlay_hint(&dep_up_to_date, Some(&info_up_to_date));
+    let hint = create_inlay_hint(&dep_up_to_date, Some(&info_up_to_date), FileType::Cargo);
     match hint.label {
         tower_lsp::lsp_types::InlayHintLabel::String(s) => {
             assert!(s.contains("✓"), "Expected checkmark for up-to-date dep");
@@ -212,7 +213,7 @@ fn test_inlay_hint_generation() {
         ..Default::default()
     };
 
-    let hint = create_inlay_hint(&dep_outdated, Some(&info_outdated));
+    let hint = create_inlay_hint(&dep_outdated, Some(&info_outdated), FileType::Cargo);
     match hint.label {
         tower_lsp::lsp_types::InlayHintLabel::String(s) => {
             assert!(s.contains("->"), "Expected arrow for outdated dep");
@@ -222,7 +223,7 @@ fn test_inlay_hint_generation() {
     }
 
     // Unknown version (no info) - shows ? Unknown with troubleshooting tooltip
-    let hint = create_inlay_hint(&dep_outdated, None);
+    let hint = create_inlay_hint(&dep_outdated, None, FileType::Cargo);
     match hint.label {
         tower_lsp::lsp_types::InlayHintLabel::String(s) => {
             assert!(

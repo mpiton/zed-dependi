@@ -34,6 +34,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Use async I/O for lockfile discovery to avoid blocking the Tokio executor
 - Fix GLIBC compatibility on older Linux systems (Ubuntu 22.04, WSL) by targeting GLIBC 2.17 with cargo-zigbuild ([#198](https://github.com/mpiton/zed-dependi/issues/198))
 - Use `env::var_os` instead of `env::var` for `CARGO_HOME` to avoid failures on non-UTF-8 paths
+- Fix hardcoded "crates.io" in yanked version diagnostics — now uses the correct registry name/URL for all ecosystems ([#201](https://github.com/mpiton/zed-dependi/issues/201))
+- Fix future timestamps rendering as negative age (e.g., "-5 hours ago") due to clock skew — now shows "just now" ([#201](https://github.com/mpiton/zed-dependi/issues/201))
+- Fix hover panel showing manifest version specifier instead of resolved lockfile version ([#201](https://github.com/mpiton/zed-dependi/issues/201))
+- Fix `fmt_truncate_string` emitting "..." (3 chars) even when `max_chars` < 3 ([#201](https://github.com/mpiton/zed-dependi/issues/201))
 
 ### Changed
 

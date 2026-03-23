@@ -31,10 +31,10 @@ pub fn fmt_release_age(released_at: DateTime<Utc>) -> impl fmt::Display + fmt::D
             })
         };
 
-        let days = duration.num_days();
-        if days < 0 {
+        if duration.num_seconds() <= 0 {
             return f.write_str("just now");
         }
+        let days = duration.num_days();
 
         if days == 0 {
             let hours = duration.num_hours();
@@ -245,6 +245,17 @@ mod tests {
         let now = Utc::now();
         let age = format_release_age(now);
         assert_eq!(age, "just now");
+    }
+
+    #[test]
+    fn test_format_release_age_future() {
+        // Simulate clock skew: release date 5 hours in the future
+        let future = Utc::now() + Duration::hours(5);
+        assert_eq!(format_release_age(future), "just now");
+
+        // Also test small future offsets
+        let near_future = Utc::now() + Duration::minutes(10);
+        assert_eq!(format_release_age(near_future), "just now");
     }
 
     #[test]

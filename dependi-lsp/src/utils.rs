@@ -25,6 +25,12 @@ pub fn fmt_truncate_string(s: &str, max_chars: usize) -> impl fmt::Display + fmt
             return f.write_str(s);
         }
 
+        // When max_chars < 3, we can't fit the ellipsis ("...")
+        // so just truncate to max_chars characters
+        if max_chars < 3 {
+            return s.chars().take(max_chars).try_for_each(|c| f.write_char(c));
+        }
+
         let keep_chars = max_chars.saturating_sub(3);
         s.chars()
             .take(keep_chars)
@@ -56,10 +62,17 @@ mod tests {
 
     #[test]
     fn test_edge_cases() {
-        assert_eq!(truncate_string("hello", 3), "...");
+        assert_eq!(truncate_string("hello", 3), "..."); // Exactly 3: ellipsis fits
         assert_eq!(truncate_string("hello", 4), "h...");
-        assert_eq!(truncate_string("ab", 1), "...");
-        assert_eq!(truncate_string("a", 0), "...");
+    }
+
+    #[test]
+    fn test_small_max_chars() {
+        // max_chars < 3: truncate without ellipsis
+        assert_eq!(truncate_string("hello", 2), "he");
+        assert_eq!(truncate_string("ab", 1), "a");
+        assert_eq!(truncate_string("a", 0), "");
+        assert_eq!(truncate_string("hello world", 1), "h");
     }
 
     #[test]

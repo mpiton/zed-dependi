@@ -539,6 +539,7 @@ impl ProcessingContext {
                         .unwrap_or_else(|| file_type.cache_key(name))
                 },
                 severity_filter,
+                file_type,
             );
 
             self.client
@@ -1308,7 +1309,7 @@ impl LanguageServer for DependiBackend {
             .filter_map(|dep| {
                 let cache_key = dep_cache_key(dep, file_type);
                 let version_info = self.version_cache.get(&cache_key);
-                let hint = create_inlay_hint(dep, version_info.as_ref());
+                let hint = create_inlay_hint(dep, version_info.as_ref(), file_type);
 
                 // Optionally filter out up-to-date hints
                 if !show_up_to_date {
@@ -1363,7 +1364,7 @@ impl LanguageServer for DependiBackend {
             return Ok(None);
         };
         let dep_name = &*dep.name;
-        let dep_version = &*dep.version;
+        let dep_version = dep.effective_version();
 
         // Drop the lock before async call
         drop(doc);
@@ -1383,7 +1384,7 @@ impl LanguageServer for DependiBackend {
 
                 // Current version with release date
                 let current_date_str = info
-                    .get_release_date(&dep.version)
+                    .get_release_date(dep_version)
                     .map(|dt| format!(" ({})", fmt_release_age(dt)))
                     .unwrap_or_default();
                 writeln!(f, "**Current:** {dep_version}{current_date_str}")?;
