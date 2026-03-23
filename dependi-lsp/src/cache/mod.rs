@@ -59,9 +59,6 @@ pub trait WriteCache: ReadCache {
     fn clear(&self);
 }
 
-#[deprecated(since = "0.1.0", note = "Use ReadCache instead")]
-pub use ReadCache as Cache;
-
 impl<T: ReadCache> ReadCache for Arc<T> {
     fn get(&self, key: &str) -> Option<VersionInfo> {
         (**self).get(key)
