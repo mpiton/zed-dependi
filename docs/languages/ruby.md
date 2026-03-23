@@ -26,6 +26,10 @@ Support for Ruby projects using Gemfile.
 |------|-------------|
 | `Gemfile` | Bundler dependency file |
 
+### Lockfile Resolution
+
+Dependi reads `Gemfile.lock` to show resolved versions and eliminate false-positive "update available" warnings.
+
 ## Registry
 
 **RubyGems.org** - The Ruby community's gem hosting service

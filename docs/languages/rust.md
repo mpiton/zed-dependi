@@ -26,6 +26,10 @@ Support for Rust projects using Cargo.toml.
 |------|-------------|
 | `Cargo.toml` | Main dependency manifest |
 
+### Lockfile Resolution
+
+Dependi reads `Cargo.lock` to show resolved versions and eliminate false-positive "update available" warnings when using minimal version syntax (e.g., `serde = "1.0"`).
+
 ## Registries
 
 ### crates.io (Default)

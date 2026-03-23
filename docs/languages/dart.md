@@ -26,6 +26,10 @@ Support for Dart and Flutter projects using pubspec.yaml.
 |------|-------------|
 | `pubspec.yaml` | Dart/Flutter manifest |
 
+### Lockfile Resolution
+
+Dependi reads `pubspec.lock` to show resolved versions and eliminate false-positive "update available" warnings.
+
 ## Registry
 
 **pub.dev** - The official Dart package repository

@@ -26,6 +26,10 @@ Support for Go projects using go.mod.
 |------|-------------|
 | `go.mod` | Go module definition |
 
+### Lockfile Resolution
+
+Dependi reads `go.sum` to show resolved versions and eliminate false-positive "update available" warnings.
+
 ## Registry
 
 **Go Module Proxy** - Official Go module mirror

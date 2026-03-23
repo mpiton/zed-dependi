@@ -25,7 +25,19 @@ Support for Python projects using requirements.txt and pyproject.toml.
 | File | Description |
 |------|-------------|
 | `requirements.txt` | pip requirements file |
+| `constraints.txt` | pip constraints file |
 | `pyproject.toml` | PEP 517/518 project file |
+
+### Lockfile Resolution
+
+Dependi reads lockfiles to show resolved versions and eliminate false-positive "update available" warnings:
+
+| Lockfile | Tool |
+|----------|------|
+| `poetry.lock` | Poetry |
+| `uv.lock` | uv |
+| `pdm.lock` | PDM |
+| `Pipfile.lock` | Pipenv |
 
 ## Registry
 

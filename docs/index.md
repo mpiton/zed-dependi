@@ -29,6 +29,8 @@ Dependi provides comprehensive dependency management directly in your editor:
   - `⚠ N vulns` Vulnerabilities detected
   - `⚠ Deprecated` Package is deprecated
   - `⊘ Yanked` Version has been yanked
+  - `→ Local` Local/path dependency
+  - `? Unknown` Could not fetch version info
 
 - **Vulnerability Scanning** - Real-time security scanning via [OSV.dev](https://osv.dev)
   - CVE details in hover tooltips
@@ -52,7 +54,7 @@ Dependi provides comprehensive dependency management directly in your editor:
 |----------|------|----------|
 | [Rust]({% link languages/rust.md %}) | `Cargo.toml` | crates.io |
 | [JavaScript/TypeScript]({% link languages/nodejs.md %}) | `package.json` | npm |
-| [Python]({% link languages/python.md %}) | `requirements.txt`, `pyproject.toml` | PyPI |
+| [Python]({% link languages/python.md %}) | `requirements.txt`, `constraints.txt`, `pyproject.toml` | PyPI |
 | [Go]({% link languages/go.md %}) | `go.mod` | proxy.golang.org |
 | [PHP]({% link languages/php.md %}) | `composer.json` | Packagist |
 | [Dart/Flutter]({% link languages/dart.md %}) | `pubspec.yaml` | pub.dev |

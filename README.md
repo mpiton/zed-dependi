@@ -94,28 +94,50 @@ zed-dependi/
 │   │   ├── lib.rs         # Library exports
 │   │   ├── backend.rs     # LSP implementation
 │   │   ├── config.rs      # Configuration management
+│   │   ├── document.rs    # Document/text utilities
+│   │   ├── file_types.rs  # File type detection
+│   │   ├── reports.rs     # Vulnerability report generation
+│   │   ├── utils.rs       # Shared utilities
+│   │   ├── auth/          # Registry authentication
 │   │   ├── parsers/       # Dependency file parsers
 │   │   │   ├── cargo.rs   # Cargo.toml parser
+│   │   │   ├── cargo_lock.rs # Cargo.lock lockfile
 │   │   │   ├── npm.rs     # package.json parser
+│   │   │   ├── npm_lock.rs # package-lock.json, yarn.lock, pnpm-lock.yaml, bun.lock
 │   │   │   ├── python.rs  # requirements.txt, constraints.txt, pyproject.toml
+│   │   │   ├── python_lock.rs # poetry.lock, uv.lock, pdm.lock, Pipfile.lock
 │   │   │   ├── go.rs      # go.mod parser
+│   │   │   ├── go_sum.rs  # go.sum lockfile
 │   │   │   ├── php.rs     # composer.json parser
-│   │   │   └── ruby.rs    # Gemfile parser
+│   │   │   ├── composer_lock.rs # composer.lock lockfile
+│   │   │   ├── ruby.rs    # Gemfile parser
+│   │   │   ├── gemfile_lock.rs # Gemfile.lock lockfile
+│   │   │   ├── dart.rs    # pubspec.yaml parser
+│   │   │   ├── pubspec_lock.rs # pubspec.lock lockfile
+│   │   │   ├── csharp.rs  # *.csproj parser
+│   │   │   └── packages_lock_json.rs # packages.lock.json lockfile
 │   │   ├── registries/    # Package registry clients
-│   │   │   ├── crates_io.rs
-│   │   │   ├── npm.rs
-│   │   │   ├── pypi.rs
-│   │   │   ├── go_proxy.rs
-│   │   │   ├── packagist.rs
-│   │   │   └── rubygems.rs
+│   │   │   ├── crates_io.rs    # crates.io API
+│   │   │   ├── cargo_sparse.rs # Cargo alternative registries (sparse index)
+│   │   │   ├── npm.rs          # npm registry
+│   │   │   ├── pypi.rs         # PyPI registry
+│   │   │   ├── go_proxy.rs     # Go module proxy
+│   │   │   ├── packagist.rs    # Packagist (PHP)
+│   │   │   ├── pub_dev.rs      # pub.dev (Dart)
+│   │   │   ├── nuget.rs        # NuGet (.NET)
+│   │   │   ├── rubygems.rs     # RubyGems
+│   │   │   ├── http_client.rs  # Shared HTTP client
+│   │   │   └── version_utils.rs # Shared version utilities
 │   │   ├── providers/     # LSP feature providers
 │   │   │   ├── inlay_hints.rs
 │   │   │   ├── diagnostics.rs
 │   │   │   ├── code_actions.rs
-│   │   │   └── completion.rs
-│   │   └── cache/         # Caching layer
-│   │       ├── mod.rs     # Memory + hybrid cache
-│   │       └── sqlite.rs  # SQLite persistent cache
+│   │   │   ├── completion.rs
+│   │   │   └── document_links.rs # Clickable dependency links
+│   │   ├── cache/         # Caching layer
+│   │   │   ├── mod.rs     # Memory + hybrid cache
+│   │   │   └── sqlite.rs  # SQLite persistent cache
+│   │   └── vulnerabilities/ # Security scanning via OSV
 │   └── tests/             # Integration tests
 ├── dependi-zed/           # Zed Extension (WASM)
 │   ├── extension.toml
@@ -129,7 +151,7 @@ zed-dependi/
 
 ### Prerequisites
 
-- Rust 1.85+ (edition 2024)
+- Rust 1.94+ (edition 2024)
 - `wasm32-wasip1` target: `rustup target add wasm32-wasip1`
 
 ### Building
@@ -213,11 +235,13 @@ Configure Dependi in your Zed `settings.json`:
 | `inlay_hints.show_up_to_date` | bool | `true` | Show hints for up-to-date packages |
 | `diagnostics.enabled` | bool | `true` | Enable/disable diagnostics |
 | `cache.ttl_secs` | number | `3600` | Cache TTL in seconds (1 hour) |
+| `cache.debounce_ms` | number | `200` | Debounce delay for file change notifications (ms) |
 | `ignore` | string[] | `[]` | Package names/patterns to ignore |
 | `security.enabled` | bool | `true` | Enable/disable vulnerability scanning |
 | `security.show_in_hints` | bool | `true` | Show vulnerability count in inlay hints |
 | `security.show_diagnostics` | bool | `true` | Show vulnerability diagnostics |
 | `security.min_severity` | string | `"low"` | Minimum severity to report (low/medium/high/critical) |
+| `security.cache_ttl_secs` | number | `21600` | Vulnerability cache TTL in seconds (6 hours) |
 
 ### Private Registries
 
@@ -496,8 +520,10 @@ security-scan:
 │  │ • requirements│ │ • Code Action│  │ • npm        │      │
 │  │ • constraints│  │ • Completion │  │ • PyPI       │      │
 │  │ • pyproject  │  │ • Hover      │  │ • Go Proxy   │      │
-│  │ • go.mod     │  │ • Hover      │  │ • Packagist  │      │
-│  │ • composer   │  └──────────────┘  │ • RubyGems   │      │
+│  │ • go.mod     │  │ • Doc Links  │  │ • Packagist  │      │
+│  │ • composer   │  └──────────────┘  │ • pub.dev    │      │
+│  │ • pubspec    │                    │ • NuGet      │      │
+│  │ • *.csproj   │                    │ • RubyGems   │      │
 │  │ • Gemfile    │                    └──────────────┘      │
 │  └──────────────┘                                           │
 │                                                             │

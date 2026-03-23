@@ -26,6 +26,10 @@ Support for .NET projects using *.csproj files.
 |------|-------------|
 | `*.csproj` | C# project file |
 
+### Lockfile Resolution
+
+Dependi reads `packages.lock.json` to show resolved versions and eliminate false-positive "update available" warnings.
+
 ## Registry
 
 **NuGet** - The .NET package manager

@@ -26,6 +26,17 @@ Support for Node.js projects using package.json.
 |------|-------------|
 | `package.json` | npm/yarn/pnpm manifest |
 
+### Lockfile Resolution
+
+Dependi reads lockfiles to show resolved versions and eliminate false-positive "update available" warnings:
+
+| Lockfile | Tool |
+|----------|------|
+| `package-lock.json` | npm (lockfileVersion 1, 2, 3) |
+| `yarn.lock` | Yarn Classic v1 and Berry v2+ |
+| `pnpm-lock.yaml` | pnpm v6 and v9 |
+| `bun.lock` | Bun (text JSONC format) |
+
 ## Registry
 
 **npm** - The Node.js package registry
