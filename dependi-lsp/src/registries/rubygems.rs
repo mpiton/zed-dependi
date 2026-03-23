@@ -67,10 +67,10 @@
 //! - [Gem Specification](https://guides.rubygems.org/specification-reference/)
 //! - [Version Format](https://guides.rubygems.org/patterns/#semantic-versioning)
 
-use std::collections::HashMap;
 use std::sync::Arc;
 
 use chrono::{DateTime, Utc};
+use hashbrown::HashMap;
 use reqwest::Client;
 use serde::Deserialize;
 

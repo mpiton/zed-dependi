@@ -55,11 +55,11 @@
 //! - [crates.io Policies](https://crates.io/policies)
 //! - [Crate Metadata Schema](https://doc.rust-lang.org/cargo/reference/registry-index.html)
 
-use std::collections::HashMap;
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 
 use chrono::{DateTime, Utc};
+use hashbrown::HashMap;
 use reqwest::Client;
 use serde::Deserialize;
 use tokio::sync::Mutex;

@@ -1,7 +1,8 @@
 //! Parser for Cargo.lock files — resolves exact locked versions for Cargo dependencies.
 
-use std::collections::HashMap;
 use std::path::{Path, PathBuf};
+
+use hashbrown::HashMap;
 
 /// Parse a Cargo.lock file and return a map of package name → resolved version.
 ///
@@ -29,7 +30,12 @@ pub fn parse_cargo_lock(content: &str) -> HashMap<String, String> {
             Some(v) => v.to_string(),
             None => continue,
         };
+
         // Keep the first entry when multiple versions exist
+        #[expect(
+            clippy::disallowed_methods,
+            reason = "`name` is an owned String; `entry_ref` would still allocate on insert"
+        )]
         map.entry(name).or_insert(version);
     }
 

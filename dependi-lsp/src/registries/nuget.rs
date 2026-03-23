@@ -65,10 +65,10 @@
 //! - [NuGet Versioning](https://learn.microsoft.com/en-us/nuget/concepts/package-versioning)
 //! - [Version Ranges](https://learn.microsoft.com/en-us/nuget/concepts/package-versioning#version-ranges)
 
-use std::collections::HashMap;
 use std::sync::Arc;
 
 use chrono::{DateTime, Utc};
+use hashbrown::HashMap;
 use reqwest::Client;
 use serde::Deserialize;
 

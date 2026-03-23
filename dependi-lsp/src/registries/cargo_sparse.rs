@@ -3,9 +3,9 @@
 //! Client for alternative Cargo registries using the sparse index protocol.
 //! Supports registries like Kellnr, Cloudsmith, and other Cargo-compatible registries.
 
-use std::collections::HashMap;
 use std::sync::Arc;
 
+use hashbrown::HashMap;
 use reqwest::Client;
 use reqwest::header::{AUTHORIZATION, HeaderMap, HeaderValue};
 use serde::Deserialize;

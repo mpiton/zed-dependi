@@ -1,7 +1,6 @@
 //! Configuration management for Dependi LSP
 
-use std::collections::HashMap;
-
+use hashbrown::HashMap;
 use serde::Deserialize;
 
 /// Default cache TTL (1 hour)

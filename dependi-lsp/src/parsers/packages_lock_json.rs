@@ -1,7 +1,8 @@
 //! Parser for packages.lock.json files — resolves exact locked versions for C# (NuGet) dependencies.
 
-use std::collections::HashMap;
 use std::path::{Path, PathBuf};
+
+use hashbrown::HashMap;
 
 /// Normalize a NuGet package name to lowercase.
 ///
@@ -43,6 +44,11 @@ pub fn parse_packages_lock(content: &str) -> HashMap<String, String> {
                 Some(v) => v.to_string(),
                 None => continue,
             };
+
+            #[expect(
+                clippy::disallowed_methods,
+                reason = "`normalized` is an owned String; `entry_ref` would still allocate on insert"
+            )]
             map.entry(normalized).or_insert(resolved);
         }
     }

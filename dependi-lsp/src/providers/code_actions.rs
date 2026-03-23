@@ -1,7 +1,5 @@
 //! Code actions provider for updating dependencies
 
-use std::collections::HashMap;
-
 use tower_lsp::lsp_types::*;
 
 use crate::cache::ReadCache;
@@ -153,7 +151,11 @@ fn create_update_action(
                 new_text,
             };
 
-            let mut changes = HashMap::new();
+            #[expect(
+                clippy::disallowed_types,
+                reason = "lsp_types requires `std::collections::HashMap`"
+            )]
+            let mut changes = std::collections::HashMap::new();
             changes.insert(uri.clone(), vec![edit]);
 
             let title = format!(
@@ -225,7 +227,11 @@ fn create_update_all_action(
         })
         .collect();
 
-    let mut changes = HashMap::new();
+    #[expect(
+        clippy::disallowed_types,
+        reason = "lsp_types requires `std::collections::HashMap`"
+    )]
+    let mut changes = std::collections::HashMap::new();
     changes.insert(uri.clone(), edits);
 
     let count = outdated_deps.len();

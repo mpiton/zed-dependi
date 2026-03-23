@@ -65,10 +65,10 @@
 //! - [PEP 440 - Version Identification](https://peps.python.org/pep-0440/)
 //! - [Trove Classifiers](https://pypi.org/classifiers/)
 
-use std::collections::HashMap;
 use std::sync::Arc;
 
 use chrono::{DateTime, NaiveDateTime, Utc};
+use hashbrown::HashMap;
 use reqwest::Client;
 use serde::Deserialize;
 

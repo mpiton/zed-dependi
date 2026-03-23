@@ -60,10 +60,10 @@
 //! - [Package Metadata Specification](https://github.com/npm/registry/blob/main/docs/responses/package-metadata.md)
 //! - [npm CLI Documentation](https://docs.npmjs.com/cli)
 
-use std::collections::HashMap;
 use std::sync::Arc;
 
 use chrono::{DateTime, Utc};
+use hashbrown::HashMap;
 use reqwest::Client;
 use serde::Deserialize;
 

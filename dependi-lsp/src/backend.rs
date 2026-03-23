@@ -6,6 +6,7 @@ use std::{
 };
 
 use dashmap::DashMap;
+use hashbrown::HashMap;
 use reqwest::Client as HttpClient;
 use tower_lsp::jsonrpc::Result;
 use tower_lsp::lsp_types::*;
@@ -525,7 +526,7 @@ impl ProcessingContext {
                 None
             };
             // Pre-build cache key map for registry-aware lookups
-            let cache_key_map: std::collections::HashMap<String, String> = dependencies
+            let cache_key_map: HashMap<String, String> = dependencies
                 .iter()
                 .map(|dep| (dep.name.clone(), dep_cache_key(dep, file_type)))
                 .collect();
@@ -783,7 +784,7 @@ impl DependiBackend {
         let ecosystem = file_type.to_ecosystem();
 
         // Pre-build cache key map for registry-aware lookups
-        let cache_key_map: std::collections::HashMap<String, String> = dependencies
+        let cache_key_map: HashMap<String, String> = dependencies
             .iter()
             .map(|dep| (dep.name.clone(), dep_cache_key(dep, file_type)))
             .collect();
@@ -1129,7 +1130,7 @@ impl LanguageServer for DependiBackend {
                     .map(PathBuf::from)
                     .or_else(|| dirs::home_dir().map(|h| h.join(".cargo")));
 
-                let mut tokens = std::collections::HashMap::new();
+                let mut tokens = HashMap::new();
                 if let Some(cargo_home) = cargo_home {
                     let cred_path = cargo_home.join("credentials.toml");
                     let content = if let Ok(c) = tokio::fs::read_to_string(&cred_path).await {
@@ -1487,7 +1488,7 @@ impl LanguageServer for DependiBackend {
         };
 
         let file_type = doc.file_type;
-        let cache_key_map: std::collections::HashMap<String, String> = doc
+        let cache_key_map: HashMap<String, String> = doc
             .dependencies
             .iter()
             .map(|dep| (dep.name.clone(), dep_cache_key(dep, file_type)))
@@ -1518,7 +1519,7 @@ impl LanguageServer for DependiBackend {
         };
 
         let file_type = doc.file_type;
-        let cache_key_map: std::collections::HashMap<String, String> = doc
+        let cache_key_map: HashMap<String, String> = doc
             .dependencies
             .iter()
             .map(|dep| (dep.name.clone(), dep_cache_key(dep, file_type)))
