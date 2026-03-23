@@ -219,32 +219,52 @@ fn create_yanked_diagnostic(
 ) -> Diagnostic {
     let dep_name = &*dep.name;
     let dep_version = dep.effective_version();
-    let registry = file_type.registry_name();
+    let has_custom_registry = dep.registry.is_some();
 
-    let message = fmt::from_fn(|f| {
-        write!(f,
-            "The version '{dep_version}' of '{dep_name}' has been yanked from {registry} and should not be used.",
-        )?;
+    let message = if has_custom_registry {
+        // Alternative registry — omit registry name since fmt_registry_package_url
+        // would incorrectly point to the default registry
+        fmt::from_fn(|f| {
+            write!(
+                f,
+                "The version '{dep_version}' of '{dep_name}' has been yanked and should not be used.",
+            )?;
+            if let Some(latest) = version_info.latest.as_deref() {
+                write!(f, " Update to {latest}.")?;
+            }
+            Ok(())
+        })
+        .to_string()
+    } else {
+        let registry = file_type.registry_name();
+        fmt::from_fn(|f| {
+            write!(
+                f,
+                "The version '{dep_version}' of '{dep_name}' has been yanked from {registry} and should not be used.",
+            )?;
+            if let Some(latest) = version_info.latest.as_deref() {
+                write!(f, " Update to {latest}.")?;
+            }
+            Ok(())
+        })
+        .to_string()
+    };
 
-        if let Some(latest) = version_info.latest.as_deref() {
-            write!(f, " Update to {latest}.")?;
+    let mut related_info = Vec::new();
+
+    // Only add registry package link for default registries
+    if !has_custom_registry {
+        let registry_url_str = file_type.fmt_registry_package_url(&dep.name).to_string();
+        if let Ok(url) = Url::parse(&registry_url_str) {
+            related_info.push(DiagnosticRelatedInformation {
+                location: Location {
+                    uri: url,
+                    range: Range::default(),
+                },
+                message: format!("View package on {}", file_type.registry_name()),
+            });
         }
-        Ok(())
-    }).to_string();
-
-    let registry_url_str = file_type.fmt_registry_package_url(&dep.name).to_string();
-    let registry_url = Url::parse(&registry_url_str).unwrap_or_else(|e| {
-        tracing::warn!("Failed to parse registry URL '{registry_url_str}': {e}");
-        Url::parse("https://github.com").expect("fallback URL is valid")
-    });
-
-    let mut related_info = vec![DiagnosticRelatedInformation {
-        location: Location {
-            uri: registry_url.clone(),
-            range: Range::default(),
-        },
-        message: format!("View package on {registry}"),
-    }];
+    }
 
     if let Some(repo) = &version_info.repository {
         related_info.push(DiagnosticRelatedInformation {
@@ -257,6 +277,17 @@ fn create_yanked_diagnostic(
             message: "View repository for more information".to_string(),
         });
     }
+
+    // Use registry URL for code_description only for default registries
+    let code_description_href = if has_custom_registry {
+        version_info
+            .repository
+            .as_deref()
+            .and_then(|r| Url::parse(r).ok())
+    } else {
+        let registry_url_str = file_type.fmt_registry_package_url(&dep.name).to_string();
+        Url::parse(&registry_url_str).ok()
+    };
 
     Diagnostic {
         range: Range {
@@ -273,9 +304,13 @@ fn create_yanked_diagnostic(
         code: Some(NumberOrString::String("yanked-version".to_string())),
         source: Some("dependi".to_string()),
         message,
-        related_information: Some(related_info),
+        related_information: if related_info.is_empty() {
+            None
+        } else {
+            Some(related_info)
+        },
         tags: None,
-        code_description: Some(CodeDescription { href: registry_url }),
+        code_description: code_description_href.map(|href| CodeDescription { href }),
         data: None,
     }
 }
