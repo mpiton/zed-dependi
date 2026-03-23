@@ -40,6 +40,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Bump MSRV from 1.85 to 1.94; adopt stable let-chains, `fmt::from_fn` for
   zero-allocation display formatting, and inlined format args across the codebase
 - Removed `String`-returning formatting functions as deprecated
+- Use `hashbrown::Hash{Map, Set}` instead of the `std::collections::Hash{Map, Set}`,
+  to enable more flexible usage and reduce allocations. Note: `hashbrown` uses `foldhash` by
+  default, instead of the `std`'s default --- SipHash.
 
 ## [1.5.0] - 2026-03-16
 
