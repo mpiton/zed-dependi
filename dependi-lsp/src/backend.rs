@@ -988,6 +988,89 @@ impl DependiBackend {
     }
 }
 
+/// Format the hover content for a dependency with version info.
+///
+/// Extracted from the hover handler to enable unit testing.
+fn format_hover_content(
+    dep: &crate::parsers::Dependency,
+    file_type: FileType,
+    info: &VersionInfo,
+) -> String {
+    let dep_name = &*dep.name;
+    let dep_version = dep.effective_version();
+
+    fmt::from_fn(|f| {
+        writeln!(f, "## {dep_name}\n")?;
+
+        if let Some(desc) = &info.description {
+            writeln!(f, "{desc}\n")?;
+        }
+
+        // Current version with release date
+        let current_date_str = info
+            .get_release_date(dep_version)
+            .map(|dt| format!(" ({})", fmt_release_age(dt)))
+            .unwrap_or_default();
+        writeln!(f, "**Current:** {dep_version}{current_date_str}")?;
+
+        if let Some(latest) = info.latest.as_deref() {
+            let latest_date_str = info
+                .get_release_date(latest)
+                .map(|dt| format!(" ({})", fmt_release_age(dt)))
+                .unwrap_or_default();
+            writeln!(f, "**Latest:** {latest}{latest_date_str}")?;
+        }
+
+        if let Some(license) = info.license.as_deref() {
+            writeln!(f, "**License:** {license}")?;
+        }
+
+        if let Some(repo) = info.repository.as_deref() {
+            writeln!(f, "\n[Repository]({repo})")?;
+        }
+
+        if let Some(homepage) = info.homepage.as_deref() {
+            writeln!(f, "[Homepage]({homepage})")?;
+        }
+
+        if dep.registry.is_none() {
+            let registry_url = file_type.fmt_registry_package_url(dep_name);
+            writeln!(f, "[View on {}]({registry_url})", file_type.registry_name())?;
+        }
+
+        // Add vulnerability information if present
+        if !info.vulnerabilities.is_empty() {
+            let vulns_count = info.vulnerabilities.len();
+            let suffix = if vulns_count == 1 {
+                "Vulnerability"
+            } else {
+                "Vulnerabilities"
+            };
+            writeln!(f, "\n### ⚠ {vulns_count} Security {suffix}")?;
+
+            for vuln in &info.vulnerabilities {
+                let (severity_icon, severity_str) = match vuln.severity {
+                    VulnerabilitySeverity::Critical => ("⚠", "CRITICAL"),
+                    VulnerabilitySeverity::High => ("▲", "HIGH"),
+                    VulnerabilitySeverity::Medium => ("●", "MEDIUM"),
+                    VulnerabilitySeverity::Low => ("○", "LOW"),
+                };
+
+                let id = &*vuln.id;
+                if let Some(url) = vuln.url.as_deref() {
+                    writeln!(f, "\n#### [{id}]({url}) - {severity_icon} {severity_str}")?;
+                } else {
+                    writeln!(f, "\n#### {id} - {severity_icon} {severity_str}")?;
+                }
+                f.write_str(&vuln.description)?;
+            }
+        }
+
+        Ok(())
+    })
+    .to_string()
+}
+
 #[tower_lsp::async_trait]
 impl LanguageServer for DependiBackend {
     async fn initialize(&self, params: InitializeParams) -> Result<InitializeResult> {
@@ -1364,7 +1447,6 @@ impl LanguageServer for DependiBackend {
             return Ok(None);
         };
         let dep_name = &*dep.name;
-        let dep_version = dep.effective_version();
 
         // Drop the lock before async call
         drop(doc);
@@ -1375,76 +1457,7 @@ impl LanguageServer for DependiBackend {
             .await;
 
         let content = match version_info {
-            Some(info) => fmt::from_fn(|f| {
-                writeln!(f, "## {dep_name}\n")?;
-
-                if let Some(desc) = &info.description {
-                    writeln!(f, "{desc}\n")?;
-                }
-
-                // Current version with release date
-                let current_date_str = info
-                    .get_release_date(dep_version)
-                    .map(|dt| format!(" ({})", fmt_release_age(dt)))
-                    .unwrap_or_default();
-                writeln!(f, "**Current:** {dep_version}{current_date_str}")?;
-
-                if let Some(latest) = info.latest.as_deref() {
-                    let latest_date_str = info
-                        .get_release_date(latest)
-                        .map(|dt| format!(" ({})", fmt_release_age(dt)))
-                        .unwrap_or_default();
-                    writeln!(f, "**Latest:** {latest}{latest_date_str}")?;
-                }
-
-                if let Some(license) = info.license.as_deref() {
-                    writeln!(f, "**License:** {license}")?;
-                }
-
-                if let Some(repo) = info.repository.as_deref() {
-                    writeln!(f, "\n[Repository]({repo})")?;
-                }
-
-                if let Some(homepage) = info.homepage.as_deref() {
-                    writeln!(f, "[Homepage]({homepage})")?;
-                }
-
-                if dep.registry.is_none() {
-                    let registry_url = file_type.fmt_registry_package_url(dep_name);
-                    writeln!(f, "[View on {}]({registry_url})", file_type.registry_name())?;
-                }
-
-                // Add vulnerability information if present
-                if !info.vulnerabilities.is_empty() {
-                    let vulns_count = info.vulnerabilities.len();
-                    let suffix = if vulns_count == 1 {
-                        "Vulnerability"
-                    } else {
-                        "Vulnerabilities"
-                    };
-                    writeln!(f, "\n### ⚠ {vulns_count} Security {suffix}")?;
-
-                    for vuln in &info.vulnerabilities {
-                        let (severity_icon, severity_str) = match vuln.severity {
-                            VulnerabilitySeverity::Critical => ("⚠", "CRITICAL"),
-                            VulnerabilitySeverity::High => ("▲", "HIGH"),
-                            VulnerabilitySeverity::Medium => ("●", "MEDIUM"),
-                            VulnerabilitySeverity::Low => ("○", "LOW"),
-                        };
-
-                        let id = &*vuln.id;
-                        if let Some(url) = vuln.url.as_deref() {
-                            writeln!(f, "\n#### [{id}]({url}) - {severity_icon} {severity_str}")?;
-                        } else {
-                            writeln!(f, "\n#### {id} - {severity_icon} {severity_str}")?;
-                        }
-                        f.write_str(&vuln.description)?;
-                    }
-                }
-
-                Ok(())
-            })
-            .to_string(),
+            Some(info) => format_hover_content(&dep, file_type, &info),
             None => format!("## {dep_name}\n\nCould not fetch package information."),
         };
 
@@ -1538,5 +1551,88 @@ impl LanguageServer for DependiBackend {
                 Ok(None)
             }
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::parsers::Dependency;
+
+    fn make_dep(name: &str, version: &str, resolved: Option<&str>) -> Dependency {
+        Dependency {
+            name: name.to_string(),
+            version: version.to_string(),
+            line: 0,
+            name_start: 0,
+            name_end: name.len() as u32,
+            version_start: name.len() as u32 + 3,
+            version_end: name.len() as u32 + 3 + version.len() as u32,
+            dev: false,
+            optional: false,
+            registry: None,
+            resolved_version: resolved.map(str::to_string),
+        }
+    }
+
+    #[test]
+    fn test_hover_uses_effective_version_not_manifest_specifier() {
+        let dep = make_dep("serde", "^1.0", Some("1.0.200"));
+        let info = VersionInfo {
+            latest: Some("1.0.210".to_string()),
+            ..Default::default()
+        };
+
+        let content = format_hover_content(&dep, FileType::Cargo, &info);
+
+        // Must show the resolved version, not the manifest specifier
+        assert!(
+            content.contains("**Current:** 1.0.200"),
+            "Hover should show effective_version '1.0.200', got:\n{content}"
+        );
+        assert!(
+            !content.contains("**Current:** ^1.0"),
+            "Hover should NOT show manifest specifier '^1.0'"
+        );
+    }
+
+    #[test]
+    fn test_hover_uses_manifest_version_when_no_lockfile() {
+        let dep = make_dep("tokio", "1.35.0", None);
+        let info = VersionInfo {
+            latest: Some("1.40.0".to_string()),
+            ..Default::default()
+        };
+
+        let content = format_hover_content(&dep, FileType::Cargo, &info);
+
+        assert!(
+            content.contains("**Current:** 1.35.0"),
+            "Without lockfile, should show manifest version, got:\n{content}"
+        );
+    }
+
+    #[test]
+    fn test_hover_release_date_uses_effective_version() {
+        use chrono::{TimeZone, Utc};
+
+        let dep = make_dep("serde", "^1.0", Some("1.0.200"));
+        let release_date = Utc.with_ymd_and_hms(2025, 1, 15, 0, 0, 0).unwrap();
+
+        let mut info = VersionInfo {
+            latest: Some("1.0.200".to_string()),
+            ..Default::default()
+        };
+        // Insert release date keyed by the resolved version, NOT the specifier
+        info.release_dates
+            .insert("1.0.200".to_string(), release_date);
+
+        let content = format_hover_content(&dep, FileType::Cargo, &info);
+
+        // The release date should be found (keyed by effective_version "1.0.200")
+        assert!(
+            content.contains("2025-01-15") || content.contains("ago"),
+            "Release date should be found via effective_version lookup, got:\n{content}"
+        );
     }
 }

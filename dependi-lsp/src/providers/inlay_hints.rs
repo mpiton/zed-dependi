@@ -283,24 +283,43 @@ fn fmt_yanked_tooltip(
 ) -> impl fmt::Display + fmt::Debug {
     let dep_name = &*dep.name;
     let dep_version = dep.effective_version();
+    let has_custom_registry = dep.registry.is_some();
 
     fmt::from_fn(move |f| {
-        let registry = file_type.registry_name();
-        writeln!(
-            f,
-            "**⊘ YANKED VERSION**\n\
-             \n\
-             The version \"{dep_version}\" of \"{dep_name}\" has been yanked from {registry}.\n\
-             \n\
-             **Why was it yanked?**\n\
-             A yanked version typically has:\n\
-             • Critical bugs that break functionality\n\
-             • Security vulnerabilities\n\
-             • Published by mistake\n\
-             • Corrupted or incomplete package\n\
-             \n\
-             **What should you do?**"
-        )?;
+        if has_custom_registry {
+            writeln!(
+                f,
+                "**⊘ YANKED VERSION**\n\
+                 \n\
+                 The version \"{dep_version}\" of \"{dep_name}\" has been yanked.\n\
+                 \n\
+                 **Why was it yanked?**\n\
+                 A yanked version typically has:\n\
+                 • Critical bugs that break functionality\n\
+                 • Security vulnerabilities\n\
+                 • Published by mistake\n\
+                 • Corrupted or incomplete package\n\
+                 \n\
+                 **What should you do?**"
+            )?;
+        } else {
+            let registry = file_type.registry_name();
+            writeln!(
+                f,
+                "**⊘ YANKED VERSION**\n\
+                 \n\
+                 The version \"{dep_version}\" of \"{dep_name}\" has been yanked from {registry}.\n\
+                 \n\
+                 **Why was it yanked?**\n\
+                 A yanked version typically has:\n\
+                 • Critical bugs that break functionality\n\
+                 • Security vulnerabilities\n\
+                 • Published by mistake\n\
+                 • Corrupted or incomplete package\n\
+                 \n\
+                 **What should you do?**"
+            )?;
+        }
 
         if let Some(latest) = info.latest.as_deref() {
             writeln!(f, "• Update to the latest version: {latest}")?;
@@ -310,11 +329,16 @@ fn fmt_yanked_tooltip(
             writeln!(f, "• Check the repository for more info: {repo}")?;
         }
 
-        writeln!(
-            f,
-            "• View on {registry}: {}",
-            file_type.fmt_registry_package_url(dep_name),
-        )
+        if has_custom_registry {
+            Ok(())
+        } else {
+            let registry = file_type.registry_name();
+            writeln!(
+                f,
+                "• View on {registry}: {}",
+                file_type.fmt_registry_package_url(dep_name),
+            )
+        }
     })
 }
 

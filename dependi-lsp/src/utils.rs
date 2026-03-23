@@ -3,16 +3,22 @@
 use core::fmt::{self, Write as _};
 
 /// Returns an <code>[fmt::Display] + [fmt::Debug]</code> implementation
-/// which truncates the given string to a maximum character count with ellipsis.
+/// which truncates the given string to a maximum character count.
 ///
 /// This function properly handles UTF-8 strings by counting characters,
-/// not bytes. If the string needs truncation, an ellipsis ("...") is
-/// appended and counted toward the maximum length.
+/// not bytes. The truncation behavior depends on `max_chars`:
+///
+/// - **`max_chars >= 3`**: If the string exceeds `max_chars`, it is truncated
+///   with an ellipsis (`"..."`). The total output length (including the ellipsis)
+///   is exactly `max_chars`.
+/// - **`max_chars < 3`**: The ellipsis cannot fit, so the string is simply
+///   truncated to `max_chars` characters with no ellipsis appended.
+/// - If the string already fits within `max_chars`, it is returned unchanged.
 ///
 /// # Arguments
 ///
 /// * `s` - The string to truncate
-/// * `max_chars` - Maximum number of characters to display (including ellipsis)
+/// * `max_chars` - Maximum number of characters in the output
 ///
 /// # Returns
 ///
