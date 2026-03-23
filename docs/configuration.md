@@ -107,6 +107,7 @@ Configure Dependi in your Zed `settings.json`:
 | Option | Type | Default | Description |
 |--------|------|---------|-------------|
 | `cache.ttl_secs` | number | `3600` | Cache time-to-live in seconds (1 hour default) |
+| `cache.debounce_ms` | number | `200` | Debounce delay for file change notifications (ms) |
 
 **Example:**
 ```json
@@ -134,6 +135,7 @@ The cache is stored in your system's cache directory. Increasing TTL reduces net
 | `security.show_in_hints` | boolean | `true` | Show vulnerability count in inlay hints |
 | `security.show_diagnostics` | boolean | `true` | Show vulnerability diagnostics |
 | `security.min_severity` | string | `"low"` | Minimum severity to report: `low`, `medium`, `high`, `critical` |
+| `security.cache_ttl_secs` | number | `21600` | Vulnerability cache TTL in seconds (6 hours default) |
 
 **Example:**
 ```json

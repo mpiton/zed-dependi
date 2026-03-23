@@ -42,7 +42,7 @@ We welcome:
 
 ### Prerequisites
 
-- **Rust 1.75+** (tested with 1.91.1)
+- **Rust 1.94+** (edition 2024)
 - **Zed Editor** (latest stable)
 - **wasm32-wasip1 target**: `rustup target add wasm32-wasip1`
 

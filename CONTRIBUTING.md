@@ -54,9 +54,14 @@ zed-dependi/
 │   │   ├── lib.rs         # Library exports
 │   │   ├── backend.rs     # LSP implementation
 │   │   ├── config.rs      # Configuration management
-│   │   ├── parsers/       # Dependency file parsers
+│   │   ├── document.rs    # Document/text utilities
+│   │   ├── file_types.rs  # File type detection
+│   │   ├── reports.rs     # Vulnerability report generation
+│   │   ├── utils.rs       # Shared utilities
+│   │   ├── auth/          # Registry authentication
+│   │   ├── parsers/       # Dependency file parsers + lockfile resolvers
 │   │   ├── registries/    # Package registry clients
-│   │   ├── providers/     # LSP features (hints, diagnostics, etc.)
+│   │   ├── providers/     # LSP features (hints, diagnostics, doc links, etc.)
 │   │   ├── cache/         # Caching layer (memory + SQLite)
 │   │   └── vulnerabilities/ # Security scanning via OSV
 │   └── tests/             # Integration tests

@@ -26,6 +26,10 @@ Support for PHP projects using composer.json.
 |------|-------------|
 | `composer.json` | Composer manifest |
 
+### Lockfile Resolution
+
+Dependi reads `composer.lock` to show resolved versions and eliminate false-positive "update available" warnings.
+
 ## Registry
 
 **Packagist** - The PHP package repository
