@@ -32,6 +32,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Fix false-positive "update available" reports when using minimal version syntax (e.g., `bon = "3.9"`) by reading resolved versions from `Cargo.lock` ([#184](https://github.com/mpiton/zed-dependi/issues/184))
 - Fix false-positive vulnerability reports by normalizing version operators before OSV.dev queries ([#181](https://github.com/mpiton/zed-dependi/issues/181))
 - Use async I/O for lockfile discovery to avoid blocking the Tokio executor
+- Fix GLIBC compatibility on older Linux systems (Ubuntu 22.04, WSL) by targeting GLIBC 2.17 with cargo-zigbuild ([#198](https://github.com/mpiton/zed-dependi/issues/198))
 
 ## [1.5.0] - 2026-03-16
 
