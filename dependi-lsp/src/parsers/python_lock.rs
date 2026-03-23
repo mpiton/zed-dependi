@@ -6,8 +6,9 @@
 //! - `pdm.lock` (PDM — TOML with `[[package]]` entries)
 //! - `Pipfile.lock` (Pipenv — JSON with `default`/`develop` sections)
 
-use std::collections::HashMap;
 use std::path::{Path, PathBuf};
+
+use hashbrown::HashMap;
 
 /// Type of Python lockfile detected.
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -199,7 +200,12 @@ fn parse_toml_package_array(content: &str) -> HashMap<String, String> {
             None => continue,
         };
         let normalized = normalize_python_name(name);
+
         // Keep the first entry when multiple versions exist
+        #[expect(
+            clippy::disallowed_methods,
+            reason = "`normalized` is an owned String; `entry_ref` would still allocate on insert"
+        )]
         map.entry(normalized).or_insert(version);
     }
 
@@ -229,6 +235,11 @@ fn parse_pipfile_lock(content: &str) -> HashMap<String, String> {
                 if let Some(version_str) = dep.get("version").and_then(|v| v.as_str()) {
                     let version = version_str.strip_prefix("==").unwrap_or(version_str);
                     let normalized = normalize_python_name(name);
+
+                    #[expect(
+                        clippy::disallowed_methods,
+                        reason = "`normalized` is an owned String; `entry_ref` would still allocate on insert"
+                    )]
                     map.entry(normalized).or_insert_with(|| version.to_string());
                 }
             }

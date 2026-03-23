@@ -1,7 +1,8 @@
 //! Parser for Ruby lockfiles (Gemfile.lock) — resolves exact locked versions for Ruby gems.
 
-use std::collections::HashMap;
 use std::path::{Path, PathBuf};
+
+use hashbrown::HashMap;
 
 /// Platform architecture keywords used to detect platform suffixes in gem versions.
 const PLATFORM_KEYWORDS: &[&str] = &[
@@ -114,6 +115,11 @@ pub fn parse_gemfile_lock(content: &str) -> HashMap<String, String> {
                             let raw_version = &rest[1..rest.len() - 1];
                             let version = strip_platform_suffix(raw_version).to_string();
                             let key = normalize_gem_name(name);
+
+                            #[expect(
+                                clippy::disallowed_methods,
+                                reason = "`key` is an owned String; `entry_ref` would still allocate on insert"
+                            )]
                             map.entry(key).or_insert(version);
                         }
                     }

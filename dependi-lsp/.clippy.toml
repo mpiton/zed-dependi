@@ -1,1 +1,8 @@
 allow-mixed-uninlined-format-args = false
+disallowed-types = [
+    { path = "std::collections::HashMap", replacement = "hashbrown::HashMap" },
+    { path = "std::collections::HashSet", replacement = "hashbrown::HashSet" },
+]
+disallowed-methods = [
+    { path = "hashbrown::HashMap::entry", reason = "May require allocations. If not, `expect` the lint", replacement = "hashbrown::HashMap::entry_ref" }
+]

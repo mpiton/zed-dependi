@@ -27,9 +27,9 @@ pub mod cargo_credentials;
 pub mod npmrc;
 
 use core::fmt::{self, Write};
-use std::collections::HashMap;
 use std::sync::Arc;
 
+use hashbrown::HashMap;
 use reqwest::header::{AUTHORIZATION, HeaderMap, HeaderValue};
 use tokio::sync::RwLock;
 

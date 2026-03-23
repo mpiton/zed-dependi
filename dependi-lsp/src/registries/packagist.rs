@@ -63,10 +63,10 @@
 //! - [Composer Version Constraints](https://getcomposer.org/doc/articles/versions.md)
 //! - [Composer Repositories](https://getcomposer.org/doc/05-repositories.md)
 
-use std::collections::HashMap;
 use std::sync::Arc;
 
 use chrono::{DateTime, Utc};
+use hashbrown::HashMap;
 use reqwest::Client;
 use serde::Deserialize;
 

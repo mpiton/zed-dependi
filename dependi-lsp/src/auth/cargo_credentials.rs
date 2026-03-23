@@ -7,8 +7,7 @@
 //! The parsing logic is tested; file I/O integration will be added when
 //! this is wired into the main auth flow.
 
-use std::collections::HashMap;
-
+use hashbrown::HashMap;
 use serde::Deserialize;
 
 #[derive(Debug, Deserialize)]

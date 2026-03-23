@@ -6,8 +6,9 @@
 //! - `pnpm-lock.yaml` (pnpm v6 and v9)
 //! - `bun.lock` (Bun text format / JSONC)
 
-use std::collections::HashMap;
 use std::path::{Path, PathBuf};
+
+use hashbrown::HashMap;
 
 /// Type of Node.js lockfile detected.
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -91,8 +92,7 @@ fn parse_package_lock(content: &str) -> HashMap<String, String> {
             if let Some(name) = extract_name_from_node_modules_path(key)
                 && let Some(version) = pkg.get("version").and_then(|v| v.as_str())
             {
-                map.entry(name.to_string())
-                    .or_insert_with(|| version.to_string());
+                map.entry_ref(name).or_insert_with(|| version.to_string());
             }
         }
         return map;
@@ -102,8 +102,7 @@ fn parse_package_lock(content: &str) -> HashMap<String, String> {
     if let Some(deps) = value.get("dependencies").and_then(|d| d.as_object()) {
         for (name, dep) in deps {
             if let Some(version) = dep.get("version").and_then(|v| v.as_str()) {
-                map.entry(name.clone())
-                    .or_insert_with(|| version.to_string());
+                map.entry_ref(name).or_insert_with(|| version.to_string());
             }
         }
     }
@@ -165,8 +164,7 @@ fn parse_yarn_lock(content: &str) -> HashMap<String, String> {
             && let Some(version) = extract_yarn_version(trimmed)
         {
             for &name in &current_names {
-                map.entry(name.to_string())
-                    .or_insert_with(|| version.clone());
+                map.entry_ref(name).or_insert_with(|| version.clone());
             }
             current_names.clear();
         }
@@ -250,8 +248,7 @@ fn parse_pnpm_lock(content: &str) -> HashMap<String, String> {
             let key = key.strip_prefix('/').unwrap_or(key);
 
             if let Some((name, version)) = split_pnpm_name_version(key) {
-                map.entry(name.to_string())
-                    .or_insert_with(|| version.to_string());
+                map.entry_ref(name).or_insert_with(|| version.to_string());
             }
         }
     }
@@ -310,8 +307,7 @@ fn parse_bun_lock(content: &str) -> HashMap<String, String> {
         if let Some(spec) = spec
             && let Some((name, version)) = split_name_version(spec)
         {
-            map.entry(name.to_string())
-                .or_insert_with(|| version.to_string());
+            map.entry_ref(name).or_insert_with(|| version.to_string());
         }
     }
 

@@ -1,7 +1,8 @@
 //! Parser for pubspec.lock files — resolves exact locked versions for Dart (pub) dependencies.
 
-use std::collections::HashMap;
 use std::path::{Path, PathBuf};
+
+use hashbrown::HashMap;
 
 /// Parse a pubspec.lock file and return a map of package name → resolved version.
 ///
@@ -45,8 +46,7 @@ pub fn parse_pubspec_lock(content: &str) -> HashMap<String, String> {
         {
             let version = rest.trim().trim_matches('"');
             if !version.is_empty() {
-                map.entry(pkg.to_owned())
-                    .or_insert_with(|| version.to_owned());
+                map.entry_ref(pkg).or_insert_with(|| version.to_owned());
             }
         }
     }

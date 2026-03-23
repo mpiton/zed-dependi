@@ -1,7 +1,8 @@
 //! Parser for Go sum files (go.sum) — resolves exact locked versions for Go dependencies.
 
-use std::collections::HashMap;
 use std::path::{Path, PathBuf};
+
+use hashbrown::HashMap;
 
 /// Parse a go.sum file and return a map of module path → all observed versions.
 ///
@@ -36,9 +37,7 @@ pub fn parse_go_sum(content: &str) -> HashMap<String, Vec<String>> {
             continue;
         }
 
-        map.entry(module.to_string())
-            .or_default()
-            .push(version.to_string());
+        map.entry_ref(module).or_default().push(version.to_string());
     }
 
     map

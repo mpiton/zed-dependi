@@ -162,7 +162,7 @@ mod tests {
     use crate::cache::{MemoryCache, WriteCache};
     use crate::registries::VersionInfo;
     use chrono::Duration;
-    use std::collections::HashMap;
+    use hashbrown::HashMap;
 
     fn create_test_dependency(name: &str, version: &str, line: u32) -> Dependency {
         Dependency {

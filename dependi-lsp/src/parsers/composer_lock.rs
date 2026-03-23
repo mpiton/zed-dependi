@@ -1,7 +1,8 @@
 //! Parser for composer.lock files — resolves exact locked versions for PHP (Composer) dependencies.
 
-use std::collections::HashMap;
 use std::path::{Path, PathBuf};
+
+use hashbrown::HashMap;
 
 /// Normalize a Composer package name to lowercase.
 ///
@@ -42,6 +43,11 @@ pub fn parse_composer_lock(content: &str) -> HashMap<String, String> {
                 Some(v) => v.to_string(),
                 None => continue,
             };
+
+            #[expect(
+                clippy::disallowed_methods,
+                reason = "`name` is an owned String; `entry_ref` would still allocate on insert"
+            )]
             map.entry(name).or_insert(version);
         }
     }

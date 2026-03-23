@@ -74,10 +74,10 @@
 //! println!("Latest: {:?}", info.latest);
 //! ```
 
-use std::collections::HashMap;
 use std::sync::Arc;
 
 use chrono::{DateTime, Utc};
+use hashbrown::HashMap;
 use reqwest::Client;
 use serde::{Deserialize, Serialize};
 
