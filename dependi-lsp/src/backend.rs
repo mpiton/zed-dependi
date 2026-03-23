@@ -381,6 +381,43 @@ impl ProcessingContext {
             }
         }
 
+        // Resolve versions from Gemfile.lock for Ruby dependencies
+        if file_type == FileType::Ruby {
+            if let Ok(gemfile_path) = uri.to_file_path() {
+                if let Some(lock_path) =
+                    crate::parsers::gemfile_lock::find_gemfile_lock(&gemfile_path).await
+                {
+                    match tokio::fs::read_to_string(&lock_path).await {
+                        Ok(lock_content) => {
+                            let lock_versions =
+                                crate::parsers::gemfile_lock::parse_gemfile_lock(&lock_content);
+                            for dep in &mut dependencies {
+                                let normalized =
+                                    crate::parsers::gemfile_lock::normalize_gem_name(&dep.name);
+                                if let Some(resolved) = lock_versions.get(&normalized) {
+                                    dep.resolved_version = Some(resolved.clone());
+                                }
+                            }
+                            tracing::debug!(
+                                "Resolved {} Ruby versions from Gemfile.lock at {}",
+                                dependencies
+                                    .iter()
+                                    .filter(|d| d.resolved_version.is_some())
+                                    .count(),
+                                lock_path.display()
+                            );
+                        }
+                        Err(e) => {
+                            tracing::debug!(
+                                "Could not read Gemfile.lock at {}: {e}",
+                                lock_path.display(),
+                            );
+                        }
+                    }
+                }
+            }
+        }
+
         tracing::info!(
             "Parsed {} dependencies from {}",
             dependencies.len(),

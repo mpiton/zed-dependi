@@ -49,6 +49,7 @@ pub mod cargo_lock;
 pub mod composer_lock;
 pub mod csharp;
 pub mod dart;
+pub mod gemfile_lock;
 pub mod go;
 pub mod go_sum;
 pub mod npm;

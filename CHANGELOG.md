@@ -25,6 +25,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - `composer.lock` (Composer)
 - Add Dart lockfile version resolution (`pubspec.lock`) to eliminate false-positive update warnings
 - Add C# lockfile version resolution (`packages.lock.json`) to eliminate false-positive update warnings
+- Add Ruby lockfile version resolution (`Gemfile.lock`) to eliminate false-positive update warnings
 
 ### Fixed
 
