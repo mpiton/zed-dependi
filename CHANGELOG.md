@@ -7,15 +7,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
-### Security
-
-- Update `rustls-webpki` 0.103.9 → 0.103.10 in fuzz lockfile (fixes certificate revocation enforcement bug, [GHSA-pwjx-qhcg-rvj4](https://github.com/rustls/webpki/security/advisories/GHSA-pwjx-qhcg-rvj4))
-- Update `aws-lc-sys` 0.38.0 → 0.39.0 in fuzz lockfile (fixes CRL Distribution Point scope check and X.509 Name Constraints bypass)
-
-### Changed
-
-- Update `toml` 1.0.6 → 1.0.7
-- Update transitive dependencies via `cargo update`
+## [1.6.0] - 2026-03-24
 
 ### Added
 
@@ -37,6 +29,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Add C# lockfile version resolution (`packages.lock.json`) to eliminate false-positive update warnings
 - Add Ruby lockfile version resolution (`Gemfile.lock`) to eliminate false-positive update warnings
 
+### Changed
+
+- Bump MSRV from 1.85 to 1.94; adopt stable let-chains, `fmt::from_fn` for
+  zero-allocation display formatting, and inlined format args across the codebase
+- Removed `String`-returning formatting functions as deprecated
+- Use `hashbrown::Hash{Map, Set}` instead of the `std::collections::Hash{Map, Set}`,
+  to enable more flexible usage and reduce allocations. Note: `hashbrown` uses `foldhash` by
+  default, instead of the `std`'s default --- SipHash.
+- Update `toml` 1.0.6 → 1.0.7
+- Update transitive dependencies via `cargo update`
+
 ### Fixed
 
 - Fix false-positive "update available" reports when using minimal version syntax (e.g., `bon = "3.9"`) by reading resolved versions from `Cargo.lock` ([#184](https://github.com/mpiton/zed-dependi/issues/184))
@@ -49,14 +52,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Fix hover panel showing manifest version specifier instead of resolved lockfile version ([#201](https://github.com/mpiton/zed-dependi/issues/201))
 - Fix `fmt_truncate_string` emitting "..." (3 chars) even when `max_chars` < 3 ([#201](https://github.com/mpiton/zed-dependi/issues/201))
 
-### Changed
+### Security
 
-- Bump MSRV from 1.85 to 1.94; adopt stable let-chains, `fmt::from_fn` for
-  zero-allocation display formatting, and inlined format args across the codebase
-- Removed `String`-returning formatting functions as deprecated
-- Use `hashbrown::Hash{Map, Set}` instead of the `std::collections::Hash{Map, Set}`,
-  to enable more flexible usage and reduce allocations. Note: `hashbrown` uses `foldhash` by
-  default, instead of the `std`'s default --- SipHash.
+- Update `rustls-webpki` 0.103.9 → 0.103.10 in fuzz lockfile (fixes certificate revocation enforcement bug, [GHSA-pwjx-qhcg-rvj4](https://github.com/rustls/webpki/security/advisories/GHSA-pwjx-qhcg-rvj4))
+- Update `aws-lc-sys` 0.38.0 → 0.39.0 in fuzz lockfile (fixes CRL Distribution Point scope check and X.509 Name Constraints bypass)
 
 ## [1.5.0] - 2026-03-16
 
@@ -334,7 +333,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - In-memory caching for version data
 - Parallel registry requests (5 concurrent)
 
-[Unreleased]: https://github.com/mpiton/zed-dependi/compare/v1.5.0...HEAD
+[Unreleased]: https://github.com/mpiton/zed-dependi/compare/v1.6.0...HEAD
+[1.6.0]: https://github.com/mpiton/zed-dependi/compare/v1.5.0...v1.6.0
 [1.5.0]: https://github.com/mpiton/zed-dependi/compare/v1.4.4...v1.5.0
 [1.4.4]: https://github.com/mpiton/zed-dependi/compare/v1.4.3...v1.4.4
 [1.4.3]: https://github.com/mpiton/zed-dependi/compare/v1.4.2...v1.4.3
