@@ -121,7 +121,21 @@ impl ProcessingContext {
         {
             match tokio::fs::read_to_string(&lock_path).await {
                 Ok(lock_content) => {
-                    let lock_versions = crate::parsers::cargo_lock::parse_cargo_lock(&lock_content);
+                    let root_package = match toml::from_str::<toml::Value>(content) {
+                        Ok(v) => v
+                            .get("package")
+                            .and_then(|p| p.get("name"))
+                            .and_then(|n| n.as_str())
+                            .map(String::from),
+                        Err(e) => {
+                            tracing::debug!("Could not parse Cargo.toml for package name: {e}");
+                            None
+                        }
+                    };
+                    let lock_versions = crate::parsers::cargo_lock::parse_cargo_lock(
+                        &lock_content,
+                        root_package.as_deref(),
+                    );
                     for dep in &mut dependencies {
                         if let Some(resolved) = lock_versions.get(&dep.name) {
                             dep.resolved_version = Some(resolved.clone());

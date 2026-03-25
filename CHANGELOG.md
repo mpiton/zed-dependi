@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- Fix false-positive "update available" diagnostic when `Cargo.lock` contains multiple versions of the same crate (e.g., `hashbrown 0.15.5` pulled by a transitive dep and `hashbrown 0.16.1` used directly). The root package's `dependencies` list is now used to select the correct locked version ([#210](https://github.com/mpiton/zed-dependi/issues/210))
+
 ## [1.6.0] - 2026-03-24
 
 ### Added
