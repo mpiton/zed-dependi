@@ -1,4 +1,4 @@
-requests==2.32.4
+requests==2.33.0
 flask>=2.0.0,<4.0.0
 numpy~=1.24.0
 pandas[sql,excel]>=2.0.0
