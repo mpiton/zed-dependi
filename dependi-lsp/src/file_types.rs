@@ -60,6 +60,10 @@ impl FileType {
             Some(FileType::Csharp)
         } else if path.ends_with("Gemfile") {
             Some(FileType::Ruby)
+        } else if filename == "hatch.toml" {
+            // Hatch project-level config; the filename is always `hatch.toml`.
+            // Routed to FileType::Python because dependencies resolve via PyPI.
+            Some(FileType::Python)
         } else {
             None
         }
@@ -230,6 +234,22 @@ mod tests {
     fn test_detect_ruby() {
         let uri = Url::parse("file:///project/Gemfile").unwrap();
         assert_eq!(FileType::detect(&uri), Some(FileType::Ruby));
+    }
+
+    #[test]
+    fn test_detect_hatch_toml() {
+        // hatch.toml at project root
+        let uri = Url::parse("file:///project/hatch.toml").unwrap();
+        assert_eq!(FileType::detect(&uri), Some(FileType::Python));
+
+        // hatch.toml nested inside a subdirectory
+        let uri = Url::parse("file:///project/subdir/hatch.toml").unwrap();
+        assert_eq!(FileType::detect(&uri), Some(FileType::Python));
+
+        // A file that merely ends in "hatch.toml" as part of a longer name
+        // is intentionally NOT matched (rsplit behaviour ensures full filename match).
+        let uri = Url::parse("file:///project/not-hatch.toml").unwrap();
+        assert_eq!(FileType::detect(&uri), None);
     }
 
     #[test]

@@ -1,0 +1,5 @@
+[tool.hatch.envs.test]
+dependencies = [
+    "pytest>=7.0.0",
+    "coverage>=6.0",
+]
