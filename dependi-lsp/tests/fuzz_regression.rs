@@ -145,3 +145,63 @@ fn test_python_fuzz_crash_malformed_bracket() {
     let deps = parser.parse(content);
     validate_deps(&deps, content, "Python");
 }
+
+#[test]
+fn test_python_fuzz_dependency_groups() {
+    let parser = PythonParser::new();
+
+    // --- Valid case ---
+    // Non-package project: only [dependency-groups], no [project] block.
+    // Exercises: PEP 735 detection in is_pyproject_toml, multi-group iteration,
+    // {include-group} table items (skipped), unversioned strings (skipped).
+    let valid = r#"
+[dependency-groups]
+test = ["pytest>=7.0.0", "coverage>=7.0.0"]
+typing = ["mypy>=1.0.0", {include-group = "test"}, "types-requests>=2.0.0"]
+typing-test = [{include-group = "typing"}, {include-group = "test"}, "useful-types>=1.0.0"]
+unversioned = ["bare-package"]
+"#;
+    let result = std::panic::catch_unwind(AssertUnwindSafe(|| parser.parse(valid)));
+    let deps = result.expect("should not panic on valid dependency-groups");
+    // test: 2, typing: 2 (include-group skipped), typing-test: 1 (both skipped), unversioned: 0
+    assert_eq!(
+        deps.len(),
+        5,
+        "expected 5 deps: include-groups and unversioned items must be excluded"
+    );
+    validate_deps(&deps, valid, "Python/dependency-groups");
+
+    // --- Edge cases: must not panic and must satisfy position invariants ---
+    let edge_cases: &[&str] = &[
+        // truncated array
+        "[dependency-groups]\ntest = [",
+        // truncated include-group table
+        "[dependency-groups]\ntest = [{include-group",
+        // include-group table with missing value
+        "[dependency-groups]\ntest = [{include-group = }]",
+        // unrecognised table key (spec says tools SHOULD error only when processing it)
+        "[dependency-groups]\ntest = [{set-phasers-to = \"stun\"}]",
+        // invalid PEP 508 string (no valid operator)
+        "[dependency-groups]\ntest = [\">=>=>=>\"]",
+        // control characters inside a string
+        "[dependency-groups]\ntest = [\"\x00\x01\x02\"]",
+        // empty group
+        "[dependency-groups]\ntest = []",
+        // empty table
+        "[dependency-groups]\n",
+        // inline comment on header
+        "[dependency-groups] # my groups\ntest = [\"pytest>=7.0.0\"]",
+        // mixed valid strings and include-group on same line (inline array)
+        "[dependency-groups]\ntest = [\"pkg>=1.0\", {include-group = \"test\"}, \"other>=2.0\"]",
+        // combined with [project] block (package project using both sections)
+        "[project]\nname = \"mypkg\"\n\n[dependency-groups]\ntest = [\"pytest>=7.0.0\"]\n",
+    ];
+
+    for content in edge_cases {
+        let result = std::panic::catch_unwind(AssertUnwindSafe(|| parser.parse(content)));
+        match result {
+            Ok(deps) => validate_deps(&deps, content, "Python/dependency-groups"),
+            Err(_) => panic!("Python parser panicked on dependency-groups input:\n{content:?}"),
+        }
+    }
+}

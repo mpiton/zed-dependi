@@ -40,6 +40,13 @@ fn is_pyproject_toml(content: &str) -> bool {
         if trimmed.starts_with("[tool.poetry") && is_valid_section_header(trimmed, "[tool.poetry") {
             return true;
         }
+
+        // Match [dependency-groups] section header (PEP 735)
+        if trimmed.starts_with("[dependency-groups")
+            && is_valid_section_header(trimmed, "[dependency-groups")
+        {
+            return true;
+        }
     }
     false
 }
@@ -320,6 +327,42 @@ fn parse_pyproject_toml(content: &str) -> Vec<Dependency> {
 
         // Suppress unused variable warning
         let _ = poetry_table;
+    }
+
+    // PEP 735: [dependency-groups] table
+    //
+    // Each group is an array whose items are either:
+    //   - a PEP 508 string specifier  → parsed exactly like [project.dependencies]
+    //   - a table {include-group = "name"} → skipped here; since every group is
+    //     iterated directly, the packages referenced by an include are already
+    //     emitted when that group itself is processed, so no packages are missed.
+    //
+    // Unversioned items (e.g. "pytest" with no operator) produce no Dependency
+    // because parse_pep508_dependency requires a version operator; there is
+    // nothing to check without a version constraint.
+    //
+    // The spec assigns no "dev" semantics to group names, so dev = false for all.
+    let dep_groups_node = dom.get("dependency-groups");
+    if let Some(dep_groups_table) = dep_groups_node.as_table() {
+        let group_entries = dep_groups_table.entries().read();
+        for (_group_name, group_value) in group_entries.iter() {
+            if let Some(items_array) = group_value.as_array() {
+                let items = items_array.items().read();
+                for item in items.iter() {
+                    // String item: a PEP 508 dependency specifier
+                    if let Some(dep_str) = item.as_str() {
+                        let dep_str = dep_str.value();
+                        if let Some((name, version)) = parse_pep508_dependency(dep_str)
+                            && let Some(dep) =
+                                find_dependency_position(content, &name, &version, false)
+                        {
+                            dependencies.push(dep);
+                        }
+                    }
+                    // Table items ({include-group = "..."}) are intentionally skipped
+                }
+            }
+        }
     }
 
     dependencies
@@ -661,6 +704,15 @@ flask>=2.0.0
             "[tool.poetry] # comment\nname = \"test\""
         ));
 
+        // Valid [dependency-groups] patterns (PEP 735)
+        assert!(is_pyproject_toml(
+            "[dependency-groups]\ntest = [\"pytest\"]"
+        ));
+        assert!(is_pyproject_toml(
+            "[dependency-groups] # comment\ntest = []"
+        ));
+        assert!(is_pyproject_toml("  [dependency-groups]  \ntest = []"));
+
         // Invalid patterns (should not trigger TOML parsing)
         assert!(!is_pyproject_toml("mypkg[project]==1.2"));
         assert!(!is_pyproject_toml("pkg[tool.poetry]>=1.0"));
@@ -668,5 +720,53 @@ flask>=2.0.0
         assert!(!is_pyproject_toml("[projectx]\nname = \"test\"")); // not [project] or [project.*]
         assert!(!is_pyproject_toml("[tool.poetryextra]\nname = \"test\"")); // not [tool.poetry...]
         assert!(!is_pyproject_toml("flask>=2.0.0\nrequests>=2.25.0"));
+        assert!(!is_pyproject_toml("[dependency-groupsx]\ntest = []")); // not [dependency-groups]
+    }
+
+    #[test]
+    fn test_pyproject_dependency_groups() {
+        // Covers:
+        //   - file with ONLY [dependency-groups] (non-package project, no [project] block)
+        //   - multiple groups, multiple versioned deps per group
+        //   - {include-group = "..."} table items are silently skipped (all groups are
+        //     iterated directly, so no package is ever missed via this skip)
+        //   - unversioned items ("useful-types" without operator) produce no Dependency
+        //   - dev = false for all groups (spec assigns no dev semantics to group names)
+        let parser = PythonParser::new();
+        let content = r#"
+[dependency-groups]
+test = ["pytest>=7.0.0", "coverage>=7.0.0"]
+typing = ["mypy>=1.0.0", {include-group = "test"}, "types-requests>=2.0.0"]
+typing-test = [{include-group = "typing"}, {include-group = "test"}, "useful-types>=1.0.0"]
+unversioned = ["bare-package"]
+"#;
+        let deps = parser.parse(content);
+
+        // test: 2, typing: 2 (include-group skipped), typing-test: 1 (both include-groups skipped)
+        // unversioned: 0 (no version operator → parse_pep508_dependency returns None)
+        assert_eq!(deps.len(), 5);
+
+        let pytest = deps.iter().find(|d| d.name == "pytest").unwrap();
+        assert_eq!(pytest.version, ">=7.0.0");
+        assert!(!pytest.dev);
+
+        let coverage = deps.iter().find(|d| d.name == "coverage").unwrap();
+        assert_eq!(coverage.version, ">=7.0.0");
+        assert!(!coverage.dev);
+
+        let mypy = deps.iter().find(|d| d.name == "mypy").unwrap();
+        assert_eq!(mypy.version, ">=1.0.0");
+        assert!(!mypy.dev);
+
+        let types_requests = deps.iter().find(|d| d.name == "types-requests").unwrap();
+        assert_eq!(types_requests.version, ">=2.0.0");
+        assert!(!types_requests.dev);
+
+        let useful_types = deps.iter().find(|d| d.name == "useful-types").unwrap();
+        assert_eq!(useful_types.version, ">=1.0.0");
+        assert!(!useful_types.dev);
+
+        // bare-package has no version operator → must not appear
+        assert!(!deps.iter().any(|d| d.name == "bare-package"));
     }
 }
