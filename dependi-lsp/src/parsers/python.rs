@@ -730,7 +730,7 @@ flask>=2.0.0
         //   - multiple groups, multiple versioned deps per group
         //   - {include-group = "..."} table items are silently skipped (all groups are
         //     iterated directly, so no package is ever missed via this skip)
-        //   - unversioned items ("useful-types" without operator) produce no Dependency
+        //   - unversioned items ("bare-package" without operator) produce no Dependency
         //   - dev = false for all groups (spec assigns no dev semantics to group names)
         let parser = PythonParser::new();
         let content = r#"
