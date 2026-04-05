@@ -48,7 +48,7 @@ Dependency management extension for the [Zed](https://zed.dev) editor.
 |----------|------|----------|--------|
 | Rust | `Cargo.toml` | crates.io + alternative registries | ✅ |
 | JavaScript/TypeScript | `package.json` | npm | ✅ |
-| Python | `requirements.txt`, `constraints.txt`, `pyproject.toml` | PyPI | ✅ |
+| Python | `requirements.txt`, `constraints.txt`, `pyproject.toml`, `hatch.toml` | PyPI | ✅ |
 | Go | `go.mod` | proxy.golang.org | ✅ |
 | PHP | `composer.json` | Packagist | ✅ |
 | Dart/Flutter | `pubspec.yaml` | pub.dev | ✅ |
@@ -104,7 +104,7 @@ zed-dependi/
 │   │   │   ├── cargo_lock.rs # Cargo.lock lockfile
 │   │   │   ├── npm.rs     # package.json parser
 │   │   │   ├── npm_lock.rs # package-lock.json, yarn.lock, pnpm-lock.yaml, bun.lock
-│   │   │   ├── python.rs  # requirements.txt, constraints.txt, pyproject.toml
+│   │   │   ├── python.rs  # requirements.txt, constraints.txt, pyproject.toml, hatch.toml
 │   │   │   ├── python_lock.rs # poetry.lock, uv.lock, pdm.lock, Pipfile.lock
 │   │   │   ├── go.rs      # go.mod parser
 │   │   │   ├── go_sum.rs  # go.sum lockfile
@@ -347,7 +347,7 @@ dependi-lsp scan --file <path> [options]
 
 - Rust: `Cargo.toml`
 - JavaScript/TypeScript: `package.json`
-- Python: `requirements.txt`, `constraints.txt`, `pyproject.toml`
+- Python: `requirements.txt`, `constraints.txt`, `pyproject.toml`, `hatch.toml`
 - Go: `go.mod`
 - PHP: `composer.json`
 - Dart/Flutter: `pubspec.yaml`
