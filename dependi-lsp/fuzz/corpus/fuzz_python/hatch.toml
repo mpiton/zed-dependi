@@ -1,0 +1,13 @@
+[envs.default]
+dependencies = [
+    "mypy>=1.0.0",
+]
+
+[envs.test]
+dependencies = [
+    "pytest>=7.0.0",
+    "coverage>=6.0",
+]
+extra-dependencies = [
+    "baz>=1.0",
+]

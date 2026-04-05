@@ -1,0 +1,10 @@
+[tool.hatch.envs.default]
+dependencies = [
+    "foo>=1.0",
+    "bar>=2.0",
+]
+
+[tool.hatch.envs.experimental]
+extra-dependencies = [
+    "baz>=1.0",
+]

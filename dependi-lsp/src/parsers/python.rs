@@ -1,4 +1,4 @@
-//! Parser for Python dependency files (requirements.txt, constraints.txt, pyproject.toml)
+//! Parser for Python dependency files (requirements.txt, constraints.txt, pyproject.toml, hatch.toml)
 
 use super::{Dependency, Parser};
 
@@ -14,11 +14,15 @@ impl PythonParser {
 
 impl Parser for PythonParser {
     fn parse(&self, content: &str) -> Vec<Dependency> {
-        // Detect file type based on content
-        // Only parse as TOML if it contains valid pyproject.toml section headers
-        // Use line-anchored detection to avoid false positives like "mypkg[project]==1.2"
+        // Detect file type based on content.
+        // Only parse as TOML if it contains valid pyproject.toml section headers.
+        // Use line-anchored detection to avoid false positives like "mypkg[project]==1.2".
+        // is_pyproject_toml is checked first so that a pyproject.toml that also uses
+        // [tool.hatch.envs.*] is routed through parse_pyproject_toml (which handles both).
         if is_pyproject_toml(content) {
             parse_pyproject_toml(content)
+        } else if is_hatch_toml(content) {
+            parse_hatch_toml(content)
         } else {
             parse_requirements_txt(content)
         }
@@ -46,6 +50,33 @@ fn is_pyproject_toml(content: &str) -> bool {
             && is_valid_section_header(trimmed, "[dependency-groups")
         {
             return true;
+        }
+        // Match [tool.hatch...] section headers (e.g., [tool.hatch.envs.test])
+        if trimmed.starts_with("[tool.hatch") && is_valid_section_header(trimmed, "[tool.hatch") {
+            return true;
+        }
+    }
+    false
+}
+
+/// Detect a standalone hatch.toml file.
+///
+/// The project-level Hatch config is always stored in a file named `hatch.toml`;
+/// the filename cannot be changed. `file_types.rs` therefore gates entry to this
+/// code path via a filename check, making content-based false positives impossible
+/// in practice. Detection requires a top-level `[envs.<NAME>]` section header
+/// with a mandatory dot-separated env name (bare `[envs]` is not a valid hatch section).
+fn is_hatch_toml(content: &str) -> bool {
+    for line in content.lines() {
+        let trimmed = line.trim();
+        // Require "[envs." (dot included) so that a bare "[envs]" is never matched.
+        if trimmed.starts_with("[envs.")
+            && let Some(close) = trimmed.find(']')
+        {
+            let after = trimmed[close + 1..].trim_start();
+            if after.is_empty() || after.starts_with('#') {
+                return true;
+            }
         }
     }
     false
@@ -200,7 +231,7 @@ fn parse_requirement_line(line: &str, line_num: u32, dev: bool) -> Option<Depend
     })
 }
 
-/// Parse pyproject.toml format (PEP 621 + Poetry)
+/// Parse pyproject.toml format (PEP 621 + Poetry + Hatch)
 fn parse_pyproject_toml(content: &str) -> Vec<Dependency> {
     let mut dependencies = Vec::new();
 
@@ -364,8 +395,89 @@ fn parse_pyproject_toml(content: &str) -> Vec<Dependency> {
             }
         }
     }
+    // Hatch: [tool.hatch.envs.<ENV_NAME>]
+    // Both `dependencies` and `extra-dependencies` are PEP 508 string arrays.
+    // Matrix overrides (e.g. [tool.hatch.envs.test.overrides.matrix.*.dependencies])
+    // use a different inline-table value format and are out of scope.
+    let hatch_envs = dom.get("tool").get("hatch").get("envs");
+    collect_hatch_env_deps(&hatch_envs, content, &mut dependencies);
 
     dependencies
+}
+
+/// Parse a standalone `hatch.toml` file.
+///
+/// The project-level Hatch config is always stored in a file named `hatch.toml`.
+/// In this format the envs table lives at the top level under `envs`
+/// (no `tool.hatch` prefix as in pyproject.toml).
+fn parse_hatch_toml(content: &str) -> Vec<Dependency> {
+    let mut dependencies = Vec::new();
+
+    let parsed = taplo::parser::parse(content);
+    if !parsed.errors.is_empty() {
+        return dependencies;
+    }
+
+    let dom = parsed.into_dom();
+    let envs_node = dom.get("envs");
+    collect_hatch_env_deps(&envs_node, content, &mut dependencies);
+
+    dependencies
+}
+
+/// Collect `dependencies` and `extra-dependencies` from a hatch envs Node.
+///
+/// `envs_node` is the taplo node for the envs table:
+/// - `dom["tool"]["hatch"]["envs"]` when called from `parse_pyproject_toml`
+/// - `dom["envs"]`                  when called from `parse_hatch_toml`
+///
+/// Flags set on every collected dependency:
+/// - `dev = true`       — hatch env deps are extras layered on top of
+///   `[project.dependencies]`; they are always dev/test tooling.
+/// - `optional = false` — they are unconditionally installed when the env is
+///   activated; they are not PEP 508 optional extras (project features/extras).
+///
+/// Context-formatted strings (e.g. `"{root:parent:uri}/pkg"`, `"{env:PKG:default}"`)
+/// contain no PEP 508 version operator, so `parse_pep508_dependency` returns `None`
+/// and they are silently skipped — identical to the treatment of unversioned plain
+/// strings.
+///
+/// Env inheritance (`template` option) is not followed; only deps declared directly
+/// in each env are emitted. This mirrors the treatment of Poetry group inheritance.
+///
+/// The `dependency-groups` key inside a hatch env is a reference to groups already
+/// parsed elsewhere (e.g. from a `[dependency-groups]` table in the same file);
+/// following those references here would produce duplicate entries.
+fn collect_hatch_env_deps(
+    envs_node: &taplo::dom::Node,
+    content: &str,
+    dependencies: &mut Vec<Dependency>,
+) {
+    let Some(envs_table) = envs_node.as_table() else {
+        return;
+    };
+    let env_entries = envs_table.entries().read();
+    for (_env_name, env_value) in env_entries.iter() {
+        for key in ["dependencies", "extra-dependencies"] {
+            let deps_node = env_value.get(key);
+            let Some(deps_array) = deps_node.as_array() else {
+                continue;
+            };
+            let items = deps_array.items().read();
+            for item in items.iter() {
+                let Some(dep_str) = item.as_str() else {
+                    continue;
+                };
+                let dep_str = dep_str.value();
+                if let Some((name, version)) = parse_pep508_dependency(dep_str)
+                    && let Some(mut dep) = find_dependency_position(content, &name, &version, true)
+                {
+                    dep.optional = false; // env deps are required within their env
+                    dependencies.push(dep);
+                }
+            }
+        }
+    }
 }
 
 /// Parse PEP 508 dependency string: "package>=1.0.0" or "package[extra]>=1.0.0"
@@ -712,13 +824,26 @@ flask>=2.0.0
             "[dependency-groups] # comment\ntest = []"
         ));
         assert!(is_pyproject_toml("  [dependency-groups]  \ntest = []"));
+        // Valid [tool.hatch] patterns
+        assert!(is_pyproject_toml(
+            "[tool.hatch.envs.test]\ndependencies = []"
+        ));
+        assert!(is_pyproject_toml(
+            "[tool.hatch.envs.default]\ndependencies = []"
+        ));
+        assert!(is_pyproject_toml("[tool.hatch] # comment\nversion = {}"));
+        assert!(is_pyproject_toml(
+            "[tool.hatch.envs.test.scripts]\ntest = \"pytest\""
+        ));
 
         // Invalid patterns (should not trigger TOML parsing)
         assert!(!is_pyproject_toml("mypkg[project]==1.2"));
         assert!(!is_pyproject_toml("pkg[tool.poetry]>=1.0"));
+        assert!(!is_pyproject_toml("pkg[tool.hatch]>=1.0"));
         assert!(!is_pyproject_toml("[projects]\nname = \"test\"")); // not [project]
         assert!(!is_pyproject_toml("[projectx]\nname = \"test\"")); // not [project] or [project.*]
         assert!(!is_pyproject_toml("[tool.poetryextra]\nname = \"test\"")); // not [tool.poetry...]
+        assert!(!is_pyproject_toml("[tool.hatchextra]\nname = \"test\"")); // not [tool.hatch...]
         assert!(!is_pyproject_toml("flask>=2.0.0\nrequests>=2.25.0"));
         assert!(!is_pyproject_toml("[dependency-groupsx]\ntest = []")); // not [dependency-groups]
     }
@@ -768,5 +893,267 @@ unversioned = ["bare-package"]
 
         // bare-package has no version operator → must not appear
         assert!(!deps.iter().any(|d| d.name == "bare-package"));
+    }
+
+    #[test]
+    fn test_is_hatch_toml_detection() {
+        // Valid: top-level [envs.<name>] section
+        assert!(is_hatch_toml("[envs.test]\ndependencies = []"));
+        assert!(is_hatch_toml("[envs.default]\ndependencies = []"));
+        // Sub-tables of an env are also valid triggers
+        assert!(is_hatch_toml("[envs.test.scripts]\ntest = \"pytest\""));
+        // Inline comment after closing bracket
+        assert!(is_hatch_toml(
+            "[envs.test] # my test env\ndependencies = []"
+        ));
+        // Leading whitespace on header line
+        assert!(is_hatch_toml("  [envs.test]  \ndependencies = []"));
+
+        // Invalid: bare [envs] without a name
+        assert!(!is_hatch_toml("[envs]\ndependencies = []"));
+        // Invalid: different top-level key
+        assert!(!is_hatch_toml("[envsx.test]\ndependencies = []"));
+        // Invalid: content that would be pyproject.toml
+        assert!(!is_hatch_toml("[project]\nname = \"test\""));
+        // Invalid: requirements.txt style
+        assert!(!is_hatch_toml("flask>=2.0.0\nrequests>=2.25.0"));
+        // Invalid: env name is part of a value, not a section header
+        assert!(!is_hatch_toml("template = \"[envs.default]\""));
+    }
+
+    #[test]
+    fn test_pyproject_hatch_deps() {
+        // Basic [tool.hatch.envs.*] with dependencies
+        let parser = PythonParser::new();
+        let content = r#"
+[project]
+name = "myproject"
+version = "1.0.0"
+
+[tool.hatch.envs.test]
+dependencies = [
+    "pytest>=7.0.0",
+    "coverage>=6.0",
+]
+"#;
+        let deps = parser.parse(content);
+        assert_eq!(deps.len(), 2);
+
+        let pytest = deps.iter().find(|d| d.name == "pytest").unwrap();
+        assert_eq!(pytest.version, ">=7.0.0");
+        assert!(pytest.dev);
+        assert!(!pytest.optional);
+
+        let coverage = deps.iter().find(|d| d.name == "coverage").unwrap();
+        assert_eq!(coverage.version, ">=6.0");
+        assert!(coverage.dev);
+        assert!(!coverage.optional);
+    }
+
+    #[test]
+    fn test_pyproject_hatch_extra_deps() {
+        // extra-dependencies in a hatch env
+        let parser = PythonParser::new();
+        let content = r#"
+[project]
+name = "myproject"
+
+[tool.hatch.envs.default]
+dependencies = [
+    "foo>=1.0",
+]
+
+[tool.hatch.envs.experimental]
+extra-dependencies = [
+    "baz>=2.0",
+]
+"#;
+        let deps = parser.parse(content);
+        assert_eq!(deps.len(), 2);
+
+        let foo = deps.iter().find(|d| d.name == "foo").unwrap();
+        assert_eq!(foo.version, ">=1.0");
+        assert!(foo.dev);
+        assert!(!foo.optional);
+
+        let baz = deps.iter().find(|d| d.name == "baz").unwrap();
+        assert_eq!(baz.version, ">=2.0");
+        assert!(baz.dev);
+        assert!(!baz.optional);
+    }
+
+    #[test]
+    fn test_pyproject_hatch_multiple_envs() {
+        // Several named envs each contributing deps; all dev=true, optional=false
+        let parser = PythonParser::new();
+        let content = r#"
+[project]
+name = "myproject"
+
+[tool.hatch.envs.default]
+dependencies = ["requests>=2.28.0"]
+
+[tool.hatch.envs.test]
+dependencies = [
+    "pytest>=7.0.0",
+    "coverage[toml]>=6.0",
+]
+
+[tool.hatch.envs.lint]
+dependencies = [
+    "ruff>=0.1.0",
+    "mypy>=1.0.0",
+]
+extra-dependencies = [
+    "types-requests>=2.28.0",
+]
+"#;
+        let deps = parser.parse(content);
+        assert_eq!(deps.len(), 6);
+        assert!(deps.iter().all(|d| d.dev));
+        assert!(deps.iter().all(|d| !d.optional));
+
+        assert!(deps.iter().any(|d| d.name == "requests"));
+        assert!(deps.iter().any(|d| d.name == "pytest"));
+        assert!(deps.iter().any(|d| d.name == "coverage"));
+        assert!(deps.iter().any(|d| d.name == "ruff"));
+        assert!(deps.iter().any(|d| d.name == "mypy"));
+        assert!(deps.iter().any(|d| d.name == "types-requests"));
+    }
+
+    #[test]
+    fn test_pyproject_hatch_no_version() {
+        // Bare package name without a version operator is silently dropped
+        let parser = PythonParser::new();
+        let content = r#"
+[tool.hatch.envs.test]
+dependencies = [
+    "bare-package",
+    "pytest>=7.0.0",
+]
+"#;
+        let deps = parser.parse(content);
+        assert_eq!(deps.len(), 1);
+        assert_eq!(deps[0].name, "pytest");
+        assert!(!deps.iter().any(|d| d.name == "bare-package"));
+    }
+
+    #[test]
+    fn test_pyproject_hatch_context_formatted() {
+        // Context-formatted strings (hatch-specific, no PEP 508 version operator) are
+        // silently skipped.  A versioned dep on the same env is still collected.
+        let parser = PythonParser::new();
+        let content = r#"
+[tool.hatch.envs.test]
+dependencies = [
+    "example-project @ {root:parent:parent:uri}/example-project",
+    "pytest>=7.0.0",
+]
+"#;
+        let deps = parser.parse(content);
+        assert_eq!(deps.len(), 1);
+        assert_eq!(deps[0].name, "pytest");
+    }
+
+    #[test]
+    fn test_pyproject_hatch_combined_pep621() {
+        // pyproject.toml with [project.dependencies] (dev=false) and
+        // [tool.hatch.envs.*] (dev=true, optional=false) in the same file.
+        let parser = PythonParser::new();
+        let content = r#"
+[project]
+name = "myproject"
+dependencies = [
+    "flask>=2.0.0",
+    "requests~=2.25.0",
+]
+
+[project.optional-dependencies]
+extras = [
+    "redis>=4.0.0",
+]
+
+[tool.hatch.envs.test]
+dependencies = [
+    "pytest>=7.0.0",
+    "coverage>=6.0",
+]
+"#;
+        let deps = parser.parse(content);
+        assert_eq!(deps.len(), 5);
+
+        // Project deps: dev=false, optional=false
+        let flask = deps.iter().find(|d| d.name == "flask").unwrap();
+        assert!(!flask.dev);
+        assert!(!flask.optional);
+
+        let requests = deps.iter().find(|d| d.name == "requests").unwrap();
+        assert!(!requests.dev);
+        assert!(!requests.optional);
+
+        // Optional dep: dev=true, optional=true
+        let redis = deps.iter().find(|d| d.name == "redis").unwrap();
+        assert!(redis.dev);
+        assert!(redis.optional);
+
+        // Hatch env deps: dev=true, optional=false
+        let pytest = deps.iter().find(|d| d.name == "pytest").unwrap();
+        assert!(pytest.dev);
+        assert!(!pytest.optional);
+
+        let coverage = deps.iter().find(|d| d.name == "coverage").unwrap();
+        assert!(coverage.dev);
+        assert!(!coverage.optional);
+    }
+
+    #[test]
+    fn test_hatch_toml_basic() {
+        // Standalone hatch.toml — envs at top level under [envs.*]
+        let parser = PythonParser::new();
+        let content = r#"
+[envs.default]
+dependencies = [
+    "mypy>=1.0.0",
+]
+
+[envs.test]
+dependencies = [
+    "pytest>=7.0.0",
+    "coverage>=6.0",
+]
+"#;
+        let deps = parser.parse(content);
+        assert_eq!(deps.len(), 3);
+        assert!(deps.iter().all(|d| d.dev));
+        assert!(deps.iter().all(|d| !d.optional));
+
+        assert!(deps.iter().any(|d| d.name == "mypy"));
+        assert!(deps.iter().any(|d| d.name == "pytest"));
+        assert!(deps.iter().any(|d| d.name == "coverage"));
+    }
+
+    #[test]
+    fn test_hatch_toml_extra_deps() {
+        // extra-dependencies in standalone hatch.toml
+        let parser = PythonParser::new();
+        let content = r#"
+[envs.default]
+dependencies = [
+    "foo>=1.0",
+    "bar>=2.0",
+]
+
+[envs.experimental]
+extra-dependencies = [
+    "baz>=3.0",
+]
+"#;
+        let deps = parser.parse(content);
+        assert_eq!(deps.len(), 3);
+        assert!(deps.iter().any(|d| d.name == "foo"));
+        assert!(deps.iter().any(|d| d.name == "bar"));
+        assert!(deps.iter().any(|d| d.name == "baz"));
+        assert!(deps.iter().all(|d| d.dev));
+        assert!(deps.iter().all(|d| !d.optional));
     }
 }
