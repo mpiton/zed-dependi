@@ -1,0 +1,6 @@
+[dependency-groups]
+test = ["pytest>=7.0.0", "coverage>=7.0.0"]
+typing = ["mypy>=1.0.0", "types-requests>=2.0.0"]
+lint = ["ruff>=0.1.0", "black>=23.0.0"]
+typing-test = [{include-group = "typing"}, {include-group = "test"}, "useful-types>=1.0.0"]
+all = [{include-group = "test"}, {include-group = "typing"}, {include-group = "lint"}]
