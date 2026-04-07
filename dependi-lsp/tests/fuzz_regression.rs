@@ -205,3 +205,149 @@ unversioned = ["bare-package"]
         }
     }
 }
+
+#[test]
+fn test_hatch_fuzz_pyproject() {
+    // Exercises collect_hatch_env_deps via parse_pyproject_toml:
+    // [tool.hatch.envs.*] with `dependencies` and `extra-dependencies`.
+    let parser = PythonParser::new();
+
+    // --- Valid case: multiple envs with both dep keys ---
+    let valid = r#"
+[project]
+name = "mypkg"
+version = "1.0.0"
+
+[tool.hatch.envs.default]
+dependencies = [
+    "mypy>=1.0.0",
+]
+
+[tool.hatch.envs.test]
+dependencies = [
+    "pytest>=7.0.0",
+    "coverage>=6.0",
+]
+extra-dependencies = [
+    "baz>=1.0",
+]
+"#;
+    let result = std::panic::catch_unwind(AssertUnwindSafe(|| parser.parse(valid)));
+    let deps = result.expect("should not panic on valid hatch pyproject.toml");
+    // default: 1, test: 2, extra: 1 = 4 hatch deps (plus any [project.dependencies])
+    assert_eq!(deps.len(), 4, "expected 4 hatch env deps");
+    // All hatch env deps: dev=true, optional=false
+    for dep in &deps {
+        assert!(dep.dev, "hatch env dep should be dev=true");
+        assert!(!dep.optional, "hatch env dep should be optional=false");
+    }
+    validate_deps(&deps, valid, "Python/hatch-pyproject");
+
+    // --- Edge cases: must not panic and must satisfy position invariants ---
+    let edge_cases: &[&str] = &[
+        // truncated array — no closing bracket
+        "[tool.hatch.envs.test]\ndependencies = [",
+        // empty deps array
+        "[tool.hatch.envs.test]\ndependencies = []",
+        // empty envs table
+        "[tool.hatch.envs]\n",
+        // no envs at all
+        "[tool.hatch]\n",
+        // extra-dependencies key only
+        "[tool.hatch.envs.lint]\nextra-dependencies = [\"ruff>=0.4\"]",
+        // context-formatted string — no PEP 508 version, must be silently skipped
+        "[tool.hatch.envs.test]\ndependencies = [\"{root:parent:uri}/local-pkg\"]",
+        // mixed: one context-formatted, one real dep
+        "[tool.hatch.envs.test]\ndependencies = [\"{env:MY_PKG:default}\", \"pytest>=7.0\"]",
+        // unversioned string — skipped
+        "[tool.hatch.envs.test]\ndependencies = [\"bare-package\"]",
+        // invalid PEP 508 specifier — no valid operator
+        "[tool.hatch.envs.test]\ndependencies = [\">=>==>>\"]",
+        // control characters inside string value
+        "[tool.hatch.envs.test]\ndependencies = [\"\x00\x01pytest>=7.0\"]",
+        // malformed TOML (unclosed string) — must not panic
+        "[tool.hatch.envs.test]\ndependencies = [\"pytest>=7.0",
+        // combined: [project.dependencies] + hatch envs
+        "[project]\nname = \"p\"\n\n[project.dependencies]\n# none\n\n[tool.hatch.envs.test]\ndependencies = [\"pytest>=7.0.0\"]\n",
+    ];
+
+    for content in edge_cases {
+        let result = std::panic::catch_unwind(AssertUnwindSafe(|| parser.parse(content)));
+        match result {
+            Ok(deps) => validate_deps(&deps, content, "Python/hatch-pyproject"),
+            Err(_) => panic!("Python parser panicked on hatch pyproject input:\n{content:?}"),
+        }
+    }
+}
+
+#[test]
+fn test_hatch_fuzz_standalone() {
+    // Exercises collect_hatch_env_deps via parse_hatch_toml:
+    // standalone hatch.toml uses [envs.*] (no [tool.hatch] wrapper).
+    let parser = PythonParser::new();
+
+    // --- Valid case ---
+    let valid = r#"
+[envs.default]
+dependencies = [
+    "mypy>=1.0.0",
+]
+
+[envs.test]
+dependencies = [
+    "pytest>=7.0.0",
+    "coverage>=6.0",
+]
+extra-dependencies = [
+    "baz>=1.0",
+]
+"#;
+    let result = std::panic::catch_unwind(AssertUnwindSafe(|| parser.parse(valid)));
+    let deps = result.expect("should not panic on valid standalone hatch.toml");
+    assert_eq!(
+        deps.len(),
+        4,
+        "expected 4 hatch env deps from standalone hatch.toml"
+    );
+    for dep in &deps {
+        assert!(dep.dev, "hatch env dep should be dev=true");
+        assert!(!dep.optional, "hatch env dep should be optional=false");
+    }
+    validate_deps(&deps, valid, "Python/hatch-standalone");
+
+    // --- Edge cases: must not panic and must satisfy position invariants ---
+    let edge_cases: &[&str] = &[
+        // truncated array
+        "[envs.test]\ndependencies = [",
+        // empty deps array
+        "[envs.test]\ndependencies = []",
+        // empty envs table
+        "[envs]\n",
+        // no envs key
+        "[build]\nrequires = [\"hatchling\"]\n",
+        // extra-dependencies only
+        "[envs.lint]\nextra-dependencies = [\"ruff>=0.4\"]",
+        // context-formatted string — silently skipped
+        "[envs.test]\ndependencies = [\"{root:parent:uri}/pkg\"]",
+        // mixed valid + context-formatted
+        "[envs.test]\ndependencies = [\"{env:PKG:default}\", \"coverage>=6.0\"]",
+        // unversioned bare name
+        "[envs.test]\ndependencies = [\"bare-package\"]",
+        // invalid PEP 508
+        "[envs.test]\ndependencies = [\">>>>=invalid\"]",
+        // control characters
+        "[envs.test]\ndependencies = [\"\x00\x01ruff>=0.4\"]",
+        // malformed TOML
+        "[envs.test]\ndependencies = [\"pytest>=7.0",
+        // multiple envs, one empty
+        "[envs.a]\ndependencies = []\n[envs.b]\ndependencies = [\"pytest>=7.0.0\"]\n",
+    ];
+
+    for content in edge_cases {
+        let result = std::panic::catch_unwind(AssertUnwindSafe(|| parser.parse(content)));
+        match result {
+            Ok(deps) => validate_deps(&deps, content, "Python/hatch-standalone"),
+            Err(_) => panic!("Python parser panicked on standalone hatch.toml input:\n{content:?}"),
+        }
+    }
+}

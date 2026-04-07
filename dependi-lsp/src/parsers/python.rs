@@ -256,7 +256,8 @@ fn parse_pyproject_toml(content: &str) -> Vec<Dependency> {
                 if let Some(dep_str) = item.as_str() {
                     let dep_str = dep_str.value();
                     if let Some((name, version)) = parse_pep508_dependency(dep_str)
-                        && let Some(dep) = find_dependency_position(content, &name, &version, false)
+                        && let Some(dep) =
+                            find_dependency_position(content, &name, &version, false, false)
                     {
                         dependencies.push(dep);
                     }
@@ -276,7 +277,7 @@ fn parse_pyproject_toml(content: &str) -> Vec<Dependency> {
                             let dep_str = dep_str.value();
                             if let Some((name, version)) = parse_pep508_dependency(dep_str)
                                 && let Some(dep) =
-                                    find_dependency_position(content, &name, &version, true)
+                                    find_dependency_position(content, &name, &version, true, true)
                             {
                                 dependencies.push(dep);
                             }
@@ -385,7 +386,7 @@ fn parse_pyproject_toml(content: &str) -> Vec<Dependency> {
                         let dep_str = dep_str.value();
                         if let Some((name, version)) = parse_pep508_dependency(dep_str)
                             && let Some(dep) =
-                                find_dependency_position(content, &name, &version, false)
+                                find_dependency_position(content, &name, &version, false, false)
                         {
                             dependencies.push(dep);
                         }
@@ -470,9 +471,9 @@ fn collect_hatch_env_deps(
                 };
                 let dep_str = dep_str.value();
                 if let Some((name, version)) = parse_pep508_dependency(dep_str)
-                    && let Some(mut dep) = find_dependency_position(content, &name, &version, true)
+                    && let Some(dep) =
+                        find_dependency_position(content, &name, &version, true, false)
                 {
-                    dep.optional = false; // env deps are required within their env
                     dependencies.push(dep);
                 }
             }
@@ -558,6 +559,7 @@ fn find_dependency_position(
     name: &str,
     version: &str,
     dev: bool,
+    optional: bool,
 ) -> Option<Dependency> {
     for (line_idx, line) in content.lines().enumerate() {
         // Look for the dependency string in an array
@@ -583,7 +585,7 @@ fn find_dependency_position(
                     version_start,
                     version_end,
                     dev,
-                    optional: dev, // optional-dependencies are optional
+                    optional,
                     registry: None,
                     resolved_version: None,
                 });
