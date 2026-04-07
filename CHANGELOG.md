@@ -7,6 +7,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- Add support for PEP 735 `[dependency-groups]` in `pyproject.toml` — versioned dependencies are parsed, `include-group` references and unversioned items are skipped ([#219](https://github.com/mpiton/zed-dependi/pull/219))
+- Add support for Hatch environment dependencies in `pyproject.toml` (`[tool.hatch.envs.*]`) and `hatch.toml` (`[envs.*]`), parsing both `dependencies` and `extra-dependencies` ([#220](https://github.com/mpiton/zed-dependi/pull/220))
+
 ### Changed
 
 - Bump `sha2` from 0.10 to 0.11 in dependi-zed (digest 0.11 migration)
