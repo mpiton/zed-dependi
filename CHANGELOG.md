@@ -7,6 +7,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- Add support for PEP 735 `[dependency-groups]` in `pyproject.toml` — versioned dependencies are parsed, `include-group` references and unversioned items are skipped ([#219](https://github.com/mpiton/zed-dependi/pull/219))
+- Add support for Hatch environment dependencies in `pyproject.toml` (`[tool.hatch.envs.*]`) and `hatch.toml` (`[envs.*]`), parsing both `dependencies` and `extra-dependencies` ([#220](https://github.com/mpiton/zed-dependi/pull/220))
+
+### Changed
+
+- Bump `sha2` from 0.10 to 0.11 in dependi-zed (digest 0.11 migration)
+- Bump `actions/configure-pages` from v5 to v6 and `actions/deploy-pages` from v4 to v5 in CI
+- Update all Cargo lockfiles with latest compatible dependency versions
+
+### Security
+
+- Bump `requests` from 2.32.4 to 2.33.0 in Python fuzz corpus (`dependi-lsp/fuzz/corpus/fuzz_python/requirements.txt`) — insecure temp file reuse in `extract_zipped_paths()` ([#213](https://github.com/mpiton/zed-dependi/pull/213))
+
 ## [1.6.1] - 2026-03-25
 
 ### Fixed
