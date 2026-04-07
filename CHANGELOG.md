@@ -20,7 +20,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Security
 
-- Bump `requests` from 2.32.4 to 2.33.0 in fuzz corpus (CVE: insecure temp file reuse)
+- Bump `requests` from 2.32.4 to 2.33.0 in Python fuzz corpus (`dependi-lsp/fuzz/corpus/fuzz_python/requirements.txt`) — insecure temp file reuse in `extract_zipped_paths()` ([#213](https://github.com/mpiton/zed-dependi/pull/213))
 
 ## [1.6.1] - 2026-03-25
 
