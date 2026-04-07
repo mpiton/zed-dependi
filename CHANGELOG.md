@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.7.0] - 2026-04-07
+
 ### Added
 
 - Add support for PEP 735 `[dependency-groups]` in `pyproject.toml` — versioned dependencies are parsed, `include-group` references and unversioned items are skipped ([#219](https://github.com/mpiton/zed-dependi/pull/219))
@@ -354,7 +356,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - In-memory caching for version data
 - Parallel registry requests (5 concurrent)
 
-[Unreleased]: https://github.com/mpiton/zed-dependi/compare/v1.6.1...HEAD
+[Unreleased]: https://github.com/mpiton/zed-dependi/compare/v1.7.0...HEAD
+[1.7.0]: https://github.com/mpiton/zed-dependi/compare/v1.6.1...v1.7.0
 [1.6.1]: https://github.com/mpiton/zed-dependi/compare/v1.6.0...v1.6.1
 [1.6.0]: https://github.com/mpiton/zed-dependi/compare/v1.5.0...v1.6.0
 [1.5.0]: https://github.com/mpiton/zed-dependi/compare/v1.4.4...v1.5.0
