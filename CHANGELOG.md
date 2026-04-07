@@ -7,6 +7,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+
+- Bump `sha2` from 0.10 to 0.11 in dependi-zed (digest 0.11 migration)
+- Bump `actions/configure-pages` from v5 to v6 and `actions/deploy-pages` from v4 to v5 in CI
+- Update all Cargo lockfiles with latest compatible dependency versions
+
+### Security
+
+- Bump `requests` from 2.32.4 to 2.33.0 in fuzz corpus (CVE: insecure temp file reuse)
+
 ## [1.6.1] - 2026-03-25
 
 ### Fixed
