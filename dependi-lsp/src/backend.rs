@@ -1474,6 +1474,11 @@ impl LanguageServer for DependiBackend {
             None => format!("## {dep_name}\n\nCould not fetch package information."),
         };
 
+        let hovered_span = if dep.name_span.contains_lsp_position(&position) {
+            &dep.name_span
+        } else {
+            &dep.version_span
+        };
         Ok(Some(Hover {
             contents: HoverContents::Markup(MarkupContent {
                 kind: MarkupKind::Markdown,
@@ -1481,12 +1486,12 @@ impl LanguageServer for DependiBackend {
             }),
             range: Some(Range {
                 start: Position {
-                    line: dep.name_span.line,
-                    character: dep.name_span.line_start,
+                    line: hovered_span.line,
+                    character: hovered_span.line_start,
                 },
                 end: Position {
-                    line: dep.name_span.line,
-                    character: dep.name_span.line_end,
+                    line: hovered_span.line,
+                    character: hovered_span.line_end,
                 },
             }),
         }))
