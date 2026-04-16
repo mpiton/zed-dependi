@@ -351,7 +351,7 @@ fn find_table_dependency_positions(
                 break;
             }
 
-            if trimmed.starts_with("version") && line.contains(version) {
+            if trimmed.starts_with("version") {
                 let version_start = line.find(version)? as u32;
                 let version_end = version_start + version.len() as u32;
 
@@ -364,16 +364,14 @@ fn find_table_dependency_positions(
 
             if trimmed.starts_with("package") {
                 let package = package?;
-                if line.contains(package) {
-                    let package_start = line.find(package)? as u32;
-                    let package_end = package_start + package.len() as u32;
+                let package_start = line.find(&format!("\"{package}\""))? as u32 + 1;
+                let package_end = package_start + package.len() as u32;
 
-                    *name_span = Span {
-                        line: line_idx as u32,
-                        line_start: package_start,
-                        line_end: package_end,
-                    };
-                }
+                *name_span = Span {
+                    line: line_idx as u32,
+                    line_start: package_start,
+                    line_end: package_end,
+                };
             }
         }
     }
