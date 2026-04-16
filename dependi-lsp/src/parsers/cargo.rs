@@ -1,7 +1,8 @@
 //! Parser for Cargo.toml files using structured TOML parsing
 
-use super::{Dependency, Parser};
+use super::{Dependency, Parser, Span};
 use taplo::dom::Node;
+use taplo::dom::node::{Bool, Str};
 use taplo::parser::parse;
 
 /// Parser for Rust Cargo.toml dependency files
@@ -54,44 +55,52 @@ impl Parser for CargoParser {
                 for (key_path, node) in matches {
                     // Extract the dependency name from the key path
                     let key_str = key_path.to_string();
-                    let name = key_str
-                        .split('.')
-                        .next_back()
-                        .unwrap_or(&key_str)
-                        .to_string();
+                    let name = key_str.split('.').next_back().unwrap_or(&key_str);
 
                     // For table dependencies, look for the version key
-                    if let Some(table) = node.as_table()
-                        && let Some(version_node) = table.get("version")
-                        && let Some(version_str) = version_node.as_str()
-                    {
-                        let version = version_str.value().to_string();
-                        let optional = table
-                            .get("optional")
-                            .and_then(|n| n.as_bool().map(|b| b.value()))
-                            .unwrap_or(false);
-                        let registry = table
-                            .get("registry")
-                            .and_then(|n| n.as_str().map(|s| s.value().to_string()));
+                    let Some(table) = node.as_table() else {
+                        continue;
+                    };
+                    let Some(version_node) = table.get("version") else {
+                        continue;
+                    };
+                    let Some(version) = version_node.as_str().map(Str::value) else {
+                        continue;
+                    };
 
-                        if let Some((line, name_start, name_end, version_start, version_end)) =
-                            find_table_dependency_positions(content, &name, &version)
-                        {
-                            dependencies.push(Dependency {
-                                name,
-                                version,
-                                line,
-                                name_start,
-                                name_end,
-                                version_start,
-                                version_end,
-                                dev: is_dev,
-                                optional,
-                                registry,
-                                resolved_version: None,
-                            });
-                        }
-                    }
+                    let package_node = table.get("package");
+                    let package = package_node.as_ref().and_then(Node::as_str).map(Str::value);
+
+                    let optional = table
+                        .get("optional")
+                        .as_ref()
+                        .and_then(Node::as_bool)
+                        .map(Bool::value)
+                        .unwrap_or(false);
+
+                    let registry_node = table.get("registry");
+                    let registry = registry_node
+                        .as_ref()
+                        .and_then(Node::as_str)
+                        .map(Str::value);
+
+                    let Some(TablePositions {
+                        name_span,
+                        version_span,
+                    }) = find_table_dependency_positions(content, name, package, version)
+                    else {
+                        continue;
+                    };
+                    dependencies.push(Dependency {
+                        name: package.unwrap_or(name).to_owned(),
+                        version: version.to_owned(),
+                        name_span,
+                        version_span,
+                        dev: is_dev,
+                        optional,
+                        registry: registry.map(str::to_owned),
+                        resolved_version: None,
+                    });
                 }
             }
         }
@@ -126,11 +135,16 @@ fn parse_dependency(name: &str, node: &Node, content: &str, is_dev: bool) -> Opt
             Some(Dependency {
                 name: name.to_string(),
                 version,
-                line,
-                name_start,
-                name_end,
-                version_start,
-                version_end,
+                name_span: Span {
+                    line,
+                    line_start: name_start,
+                    line_end: name_end,
+                },
+                version_span: Span {
+                    line,
+                    line_start: version_start,
+                    line_end: version_end,
+                },
                 dev: is_dev,
                 optional: false,
                 registry: None,
@@ -138,31 +152,37 @@ fn parse_dependency(name: &str, node: &Node, content: &str, is_dev: bool) -> Opt
             })
         }
         Node::Table(table) => {
+            let package_node = table.get("package");
+            let package = package_node.as_ref().and_then(Node::as_str).map(Str::value);
+
             // Inline table: name = { version = "1.0.0", ... }
             let version_node = table.get("version")?;
             let version_str = version_node.as_str()?;
-            let version = version_str.value().to_string();
+            let version = version_str.value();
 
             let optional = table
                 .get("optional")
-                .and_then(|n| n.as_bool().map(|b| b.value()))
+                .as_ref()
+                .and_then(Node::as_bool)
+                .map(Bool::value)
                 .unwrap_or(false);
 
             let registry = table
                 .get("registry")
-                .and_then(|n| n.as_str().map(|s| s.value().to_string()));
+                .as_ref()
+                .and_then(Node::as_str)
+                .map(|s| s.value().to_owned());
 
-            let (line, name_start, name_end, version_start, version_end) =
-                find_inline_table_positions(content, name, &version)?;
+            let TablePositions {
+                name_span,
+                version_span,
+            } = find_inline_table_positions(content, name, package, version)?;
 
             Some(Dependency {
-                name: name.to_string(),
-                version,
-                line,
-                name_start,
-                name_end,
-                version_start,
-                version_end,
+                name: package.unwrap_or(name).to_owned(),
+                version: version.to_owned(),
+                name_span,
+                version_span,
                 dev: is_dev,
                 optional,
                 registry,
@@ -222,12 +242,18 @@ fn find_simple_dependency_positions(
     None
 }
 
+struct TablePositions {
+    name_span: Span,
+    version_span: Span,
+}
+
 /// Find positions for an inline table dependency: `name = { version = "1.0.0", ... }`
 fn find_inline_table_positions(
     content: &str,
     name: &str,
+    package: Option<&str>,
     version: &str,
-) -> Option<(u32, u32, u32, u32, u32)> {
+) -> Option<TablePositions> {
     for (line_idx, line) in content.lines().enumerate() {
         let trimmed = line.trim();
         if !trimmed.starts_with(name) {
@@ -251,20 +277,35 @@ fn find_inline_table_positions(
         }
 
         // Calculate positions
-        let name_start = line.find(name)? as u32;
-        let name_end = name_start + name.len() as u32;
+        let (name_start, name_end) = if let Some(package) = package {
+            // Find package position (inside quotes after "package =")
+            let package_start = line.find(&format!("\"{package}\""))? as u32 + 1;
+            let package_end = package_start + package.len() as u32;
+            (package_start, package_end)
+        } else {
+            let name_start = line.find(name)? as u32;
+            let name_end = name_start + name.len() as u32;
+            (name_start, name_end)
+        };
 
         // Find version position (inside quotes after "version =")
         let version_start = line.find(version)? as u32;
         let version_end = version_start + version.len() as u32;
 
-        return Some((
-            line_idx as u32,
-            name_start,
-            name_end,
-            version_start,
-            version_end,
-        ));
+        let line = line_idx as u32;
+
+        return Some(TablePositions {
+            name_span: Span {
+                line,
+                line_start: name_start,
+                line_end: name_end,
+            },
+            version_span: Span {
+                line,
+                line_start: version_start,
+                line_end: version_end,
+            },
+        });
     }
     None
 }
@@ -278,9 +319,11 @@ fn find_inline_table_positions(
 fn find_table_dependency_positions(
     content: &str,
     name: &str,
+    package: Option<&str>,
     version: &str,
-) -> Option<(u32, u32, u32, u32, u32)> {
-    let mut found_table = false;
+) -> Option<TablePositions> {
+    let mut name_span = None::<Span>;
+    let mut version_span = None::<Span>;
 
     for (line_idx, line) in content.lines().enumerate() {
         let trimmed = line.trim();
@@ -290,13 +333,19 @@ fn find_table_dependency_positions(
             // Check if this is a dependencies table
             let inner = &trimmed[1..trimmed.len() - 1];
             if inner.contains("dependencies.") && inner.ends_with(name) {
-                found_table = true;
+                let name_start = line.find(name)? as u32;
+                let name_end = name_start + name.len() as u32;
+                name_span = Some(Span {
+                    line: line_idx as u32,
+                    line_start: name_start,
+                    line_end: name_end,
+                });
                 continue;
             }
         }
 
         // If we found the table, look for version = "x.y.z"
-        if found_table {
+        if let Some(name_span) = name_span.as_mut() {
             // Check if we hit a new section
             if trimmed.starts_with('[') {
                 break;
@@ -306,13 +355,33 @@ fn find_table_dependency_positions(
                 let version_start = line.find(version)? as u32;
                 let version_end = version_start + version.len() as u32;
 
-                // For table dependencies, name is in header (different line)
-                // Set name positions to 0 since we can only return one line number
-                return Some((line_idx as u32, 0, 0, version_start, version_end));
+                version_span = Some(Span {
+                    line: line_idx as u32,
+                    line_start: version_start,
+                    line_end: version_end,
+                });
+            }
+
+            if trimmed.starts_with("package") {
+                let package = package?;
+                if line.contains(package) {
+                    let package_start = line.find(package)? as u32;
+                    let package_end = package_start + package.len() as u32;
+
+                    *name_span = Span {
+                        line: line_idx as u32,
+                        line_start: package_start,
+                        line_end: package_end,
+                    };
+                }
             }
         }
     }
-    None
+
+    Some(TablePositions {
+        name_span: name_span?,
+        version_span: version_span?,
+    })
 }
 
 #[cfg(test)]
@@ -343,6 +412,21 @@ serde = { version = "1.0.0", features = ["derive"] }
         let deps = parser.parse(content);
         assert_eq!(deps.len(), 1);
         assert_eq!(deps[0].name, "serde");
+        assert_eq!(deps[0].name_span.line_start, 0);
+        assert_eq!(deps[0].version, "1.0.0");
+    }
+
+    #[test]
+    fn test_inline_table_alias_dependency() {
+        let parser = CargoParser::new();
+        let content = r#"
+[dependencies]
+serde1 = { package = "serde", version = "1.0.0", features = ["derive"] }
+"#;
+        let deps = parser.parse(content);
+        assert_eq!(deps.len(), 1);
+        assert_eq!(deps[0].name, "serde");
+        assert_eq!(deps[0].name_span.line_start, 22);
         assert_eq!(deps[0].version, "1.0.0");
     }
 
@@ -400,6 +484,24 @@ features = ["json"]
         let deps = parser.parse(content);
         assert_eq!(deps.len(), 1);
         assert_eq!(deps[0].name, "reqwest");
+        assert_eq!(deps[0].name_span.line, 1);
+        assert_eq!(deps[0].version, "0.12");
+    }
+
+    #[test]
+    fn test_table_alias_dependency() {
+        let parser = CargoParser::new();
+        let content = r#"
+[dependencies.reqwest1]
+package = "reqwest"
+version = "0.12"
+features = ["json"]
+"#;
+        let deps = parser.parse(content);
+        assert_eq!(deps.len(), 1);
+        assert_eq!(deps[0].name, "reqwest");
+        assert_eq!(deps[0].name_span.line, 2);
+        assert_eq!(deps[0].name_span.line_start, 11);
         assert_eq!(deps[0].version, "0.12");
     }
 

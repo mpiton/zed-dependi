@@ -1,6 +1,6 @@
 //! Parser for Dart/Flutter pubspec.yaml files
 
-use super::{Dependency, Parser};
+use super::{Dependency, Parser, Span};
 
 /// Parser for Dart pubspec.yaml dependency files
 #[derive(Debug, Default)]
@@ -159,11 +159,16 @@ fn parse_dart_dependency_line(line: &str, line_num: u32, dev: bool) -> Option<De
     Some(Dependency {
         name: name.to_string(),
         version,
-        line: line_num,
-        name_start,
-        name_end,
-        version_start,
-        version_end,
+        name_span: Span {
+            line: line_num,
+            line_start: name_start,
+            line_end: name_end,
+        },
+        version_span: Span {
+            line: line_num,
+            line_start: version_start,
+            line_end: version_end,
+        },
         dev,
         optional: false,
         registry: None,
@@ -279,7 +284,7 @@ dependencies:
         assert_eq!(deps.len(), 1);
         let http = &deps[0];
         assert_eq!(http.name, "http");
-        assert!(http.version_start > http.name_end);
+        assert!(http.version_span.line_start > http.name_span.line_end);
     }
 
     #[test]

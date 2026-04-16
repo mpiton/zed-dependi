@@ -1,6 +1,7 @@
 //! Parsers for dependency files (Cargo.toml, package.json, etc.)
 
 use serde::{Deserialize, Serialize};
+use tower_lsp::lsp_types;
 
 /// Represents a dependency extracted from a manifest file
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -9,16 +10,10 @@ pub struct Dependency {
     pub name: String,
     /// Version specifier (e.g., "1.0.0", "^1.0", ">=1,<2")
     pub version: String,
-    /// Line number in the file (0-indexed)
-    pub line: u32,
-    /// Column where the package name starts
-    pub name_start: u32,
-    /// Column where the package name ends
-    pub name_end: u32,
-    /// Column where the version string starts
-    pub version_start: u32,
-    /// Column where the version string ends
-    pub version_end: u32,
+    /// Package name span
+    pub name_span: Span,
+    /// Version string span
+    pub version_span: Span,
     /// Whether this is a dev dependency
     pub dev: bool,
     /// Whether this dependency is optional
@@ -28,6 +23,23 @@ pub struct Dependency {
     /// Resolved version from the lock file (e.g., Cargo.lock), if available
     #[serde(default)]
     pub resolved_version: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct Span {
+    /// Line number in the file (0-indexed)
+    pub line: u32,
+    /// Column where the value starts
+    pub line_start: u32,
+    /// Column where the value ends
+    pub line_end: u32,
+}
+
+impl Span {
+    pub fn contains_lsp_position(&self, position: &lsp_types::Position) -> bool {
+        self.line == position.line
+            && (self.line_start..=self.line_end).contains(&position.character)
+    }
 }
 
 impl Dependency {

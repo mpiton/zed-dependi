@@ -7,7 +7,7 @@
 //! - gem declarations with version constraints
 //! - group blocks for development dependencies
 
-use super::{Dependency, Parser};
+use super::{Dependency, Parser, Span};
 
 /// Parser for Ruby Gemfile dependency files
 #[derive(Debug, Default)]
@@ -93,11 +93,16 @@ fn parse_gem_declaration(line: &str, line_num: u32, dev: bool) -> Option<Depende
     Some(Dependency {
         name,
         version,
-        line: line_num,
-        name_start,
-        name_end,
-        version_start,
-        version_end,
+        name_span: Span {
+            line: line_num,
+            line_start: name_start,
+            line_end: name_end,
+        },
+        version_span: Span {
+            line: line_num,
+            line_start: version_start,
+            line_end: version_end,
+        },
         dev,
         optional: false,
         registry: None,
@@ -361,16 +366,18 @@ gem "pg", "~> 1.4"
         let dep = &deps[0];
 
         // Verify positions are valid
-        assert!(dep.name_start < dep.name_end);
-        assert!(dep.version_start < dep.version_end);
-        assert!(dep.name_end < dep.version_start);
+        assert!(dep.name_span.line_start < dep.name_span.line_end);
+        assert!(dep.version_span.line_start < dep.version_span.line_end);
+        assert!(dep.name_span.line_end < dep.version_span.line_start);
 
         // Verify name position
-        let name_slice = &content[dep.name_start as usize..dep.name_end as usize];
+        let name_slice =
+            &content[dep.name_span.line_start as usize..dep.name_span.line_end as usize];
         assert_eq!(name_slice, "rails");
 
         // Verify version position
-        let version_slice = &content[dep.version_start as usize..dep.version_end as usize];
+        let version_slice =
+            &content[dep.version_span.line_start as usize..dep.version_span.line_end as usize];
         assert_eq!(version_slice, "~> 7.0");
     }
 

@@ -2,7 +2,7 @@
 //!
 //! Uses serde_json for fast parsing with position tracking via byte offset calculation.
 
-use super::{Dependency, Parser};
+use super::{Dependency, Parser, Span};
 use serde_json::Value;
 
 /// Parser for npm package.json dependency files
@@ -179,11 +179,16 @@ fn find_dependency_position(
                 return Some(Dependency {
                     name: name.to_string(),
                     version: version.to_string(),
-                    line,
-                    name_start: name_start_col,
-                    name_end: name_end_col,
-                    version_start: version_start_col,
-                    version_end: version_end_col,
+                    name_span: Span {
+                        line,
+                        line_start: name_start_col,
+                        line_end: name_end_col,
+                    },
+                    version_span: Span {
+                        line: version_line,
+                        line_start: version_start_col,
+                        line_end: version_end_col,
+                    },
                     dev,
                     optional,
                     registry: None,
@@ -337,10 +342,11 @@ mod tests {
 
         let react = &deps[0];
         assert_eq!(react.name, "react");
-        assert_eq!(react.line, 2); // 0-indexed, so line 3 is index 2
+        assert_eq!(react.name_span.line, 2); // 0-indexed, so line 3 is index 2
+        assert_eq!(react.version_span.line, 2); // 0-indexed, so line 3 is index 2
         // Verify positions are within reasonable bounds
-        assert!(react.name_start < react.name_end);
-        assert!(react.version_start < react.version_end);
+        assert!(react.name_span.line_start < react.name_span.line_end);
+        assert!(react.version_span.line_start < react.version_span.line_end);
     }
 
     #[test]

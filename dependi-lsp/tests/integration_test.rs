@@ -163,17 +163,22 @@ fn test_cache_integration() {
 /// Test inlay hint generation with various scenarios
 #[test]
 fn test_inlay_hint_generation() {
-    use dependi_lsp::parsers::Dependency;
+    use dependi_lsp::parsers::{Dependency, Span};
 
     // Up-to-date dependency
     let dep_up_to_date = Dependency {
         name: "serde".to_string(),
         version: "1.0.200".to_string(),
-        line: 5,
-        name_start: 0,
-        name_end: 5,
-        version_start: 9,
-        version_end: 18,
+        name_span: Span {
+            line: 5,
+            line_start: 0,
+            line_end: 5,
+        },
+        version_span: Span {
+            line: 5,
+            line_start: 9,
+            line_end: 18,
+        },
         dev: false,
         optional: false,
         registry: None,
@@ -197,11 +202,16 @@ fn test_inlay_hint_generation() {
     let dep_outdated = Dependency {
         name: "tokio".to_string(),
         version: "1.0.0".to_string(),
-        line: 6,
-        name_start: 0,
-        name_end: 5,
-        version_start: 9,
-        version_end: 16,
+        name_span: Span {
+            line: 6,
+            line_start: 0,
+            line_end: 5,
+        },
+        version_span: Span {
+            line: 6,
+            line_start: 9,
+            line_end: 16,
+        },
         dev: false,
         optional: false,
         registry: None,
@@ -323,9 +333,11 @@ tokio = { version = "1.35" }
 
     // serde should be on line 1 (0-indexed)
     let serde = deps.iter().find(|d| d.name == "serde").unwrap();
-    assert_eq!(serde.line, 1);
+    assert_eq!(serde.name_span.line, 1);
+    assert_eq!(serde.version_span.line, 1);
 
     // tokio should be on line 2
     let tokio = deps.iter().find(|d| d.name == "tokio").unwrap();
-    assert_eq!(tokio.line, 2);
+    assert_eq!(tokio.name_span.line, 2);
+    assert_eq!(tokio.version_span.line, 2);
 }

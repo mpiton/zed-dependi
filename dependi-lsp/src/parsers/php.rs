@@ -2,7 +2,7 @@
 //!
 //! Uses serde_json for fast parsing with position tracking via byte offset calculation.
 
-use super::{Dependency, Parser};
+use super::{Dependency, Parser, Span};
 use serde_json::Value;
 
 /// Parser for PHP composer.json dependency files
@@ -148,11 +148,16 @@ fn find_dependency_position(
                 return Some(Dependency {
                     name: name.to_string(),
                     version: version.to_string(),
-                    line,
-                    name_start: name_start_col,
-                    name_end: name_end_col,
-                    version_start: version_start_col,
-                    version_end: version_end_col,
+                    name_span: Span {
+                        line,
+                        line_start: name_start_col,
+                        line_end: name_end_col,
+                    },
+                    version_span: Span {
+                        line: version_line,
+                        line_start: version_start_col,
+                        line_end: version_end_col,
+                    },
                     dev,
                     optional: false,
                     registry: None,

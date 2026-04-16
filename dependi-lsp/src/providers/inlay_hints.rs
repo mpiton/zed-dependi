@@ -47,8 +47,8 @@ pub fn create_inlay_hint(
 
     InlayHint {
         position: Position {
-            line: dep.line,
-            character: dep.version_end + 1,
+            line: dep.version_span.line,
+            character: dep.version_span.line_end + 1,
         },
         label: InlayHintLabel::String(format!(" {label}")),
         kind: Some(InlayHintKind::PARAMETER),
@@ -519,6 +519,7 @@ pub fn normalize_version(version: &str) -> String {
 mod tests {
     use super::*;
     use crate::file_types::FileType;
+    use crate::parsers::Span;
     use crate::registries::Vulnerability;
 
     fn make_version_info(latest: &str) -> VersionInfo {
@@ -532,11 +533,16 @@ mod tests {
         Dependency {
             name: name.to_string(),
             version: version.to_string(),
-            line: 5,
-            name_start: 0,
-            name_end: name.len() as u32,
-            version_start: name.len() as u32 + 4,
-            version_end: name.len() as u32 + 4 + version.len() as u32,
+            name_span: Span {
+                line: 5,
+                line_start: 0,
+                line_end: name.len() as u32,
+            },
+            version_span: Span {
+                line: 5,
+                line_start: name.len() as u32 + 4,
+                line_end: name.len() as u32 + 4 + version.len() as u32,
+            },
             dev: false,
             optional: false,
             registry: None,
@@ -1210,11 +1216,16 @@ mod tests {
         Dependency {
             name: name.to_string(),
             version: version.to_string(),
-            line: 5,
-            name_start: 0,
-            name_end: name.len() as u32,
-            version_start: name.len() as u32 + 4,
-            version_end: name.len() as u32 + 4 + version.len() as u32,
+            name_span: Span {
+                line: 5,
+                line_start: 0,
+                line_end: name.len() as u32,
+            },
+            version_span: Span {
+                line: 5,
+                line_start: name.len() as u32 + 4,
+                line_end: name.len() as u32 + 4 + version.len() as u32,
+            },
             dev: false,
             optional: false,
             registry: None,
