@@ -25,6 +25,8 @@ pub enum Ecosystem {
     NuGet,
     /// Ruby gems (RubyGems.org)
     RubyGems,
+    /// Java packages (Maven Central)
+    Maven,
 }
 
 impl Ecosystem {
@@ -39,6 +41,7 @@ impl Ecosystem {
             Ecosystem::Pub => "Pub",
             Ecosystem::NuGet => "NuGet",
             Ecosystem::RubyGems => "RubyGems",
+            Ecosystem::Maven => "Maven",
         }
     }
 }
@@ -181,5 +184,11 @@ mod tests {
         assert_eq!(normalize_version_for_osv(">>1.0"), ">1.0");
         // Multiple commas: takes first constraint
         assert_eq!(normalize_version_for_osv(">=1.0,<2.0,>1.5"), "1.0");
+    }
+
+    #[test]
+    fn test_ecosystem_maven_as_osv_str() {
+        use super::Ecosystem;
+        assert_eq!(Ecosystem::Maven.as_osv_str(), "Maven");
     }
 }
