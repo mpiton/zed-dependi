@@ -341,3 +341,56 @@ tokio = { version = "1.35" }
     assert_eq!(tokio.name_span.line, 2);
     assert_eq!(tokio.version_span.line, 2);
 }
+
+/// Integration test: Maven pom.xml detection + parse + cache key generation
+#[test]
+fn test_maven_pom_detection_parse_and_cache_key() {
+    use dependi_lsp::parsers::maven::MavenParser;
+    use tower_lsp::lsp_types::Url;
+
+    let uri = Url::parse("file:///project/pom.xml").unwrap();
+    assert_eq!(FileType::detect(&uri), Some(FileType::Maven));
+
+    let pom = r#"<?xml version="1.0" encoding="UTF-8"?>
+<project>
+    <modelVersion>4.0.0</modelVersion>
+    <groupId>com.example</groupId>
+    <artifactId>app</artifactId>
+    <version>1.0.0</version>
+    <properties>
+        <slf4j.version>2.0.9</slf4j.version>
+    </properties>
+    <dependencies>
+        <dependency>
+            <groupId>org.slf4j</groupId>
+            <artifactId>slf4j-api</artifactId>
+            <version>${slf4j.version}</version>
+        </dependency>
+        <dependency>
+            <groupId>junit</groupId>
+            <artifactId>junit</artifactId>
+            <version>4.13.2</version>
+            <scope>test</scope>
+        </dependency>
+    </dependencies>
+</project>
+"#;
+
+    let parser = MavenParser::new();
+    let deps = parser.parse(pom);
+    assert_eq!(deps.len(), 2);
+
+    let slf4j = &deps[0];
+    assert_eq!(slf4j.name, "org.slf4j:slf4j-api");
+    assert_eq!(slf4j.version, "2.0.9", "property must be substituted");
+    assert!(!slf4j.dev);
+
+    let junit = &deps[1];
+    assert_eq!(junit.name, "junit:junit");
+    assert!(junit.dev, "test scope must be treated as dev");
+
+    assert_eq!(
+        FileType::Maven.cache_key(&slf4j.name),
+        "maven:org.slf4j:slf4j-api"
+    );
+}
