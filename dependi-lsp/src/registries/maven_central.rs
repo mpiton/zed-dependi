@@ -84,17 +84,15 @@ impl Registry for MavenCentralRegistry {
         let (latest, latest_release, versions) = parse_metadata_xml(&metadata_body)
             .ok_or_else(|| anyhow::anyhow!("Invalid Maven metadata XML for '{package_name}'"))?;
 
-        // Split releases vs prereleases.
-        let (stable, prerelease): (Vec<_>, Vec<_>) =
-            versions.iter().cloned().partition(|v| !is_prerelease(v));
-
-        // Preferred latest stable: <release> if present, else highest stable.
-        let latest_stable = latest_release
-            .or_else(|| latest.clone())
-            .or_else(|| stable.first().cloned());
-
-        // Prerelease: first in the raw order if any.
-        let latest_prerelease = prerelease.first().cloned();
+        // Prefer <release> (Maven guarantees a stable release), then fall back to
+        // the highest version that is not a prerelease. `<latest>` is intentionally
+        // NOT used as a stable fallback because it tracks the most recently published
+        // artifact — frequently a SNAPSHOT or milestone.
+        let latest_stable =
+            latest_release.or_else(|| versions.iter().find(|v| !is_prerelease(v)).cloned());
+        let latest_prerelease = versions.iter().find(|v| is_prerelease(v)).cloned();
+        // `latest` is accepted as-is; we only use it if it differs from our picks.
+        let _ = latest;
 
         // Step 2: best-effort POM fetch for metadata (description, license, ...)
         let (description, homepage, repository, license) = match &latest_stable {
@@ -273,14 +271,27 @@ pub(crate) fn parse_pom_metadata(
 }
 
 /// Classify a Maven version string as a prerelease / snapshot.
+///
+/// Recognizes the conventional Maven qualifiers written with either a `-` or `.`
+/// separator: `-SNAPSHOT`, `-alpha`, `-beta`, `-rc`, `-milestone`, and the
+/// `-M<digit>` milestone pattern (e.g. `5.3.0-M1`). The `-m` check is deliberately
+/// narrow — it must be followed by a digit to avoid false positives on versions
+/// like `1.0-metrics` or `2.4-mixed`.
 fn is_prerelease(version: &str) -> bool {
     let v = version.to_ascii_lowercase();
-    v.contains("-snapshot")
-        || v.contains("-alpha")
-        || v.contains("-beta")
-        || v.contains("-rc")
-        || v.contains("-m")
-        || v.contains("-milestone")
+    for qualifier in ["snapshot", "alpha", "beta", "rc", "milestone"] {
+        if v.contains(&format!("-{qualifier}")) || v.contains(&format!(".{qualifier}")) {
+            return true;
+        }
+    }
+    // Maven milestone convention: `-M<digits>` (e.g. `-M1`, `-M23`).
+    if let Some(idx) = v.find("-m") {
+        let rest = &v[idx + 2..];
+        if rest.chars().next().is_some_and(|c| c.is_ascii_digit()) {
+            return true;
+        }
+    }
+    false
 }
 
 #[cfg(test)]
@@ -375,7 +386,13 @@ mod tests {
         assert!(is_prerelease("1.0-SNAPSHOT"));
         assert!(is_prerelease("1.0-alpha-1"));
         assert!(is_prerelease("2.0-rc1"));
+        assert!(is_prerelease("5.3.0-M1"));
+        assert!(is_prerelease("5.0.0.Alpha1"));
+        assert!(is_prerelease("3.0.0.Beta2"));
         assert!(!is_prerelease("1.0.0"));
         assert!(!is_prerelease("2.5.1"));
+        // `-m` alone (no digit) must NOT classify as milestone.
+        assert!(!is_prerelease("1.0-metrics"));
+        assert!(!is_prerelease("2.4-mixed"));
     }
 }

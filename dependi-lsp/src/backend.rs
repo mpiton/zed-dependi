@@ -90,7 +90,7 @@ struct ProcessingContext {
     pub_dev: Arc<PubDevRegistry>,
     nuget: Arc<NuGetRegistry>,
     rubygems: Arc<RubyGemsRegistry>,
-    maven_central: Arc<MavenCentralRegistry>,
+    maven_central: Arc<tokio::sync::RwLock<MavenCentralRegistry>>,
     osv_client: Arc<OsvClient>,
     vuln_cache: Arc<VulnerabilityCache>,
 }
@@ -480,7 +480,9 @@ impl ProcessingContext {
                         FileType::Dart => pub_dev.get_version_info(&name).await,
                         FileType::Csharp => nuget.get_version_info(&name).await,
                         FileType::Ruby => rubygems.get_version_info(&name).await,
-                        FileType::Maven => maven_central.get_version_info(&name).await,
+                        FileType::Maven => {
+                            maven_central.read().await.get_version_info(&name).await
+                        }
                     };
                     match result {
                         Ok(info) => {
@@ -629,7 +631,7 @@ pub struct DependiBackend {
     pub_dev: Arc<PubDevRegistry>,
     nuget: Arc<NuGetRegistry>,
     rubygems: Arc<RubyGemsRegistry>,
-    maven_central: Arc<MavenCentralRegistry>,
+    maven_central: Arc<tokio::sync::RwLock<MavenCentralRegistry>>,
     /// Shared HTTP client for creating new registry instances
     http_client: Arc<HttpClient>,
     /// Token provider manager for authentication across all ecosystems
@@ -673,9 +675,11 @@ impl DependiBackend {
         let npm_registry = Arc::new(tokio::sync::RwLock::new(
             NpmRegistry::with_client_and_config(Arc::clone(&http_client), &config.registries.npm),
         ));
-        let maven_central = Arc::new(MavenCentralRegistry::with_client_and_config(
-            Arc::clone(&http_client),
-            &config.registries.maven,
+        let maven_central = Arc::new(tokio::sync::RwLock::new(
+            MavenCentralRegistry::with_client_and_config(
+                Arc::clone(&http_client),
+                &config.registries.maven,
+            ),
         ));
 
         // Create token provider manager for centralized auth management
@@ -789,7 +793,13 @@ impl DependiBackend {
             FileType::Dart => self.pub_dev.get_version_info(package_name).await,
             FileType::Csharp => self.nuget.get_version_info(package_name).await,
             FileType::Ruby => self.rubygems.get_version_info(package_name).await,
-            FileType::Maven => self.maven_central.get_version_info(package_name).await,
+            FileType::Maven => {
+                self.maven_central
+                    .read()
+                    .await
+                    .get_version_info(package_name)
+                    .await
+            }
         };
 
         match result {
@@ -1152,6 +1162,20 @@ impl LanguageServer for DependiBackend {
             tracing::info!(
                 "npm registry configured with base URL: {}",
                 config.registries.npm.url
+            );
+        }
+
+        // Reconfigure Maven Central registry with custom base URL if provided
+        {
+            let new_maven = MavenCentralRegistry::with_client_and_config(
+                Arc::clone(&self.http_client),
+                &config.registries.maven,
+            );
+            let mut registry = self.maven_central.write().await;
+            *registry = new_maven;
+            tracing::info!(
+                "Maven Central registry configured with base URL: {}",
+                config.registries.maven.url
             );
         }
 

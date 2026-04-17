@@ -17,10 +17,10 @@ use hashbrown::HashMap;
 use quick_xml::events::Event;
 use quick_xml::reader::Reader;
 
-use crate::parsers::{Dependency, Parser};
+use crate::parsers::{Dependency, Parser, Span};
 
 /// Parser for Maven `pom.xml` files.
-#[derive(Default)]
+#[derive(Debug, Default)]
 pub struct MavenParser;
 
 impl MavenParser {
@@ -60,6 +60,10 @@ fn offset_to_position(offsets: &[usize], byte_offset: usize) -> (u32, u32) {
 }
 
 /// Pass 1: collect `<properties>` entries (name → value) from the pom.
+///
+/// Also captures the built-in placeholders `project.version`, `project.groupId`,
+/// and `project.artifactId` from direct children of `<project>`, matching the
+/// subset of Maven's built-in property resolution that the MVP supports.
 fn extract_properties(content: &str) -> HashMap<String, String> {
     let mut reader = Reader::from_str(content);
     reader.config_mut().trim_text(true);
@@ -74,23 +78,31 @@ fn extract_properties(content: &str) -> HashMap<String, String> {
             Ok(Event::Eof) => break,
             Ok(Event::Start(e)) => {
                 let name = e.name().as_ref().to_vec();
-                // We want properties that are a direct child of <properties>
-                // which is itself a child of <project>. Path: project > properties > <key>.
-                // depth_stack represents the path of open elements excluding the current.
-                let is_key = depth_stack.last().map(|v| v.as_slice()) == Some(b"properties");
-                if is_key
+                let parent = depth_stack.last().map(|v| v.as_slice());
+                // Properties map: project > properties > <key>
+                if parent == Some(b"properties")
                     && depth_stack.len() >= 2
                     && depth_stack[depth_stack.len() - 2] == b"project"
                     && let Ok(s) = std::str::from_utf8(&name)
                 {
                     current_key = Some(s.to_string());
                 }
+                // Built-in project properties: project > (version|groupId|artifactId)
+                if parent == Some(b"project")
+                    && matches!(name.as_slice(), b"version" | b"groupId" | b"artifactId")
+                    && let Ok(s) = std::str::from_utf8(&name)
+                {
+                    current_key = Some(format!("project.{s}"));
+                }
                 depth_stack.push(name);
             }
             Ok(Event::Text(e)) => {
                 if let Some(ref key) = current_key
                     && let Ok(text) = e.decode()
+                    && !out.contains_key(key)
                 {
+                    // First occurrence wins to avoid overwriting project.version
+                    // with a nested <dependency><version>.
                     out.insert(key.clone(), text.into_owned());
                 }
             }
@@ -108,10 +120,13 @@ fn extract_properties(content: &str) -> HashMap<String, String> {
 /// Pass 2: extract dependencies from `<dependencies>` and
 /// `<dependencyManagement><dependencies>`, substituting `${property}` placeholders.
 fn extract_dependencies(content: &str, properties: &HashMap<String, String>) -> Vec<Dependency> {
+    // Keep raw text (no trim) so that byte offsets reported by the reader match
+    // positions in the original source. We trim manually where needed.
     let mut reader = Reader::from_str(content);
-    reader.config_mut().trim_text(true);
+    reader.config_mut().trim_text(false);
 
     let offsets = line_offsets(content);
+    let bytes = content.as_bytes();
     let mut out = Vec::new();
 
     // State: track which element we're inside.
@@ -119,13 +134,15 @@ fn extract_dependencies(content: &str, properties: &HashMap<String, String>) -> 
     let mut in_dep_mgmt = false;
     let mut in_plugins = false;
     let mut in_dependency = false;
+    let mut has_parent = false;
     let mut current_tag: Option<Vec<u8>> = None;
 
     // Current dependency accumulator
     let mut cur_group: Option<String> = None;
     let mut cur_artifact: Option<String> = None;
+    let mut cur_artifact_span: Option<(usize, usize)> = None;
     let mut cur_version: Option<String> = None;
-    let mut cur_version_span: Option<(usize, usize)> = None; // byte offsets into content
+    let mut cur_version_span: Option<(usize, usize)> = None;
     let mut cur_scope: Option<String> = None;
     let mut cur_optional = false;
 
@@ -139,10 +156,12 @@ fn extract_dependencies(content: &str, properties: &HashMap<String, String>) -> 
                     b"dependencies" => in_dependencies = true,
                     b"dependencyManagement" => in_dep_mgmt = true,
                     b"plugins" | b"pluginManagement" => in_plugins = true,
+                    b"parent" => has_parent = true,
                     b"dependency" if (in_dependencies || in_dep_mgmt) && !in_plugins => {
                         in_dependency = true;
                         cur_group = None;
                         cur_artifact = None;
+                        cur_artifact_span = None;
                         cur_version = None;
                         cur_version_span = None;
                         cur_scope = None;
@@ -166,24 +185,30 @@ fn extract_dependencies(content: &str, properties: &HashMap<String, String>) -> 
                             let scope = cur_scope.take().unwrap_or_default();
                             let dev = scope == "test" || scope == "provided";
 
-                            let (line, version_start, version_end) = match cur_version_span.take() {
+                            let version_span = match cur_version_span.take() {
                                 Some((s, e_)) => {
-                                    let (l, col_s) = offset_to_position(&offsets, s);
-                                    let (_, col_e) = offset_to_position(&offsets, e_);
-                                    (l, col_s, col_e)
+                                    let (line, line_start) = offset_to_position(&offsets, s);
+                                    let (_, line_end) = offset_to_position(&offsets, e_);
+                                    Span { line, line_start, line_end }
                                 }
-                                None => (0, 0, 0),
+                                None => Span { line: 0, line_start: 0, line_end: 0 },
+                            };
+
+                            let name_span = match cur_artifact_span.take() {
+                                Some((s, e_)) => {
+                                    let (line, line_start) = offset_to_position(&offsets, s);
+                                    let (_, line_end) = offset_to_position(&offsets, e_);
+                                    Span { line, line_start, line_end }
+                                }
+                                None => Span { line: 0, line_start: 0, line_end: 0 },
                             };
 
                             if !a.is_empty() && !g.is_empty() {
                                 out.push(Dependency {
                                     name: format!("{g}:{a}"),
                                     version,
-                                    line,
-                                    name_start: 0,
-                                    name_end: 0,
-                                    version_start,
-                                    version_end,
+                                    name_span,
+                                    version_span,
                                     dev,
                                     optional: cur_optional,
                                     registry: None,
@@ -197,22 +222,25 @@ fn extract_dependencies(content: &str, properties: &HashMap<String, String>) -> 
                 current_tag = None;
             }
             Ok(Event::Text(e)) if in_dependency => {
-                let text = match e.decode() {
+                let raw = match e.decode() {
                     Ok(s) => s.into_owned(),
                     Err(_) => continue,
                 };
+                let text = raw.trim().to_string();
                 match current_tag.as_deref() {
                     Some(b"groupId") => cur_group = Some(text),
-                    Some(b"artifactId") => cur_artifact = Some(text),
+                    Some(b"artifactId") => {
+                        let (s, e_) = trimmed_span(bytes, &reader, raw.len());
+                        cur_artifact_span = Some((s, e_));
+                        cur_artifact = Some(text);
+                    }
                     Some(b"version") => {
-                        // Capture byte offsets of the text content.
-                        let end = reader.buffer_position() as usize;
-                        let start = end.saturating_sub(text.len());
-                        cur_version_span = Some((start, end));
+                        let (s, e_) = trimmed_span(bytes, &reader, raw.len());
+                        cur_version_span = Some((s, e_));
                         cur_version = Some(text);
                     }
                     Some(b"scope") => cur_scope = Some(text),
-                    Some(b"optional") => cur_optional = text.trim() == "true",
+                    Some(b"optional") => cur_optional = text == "true",
                     _ => {}
                 }
             }
@@ -220,8 +248,29 @@ fn extract_dependencies(content: &str, properties: &HashMap<String, String>) -> 
         }
     }
 
-    let _ = properties; // properties used in substitute(); silence if empty
+    if has_parent {
+        tracing::debug!(
+            "pom.xml has <parent> block — parent POM resolution is not supported in this MVP; \
+             versions inherited from the parent will appear unresolved"
+        );
+    }
     out
+}
+
+/// Given the raw buffer position after a `Text` event and the raw text length,
+/// return the byte span of the trimmed content (leading + trailing whitespace removed).
+fn trimmed_span(bytes: &[u8], reader: &Reader<&[u8]>, raw_len: usize) -> (usize, usize) {
+    let raw_end = reader.buffer_position() as usize;
+    let raw_start = raw_end.saturating_sub(raw_len);
+    let mut start = raw_start.min(bytes.len());
+    let mut end = raw_end.min(bytes.len());
+    while start < end && bytes[start].is_ascii_whitespace() {
+        start += 1;
+    }
+    while end > start && bytes[end - 1].is_ascii_whitespace() {
+        end -= 1;
+    }
+    (start, end)
 }
 
 /// Substitute `${property}` placeholders in a version string with values from `properties`.
@@ -496,12 +545,12 @@ mod tests {
         // The version line should be zero-indexed; the exact line varies with the raw string,
         // so we just sanity-check it is non-zero and the span is reasonable.
         assert!(
-            deps[0].line > 0,
+            deps[0].version_span.line > 0,
             "line should be tracked (got {})",
-            deps[0].line
+            deps[0].version_span.line
         );
         assert!(
-            deps[0].version_end > deps[0].version_start,
+            deps[0].version_span.line_end > deps[0].version_span.line_start,
             "version span should be non-empty"
         );
     }
