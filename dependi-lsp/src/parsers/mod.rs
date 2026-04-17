@@ -37,8 +37,7 @@ pub struct Span {
 
 impl Span {
     pub fn contains_lsp_position(&self, position: &lsp_types::Position) -> bool {
-        self.line == position.line
-            && (self.line_start..=self.line_end).contains(&position.character)
+        self.line == position.line && (self.line_start..self.line_end).contains(&position.character)
     }
 }
 

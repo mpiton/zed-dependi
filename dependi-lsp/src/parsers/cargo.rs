@@ -1,7 +1,7 @@
 //! Parser for Cargo.toml files using structured TOML parsing
 
+use taplo::dom::Node;
 use taplo::dom::node::{Bool, DomNode, Key, Str};
-use taplo::dom::{KeyOrIndex, Node};
 use taplo::parser::parse;
 use taplo::rowan::TextRange;
 
@@ -50,68 +50,15 @@ impl Parser for CargoParser {
 
         for (section_name, is_dev) in sections {
             // Parse regular section dependencies (e.g., [dependencies])
-            if let Some(section) = dom.get(section_name).as_table() {
-                let entries = section.entries().read();
-                let deps = entries.iter().filter_map(|(name, value)| {
-                    parse_dependency(name, value, &line_ranges, is_dev)
-                });
-                dependencies.extend(deps);
-            }
-
-            // Parse table-style dependencies (e.g., [dependencies.reqwest])
-            let pattern = format!("{section_name}.*");
-            let Ok(matches) = pattern
-                .parse::<taplo::dom::Keys>()
-                .and_then(|keys| dom.find_all_matches(keys, false))
-            else {
+            let section_node = dom.get(section_name);
+            let Some(section) = section_node.as_table() else {
                 continue;
             };
-            let matches = matches.filter_map(|(key_path, node)| {
-                // Extract the dependency name from the key path
-                let name_key = key_path.iter().filter_map(KeyOrIndex::as_key).next_back()?;
-
-                // For table dependencies, look for the version key
-                let table = node.as_table()?;
-                let version_node = table.get("version")?;
-                let version_str = version_node.as_str()?;
-
-                let package_node = table.get("package");
-                let package_str = package_node.as_ref().and_then(Node::as_str);
-
-                let optional = table
-                    .get("optional")
-                    .as_ref()
-                    .and_then(Node::as_bool)
-                    .map(Bool::value)
-                    .unwrap_or(false);
-
-                let registry_node = table.get("registry");
-                let registry = registry_node
-                    .as_ref()
-                    .and_then(Node::as_str)
-                    .map(Str::value);
-
-                let TablePositions {
-                    name_span,
-                    version_span,
-                } = find_dependency_positions(&line_ranges, name_key, package_str, version_str)?;
-
-                Some(Dependency {
-                    name: package_str
-                        .map(Str::value)
-                        .unwrap_or_else(|| name_key.value())
-                        .to_owned(),
-                    version: version_str.value().to_owned(),
-                    name_span,
-                    version_span,
-                    dev: is_dev,
-                    optional,
-                    registry: registry.map(str::to_owned),
-                    resolved_version: None,
-                })
-            });
-
-            dependencies.extend(matches);
+            let entries = section.entries().read();
+            let deps = entries
+                .iter()
+                .filter_map(|(name, value)| parse_dependency(name, value, &line_ranges, is_dev));
+            dependencies.extend(deps);
         }
 
         // Parse workspace.dependencies section
@@ -288,7 +235,8 @@ serde1 = { package = "serde", version = "1.0.0", features = ["derive"] }
         let deps = parser.parse(content);
         assert_eq!(deps.len(), 1);
         assert_eq!(deps[0].name, "serde");
-        assert_eq!(deps[0].name_span.line_start, 22);
+        assert_eq!(deps[0].name_span.line_start, 21);
+        assert_eq!(deps[0].name_span.line_end, 28);
         assert_eq!(deps[0].version, "1.0.0");
     }
 
@@ -363,7 +311,8 @@ features = ["json"]
         assert_eq!(deps.len(), 1);
         assert_eq!(deps[0].name, "reqwest");
         assert_eq!(deps[0].name_span.line, 2);
-        assert_eq!(deps[0].name_span.line_start, 11);
+        assert_eq!(deps[0].name_span.line_start, 10);
+        assert_eq!(deps[0].name_span.line_end, 19);
         assert_eq!(deps[0].version, "0.12");
     }
 
