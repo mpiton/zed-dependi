@@ -215,13 +215,11 @@ fn find_dependency_positions(
     package: Option<&Str>,
     version: &Str,
 ) -> Option<TablePositions> {
-    const SYNTAX_UNAVAILABLE: &str = "syntax unavailable";
-
     let name_range = package
-        .map(|s| s.syntax().expect(SYNTAX_UNAVAILABLE))
-        .unwrap_or_else(|| name.syntax().expect(SYNTAX_UNAVAILABLE))
+        .and_then(Str::syntax)
+        .or_else(|| name.syntax())?
         .text_range();
-    let version_range = version.syntax().expect(SYNTAX_UNAVAILABLE).text_range();
+    let version_range = version.syntax()?.text_range();
 
     let name_span = find_range_span(line_ranges, name_range)?;
     let version_span = find_range_span(line_ranges, version_range)?;
