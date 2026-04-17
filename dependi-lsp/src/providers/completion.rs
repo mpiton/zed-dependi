@@ -79,11 +79,9 @@ pub fn get_completions(
     cache_key_fn: impl Fn(&str) -> String,
 ) -> Option<Vec<CompletionItem>> {
     // Find if we're inside a version field
-    let dep = dependencies.iter().find(|d| {
-        d.version_span.line == position.line
-            && position.character >= d.version_span.line_start
-            && position.character <= d.version_span.line_end
-    })?;
+    let dep = dependencies
+        .iter()
+        .find(|d| d.version_span.contains_lsp_position(&position))?;
 
     let cache_key = cache_key_fn(&dep.name);
     let version_info = cache.get(&cache_key)?;
