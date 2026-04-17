@@ -4,6 +4,8 @@ use taplo::dom::Node;
 use taplo::dom::node::{Bool, DomNode, Key, Str};
 use taplo::parser::parse;
 use taplo::rowan::TextRange;
+use taplo::rowan::TextSize;
+use taplo::syntax::SyntaxElement;
 
 use super::{Dependency, Parser, Span};
 
@@ -163,10 +165,9 @@ fn find_dependency_positions(
     version: &Str,
 ) -> Option<TablePositions> {
     let name_range = package
-        .and_then(Str::syntax)
-        .or_else(|| name.syntax())?
-        .text_range();
-    let version_range = version.syntax()?.text_range();
+        .and_then(str_content_range)
+        .or_else(|| name.syntax().map(SyntaxElement::text_range))?;
+    let version_range = str_content_range(version)?;
 
     let name_span = find_range_span(line_ranges, name_range)?;
     let version_span = find_range_span(line_ranges, version_range)?;
@@ -175,6 +176,14 @@ fn find_dependency_positions(
         name_span,
         version_span,
     })
+}
+
+fn str_content_range(s: &Str) -> Option<TextRange> {
+    let quoted_range = s.syntax()?.text_range();
+    Some(TextRange::new(
+        quoted_range.start() + TextSize::from(1),
+        quoted_range.end() - TextSize::from(1),
+    ))
 }
 
 fn find_range_span(haystack: &[TextRange], needle: TextRange) -> Option<Span> {
@@ -235,8 +244,8 @@ serde1 = { package = "serde", version = "1.0.0", features = ["derive"] }
         let deps = parser.parse(content);
         assert_eq!(deps.len(), 1);
         assert_eq!(deps[0].name, "serde");
-        assert_eq!(deps[0].name_span.line_start, 21);
-        assert_eq!(deps[0].name_span.line_end, 28);
+        assert_eq!(deps[0].name_span.line_start, 22);
+        assert_eq!(deps[0].name_span.line_end, 27);
         assert_eq!(deps[0].version, "1.0.0");
     }
 
@@ -311,8 +320,8 @@ features = ["json"]
         assert_eq!(deps.len(), 1);
         assert_eq!(deps[0].name, "reqwest");
         assert_eq!(deps[0].name_span.line, 2);
-        assert_eq!(deps[0].name_span.line_start, 10);
-        assert_eq!(deps[0].name_span.line_end, 19);
+        assert_eq!(deps[0].name_span.line_start, 11);
+        assert_eq!(deps[0].name_span.line_end, 18);
         assert_eq!(deps[0].version, "0.12");
     }
 
