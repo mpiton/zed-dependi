@@ -17,7 +17,7 @@ path = "src/main.rs"
 
 [dependencies]
 tower-lsp = "0.20"
-tokio = { version = "1.50", features = ["full"] }
+tokio = { version = "1.52", features = ["full"] }
 serde = { version = "1.0.228", features = ["derive"] }
 serde_json = "1.0.149"
 reqwest = { version = "0.13", features = ["json", "rustls"], default-features = false }
@@ -35,7 +35,7 @@ chrono = { version = "0.4.44", features = ["serde"] }
 clap = { version = "4.5.60", features = ["derive"] }
 futures = "0.3.32"
 taplo = "0.14"
-hashbrown = { version = "0.16.1", features = ["serde"] }
+hashbrown = { version = "0.17.0", features = ["serde"] }
 
 [dev-dependencies]
 serial_test = "3"
