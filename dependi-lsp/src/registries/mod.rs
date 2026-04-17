@@ -15,6 +15,7 @@
 //! | [pub.dev](https://pub.dev) | Dart/Flutter | [`pub_dev`] |
 //! | [NuGet](https://www.nuget.org) | .NET | [`nuget`] |
 //! | [RubyGems](https://rubygems.org) | Ruby | [`rubygems`] |
+//! | [Maven Central](https://repo1.maven.org/maven2) | Java/Maven | [`maven_central`] |
 //!
 //! ## Architecture
 //!
@@ -220,6 +221,7 @@ pub mod cargo_sparse;
 pub mod crates_io;
 pub mod go_proxy;
 pub mod http_client;
+pub mod maven_central;
 pub mod npm;
 pub mod nuget;
 pub mod packagist;
