@@ -7,6 +7,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- Support for Java/Maven projects (pom.xml):
+  - Parse direct dependencies with `${properties}` substitution
+  - Scope awareness (`test`/`provided` marked as dev dependencies)
+  - Fetch versions and metadata from Maven Central (`maven-metadata.xml` + best-effort POM)
+  - Vulnerability scanning via OSV.dev (Maven ecosystem)
+
 ### Security
 
 - Bump transitive `rand` from 0.9.2 to 0.9.4 via `cargo update` to address [RUSTSEC-2026-0097](https://rustsec.org/advisories/RUSTSEC-2026-0097.html) / [GHSA-cq8v-f236-94qc](https://github.com/rust-random/rand/security/advisories/GHSA-cq8v-f236-94qc) — unsoundness when the `log` and `thread_rng` features are combined with a custom logger that calls `rand::rng()` during a reseed cycle
