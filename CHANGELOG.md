@@ -18,6 +18,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Bump `tokio` constraint from 1.50 to 1.52 in `dependi-lsp/Cargo.toml` (lockfile resolves 1.52.1; patch + minor, backwards compatible)
 - Bump `actions/github-script` from v8 to v9 in `contributor-experience.yml` workflow (Octokit v7; inline scripts unaffected — no `require()` or `getOctokit` shadowing)
 - Refresh all Cargo lockfiles (`dependi-lsp`, `dependi-zed`, `dependi-lsp/fuzz`) with latest semver-compatible transitive dependencies
+- Track dependency name and version lines separately
+
+### Fixed
+
+- Respect the `package` field of `Cargo.toml` dependencies
 
 ## [1.7.0] - 2026-04-07
 
