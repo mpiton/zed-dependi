@@ -285,6 +285,10 @@ fn format_version(version: &str, file_type: FileType) -> String {
             // Ruby Gemfile uses operators like ~> or >=
             version.to_string()
         }
+        FileType::Maven => {
+            // Maven pom.xml uses plain version strings inside <version>...</version>
+            version.to_string()
+        }
     }
 }
 

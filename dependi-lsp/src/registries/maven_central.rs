@@ -51,11 +51,11 @@ impl MavenCentralRegistry {
     }
 
     fn coord_path(package_name: &str) -> anyhow::Result<(String, String)> {
-        let (group, artifact) = package_name
-            .split_once(':')
-            .ok_or_else(|| anyhow::anyhow!(
+        let (group, artifact) = package_name.split_once(':').ok_or_else(|| {
+            anyhow::anyhow!(
                 "Invalid Maven coordinate '{package_name}' (expected 'groupId:artifactId')"
-            ))?;
+            )
+        })?;
         if group.is_empty() || artifact.is_empty() {
             anyhow::bail!(
                 "Invalid Maven coordinate '{package_name}' (groupId or artifactId empty)"
@@ -71,10 +71,8 @@ impl Registry for MavenCentralRegistry {
         let (group_path, artifact) = Self::coord_path(package_name)?;
 
         // Step 1: maven-metadata.xml
-        let metadata_url = format!(
-            "{}/{}/{}/maven-metadata.xml",
-            self.base_url, group_path, artifact
-        );
+        let base = &self.base_url;
+        let metadata_url = format!("{base}/{group_path}/{artifact}/maven-metadata.xml");
         let resp = self.client.get(&metadata_url).send().await?;
         if !resp.status().is_success() {
             anyhow::bail!(
@@ -101,10 +99,7 @@ impl Registry for MavenCentralRegistry {
         // Step 2: best-effort POM fetch for metadata (description, license, ...)
         let (description, homepage, repository, license) = match &latest_stable {
             Some(v) => {
-                let pom_url = format!(
-                    "{}/{}/{}/{}/{}-{}.pom",
-                    self.base_url, group_path, artifact, v, artifact, v
-                );
+                let pom_url = format!("{base}/{group_path}/{artifact}/{v}/{artifact}-{v}.pom");
                 match self.client.get(&pom_url).send().await {
                     Ok(r) if r.status().is_success() => match r.text().await {
                         Ok(body) => parse_pom_metadata(&body),
@@ -154,7 +149,9 @@ impl Registry for MavenCentralRegistry {
 
 /// Parse `maven-metadata.xml` → (latest, release, versions[] in descending order).
 /// `versions` preserves document order reversed (newest first as Maven writes them last).
-pub(crate) fn parse_metadata_xml(content: &str) -> Option<(Option<String>, Option<String>, Vec<String>)> {
+pub(crate) fn parse_metadata_xml(
+    content: &str,
+) -> Option<(Option<String>, Option<String>, Vec<String>)> {
     let mut reader = Reader::from_str(content);
     reader.config_mut().trim_text(true);
 
@@ -180,10 +177,7 @@ pub(crate) fn parse_metadata_xml(content: &str) -> Option<(Option<String>, Optio
                 // Path checks: metadata > versioning > latest | release
                 // Path: metadata > versioning > versions > version
                 let len = stack.len();
-                if len >= 3
-                    && stack[len - 3] == b"metadata"
-                    && stack[len - 2] == b"versioning"
-                {
+                if len >= 3 && stack[len - 3] == b"metadata" && stack[len - 2] == b"versioning" {
                     match stack[len - 1].as_slice() {
                         b"latest" => latest = Some(text),
                         b"release" => release = Some(text),
@@ -209,7 +203,14 @@ pub(crate) fn parse_metadata_xml(content: &str) -> Option<(Option<String>, Optio
 }
 
 /// Parse a minimal subset of a pom.xml to extract presentation metadata.
-pub(crate) fn parse_pom_metadata(content: &str) -> (Option<String>, Option<String>, Option<String>, Option<String>) {
+pub(crate) fn parse_pom_metadata(
+    content: &str,
+) -> (
+    Option<String>,
+    Option<String>,
+    Option<String>,
+    Option<String>,
+) {
     let mut reader = Reader::from_str(content);
     reader.config_mut().trim_text(true);
 
@@ -245,11 +246,7 @@ pub(crate) fn parse_pom_metadata(content: &str) -> (Option<String>, Option<Strin
                     continue;
                 }
                 // project > scm > url
-                if len == 3
-                    && stack[0] == b"project"
-                    && stack[1] == b"scm"
-                    && stack[2] == b"url"
-                {
+                if len == 3 && stack[0] == b"project" && stack[1] == b"scm" && stack[2] == b"url" {
                     repository = Some(text);
                     continue;
                 }

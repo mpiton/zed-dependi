@@ -21,6 +21,7 @@ use crate::parsers::cargo::CargoParser;
 use crate::parsers::csharp::CsharpParser;
 use crate::parsers::dart::DartParser;
 use crate::parsers::go::GoParser;
+use crate::parsers::maven::MavenParser;
 use crate::parsers::npm::NpmParser;
 use crate::parsers::php::PhpParser;
 use crate::parsers::python::PythonParser;
@@ -34,6 +35,7 @@ use crate::registries::cargo_sparse::CargoSparseRegistry;
 use crate::registries::crates_io::CratesIoRegistry;
 use crate::registries::go_proxy::GoProxyRegistry;
 use crate::registries::http_client::create_shared_client;
+use crate::registries::maven_central::MavenCentralRegistry;
 use crate::registries::npm::NpmRegistry;
 use crate::registries::nuget::NuGetRegistry;
 use crate::registries::packagist::PackagistRegistry;
@@ -78,6 +80,7 @@ struct ProcessingContext {
     dart_parser: Arc<DartParser>,
     csharp_parser: Arc<CsharpParser>,
     ruby_parser: Arc<RubyParser>,
+    maven_parser: Arc<MavenParser>,
     crates_io: Arc<CratesIoRegistry>,
     cargo_custom_registries: Arc<DashMap<String, Arc<CargoSparseRegistry>>>,
     npm_registry: Arc<tokio::sync::RwLock<NpmRegistry>>,
@@ -87,6 +90,7 @@ struct ProcessingContext {
     pub_dev: Arc<PubDevRegistry>,
     nuget: Arc<NuGetRegistry>,
     rubygems: Arc<RubyGemsRegistry>,
+    maven_central: Arc<MavenCentralRegistry>,
     osv_client: Arc<OsvClient>,
     vuln_cache: Arc<VulnerabilityCache>,
 }
@@ -102,6 +106,7 @@ impl ProcessingContext {
             Some(FileType::Dart) => self.dart_parser.parse(content),
             Some(FileType::Csharp) => self.csharp_parser.parse(content),
             Some(FileType::Ruby) => self.ruby_parser.parse(content),
+            Some(FileType::Maven) => self.maven_parser.parse(content),
             None => vec![],
         }
     }
@@ -425,6 +430,7 @@ impl ProcessingContext {
         let pub_dev = Arc::clone(&self.pub_dev);
         let nuget = Arc::clone(&self.nuget);
         let rubygems = Arc::clone(&self.rubygems);
+        let maven_central = Arc::clone(&self.maven_central);
         let cache = Arc::clone(&self.version_cache);
 
         let fetch_tasks: Vec<_> = dependencies
@@ -442,6 +448,7 @@ impl ProcessingContext {
                 let pub_dev = Arc::clone(&pub_dev);
                 let nuget = Arc::clone(&nuget);
                 let rubygems = Arc::clone(&rubygems);
+                let maven_central = Arc::clone(&maven_central);
                 let cache = Arc::clone(&cache);
                 async move {
                     // Check cache first
@@ -473,6 +480,7 @@ impl ProcessingContext {
                         FileType::Dart => pub_dev.get_version_info(&name).await,
                         FileType::Csharp => nuget.get_version_info(&name).await,
                         FileType::Ruby => rubygems.get_version_info(&name).await,
+                        FileType::Maven => maven_central.get_version_info(&name).await,
                     };
                     match result {
                         Ok(info) => {
@@ -608,6 +616,7 @@ pub struct DependiBackend {
     dart_parser: Arc<DartParser>,
     csharp_parser: Arc<CsharpParser>,
     ruby_parser: Arc<RubyParser>,
+    maven_parser: Arc<MavenParser>,
     /// Registry clients
     crates_io: Arc<CratesIoRegistry>,
     /// Cargo alternative registries (registry name -> sparse registry client)
@@ -620,6 +629,7 @@ pub struct DependiBackend {
     pub_dev: Arc<PubDevRegistry>,
     nuget: Arc<NuGetRegistry>,
     rubygems: Arc<RubyGemsRegistry>,
+    maven_central: Arc<MavenCentralRegistry>,
     /// Shared HTTP client for creating new registry instances
     http_client: Arc<HttpClient>,
     /// Token provider manager for authentication across all ecosystems
@@ -663,6 +673,10 @@ impl DependiBackend {
         let npm_registry = Arc::new(tokio::sync::RwLock::new(
             NpmRegistry::with_client_and_config(Arc::clone(&http_client), &config.registries.npm),
         ));
+        let maven_central = Arc::new(MavenCentralRegistry::with_client_and_config(
+            Arc::clone(&http_client),
+            &config.registries.maven,
+        ));
 
         // Create token provider manager for centralized auth management
         let token_manager = Arc::new(TokenProviderManager::new());
@@ -680,6 +694,7 @@ impl DependiBackend {
             dart_parser: Arc::new(DartParser::new()),
             csharp_parser: Arc::new(CsharpParser::new()),
             ruby_parser: Arc::new(RubyParser::new()),
+            maven_parser: Arc::new(MavenParser::new()),
             crates_io: Arc::new(CratesIoRegistry::with_client(Arc::clone(&http_client))),
             cargo_custom_registries: Arc::new(DashMap::new()),
             npm_registry,
@@ -689,6 +704,7 @@ impl DependiBackend {
             pub_dev: Arc::new(PubDevRegistry::with_client(Arc::clone(&http_client))),
             nuget: Arc::new(NuGetRegistry::with_client(Arc::clone(&http_client))),
             rubygems: Arc::new(RubyGemsRegistry::with_client(Arc::clone(&http_client))),
+            maven_central,
             http_client,
             token_manager,
             osv_client: Arc::new(OsvClient::default()),
@@ -713,6 +729,7 @@ impl DependiBackend {
             dart_parser: Arc::clone(&self.dart_parser),
             csharp_parser: Arc::clone(&self.csharp_parser),
             ruby_parser: Arc::clone(&self.ruby_parser),
+            maven_parser: Arc::clone(&self.maven_parser),
             crates_io: Arc::clone(&self.crates_io),
             cargo_custom_registries: Arc::clone(&self.cargo_custom_registries),
             npm_registry: Arc::clone(&self.npm_registry),
@@ -722,6 +739,7 @@ impl DependiBackend {
             pub_dev: Arc::clone(&self.pub_dev),
             nuget: Arc::clone(&self.nuget),
             rubygems: Arc::clone(&self.rubygems),
+            maven_central: Arc::clone(&self.maven_central),
             osv_client: Arc::clone(&self.osv_client),
             vuln_cache: Arc::clone(&self.vuln_cache),
         }
@@ -771,6 +789,7 @@ impl DependiBackend {
             FileType::Dart => self.pub_dev.get_version_info(package_name).await,
             FileType::Csharp => self.nuget.get_version_info(package_name).await,
             FileType::Ruby => self.rubygems.get_version_info(package_name).await,
+            FileType::Maven => self.maven_central.get_version_info(package_name).await,
         };
 
         match result {

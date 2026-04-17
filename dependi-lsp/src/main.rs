@@ -155,7 +155,7 @@ async fn run_scan(
 ) -> ExitCode {
     use dependi_lsp::parsers::{
         Parser, cargo::CargoParser, csharp::CsharpParser, dart::DartParser, go::GoParser,
-        npm::NpmParser, php::PhpParser, python::PythonParser,
+        maven::MavenParser, npm::NpmParser, php::PhpParser, python::PythonParser,
     };
     use dependi_lsp::registries::VulnerabilitySeverity;
     use dependi_lsp::vulnerabilities::{Ecosystem, VulnerabilityQuery, osv::OsvClient};
@@ -186,6 +186,8 @@ async fn run_scan(
         (DartParser::new().parse(&content), Ecosystem::Pub)
     } else if file_name.ends_with(".csproj") {
         (CsharpParser::new().parse(&content), Ecosystem::NuGet)
+    } else if file_name == "pom.xml" {
+        (MavenParser::new().parse(&content), Ecosystem::Maven)
     } else {
         eprintln!("Unsupported file type: {file_name}");
         return ExitCode::FAILURE;
@@ -354,7 +356,7 @@ async fn run_scan(
 async fn run_profile_parse(file: PathBuf, iterations: u32) -> ExitCode {
     use dependi_lsp::parsers::{
         Parser, cargo::CargoParser, csharp::CsharpParser, dart::DartParser, go::GoParser,
-        npm::NpmParser, php::PhpParser, python::PythonParser, ruby::RubyParser,
+        maven::MavenParser, npm::NpmParser, php::PhpParser, python::PythonParser, ruby::RubyParser,
     };
 
     let content = match tokio::fs::read_to_string(&file).await {
@@ -380,6 +382,7 @@ async fn run_profile_parse(file: PathBuf, iterations: u32) -> ExitCode {
         Dart(DartParser),
         Csharp(CsharpParser),
         Ruby(RubyParser),
+        Maven(MavenParser),
     }
 
     let parser = if file_name.ends_with("Cargo.toml")
@@ -402,6 +405,8 @@ async fn run_profile_parse(file: PathBuf, iterations: u32) -> ExitCode {
         ParserKind::Csharp(CsharpParser::new())
     } else if file_name.ends_with("Gemfile") {
         ParserKind::Ruby(RubyParser::new())
+    } else if file_name == "pom.xml" {
+        ParserKind::Maven(MavenParser::new())
     } else {
         eprintln!("Unsupported file type: {file_name}");
         return ExitCode::FAILURE;
@@ -419,6 +424,7 @@ async fn run_profile_parse(file: PathBuf, iterations: u32) -> ExitCode {
             ParserKind::Dart(p) => std::hint::black_box(p.parse(&content)),
             ParserKind::Csharp(p) => std::hint::black_box(p.parse(&content)),
             ParserKind::Ruby(p) => std::hint::black_box(p.parse(&content)),
+            ParserKind::Maven(p) => std::hint::black_box(p.parse(&content)),
         };
     }
 
@@ -553,12 +559,13 @@ async fn run_profile_full(file: PathBuf, iterations: u32, verbose: bool) -> Exit
     use dependi_lsp::config::NpmRegistryConfig;
     use dependi_lsp::parsers::{
         Parser, cargo::CargoParser, csharp::CsharpParser, dart::DartParser, go::GoParser,
-        npm::NpmParser, php::PhpParser, python::PythonParser, ruby::RubyParser,
+        maven::MavenParser, npm::NpmParser, php::PhpParser, python::PythonParser, ruby::RubyParser,
     };
     use dependi_lsp::registries::{
-        Registry, crates_io::CratesIoRegistry, go_proxy::GoProxyRegistry, npm::NpmRegistry,
-        nuget::NuGetRegistry, packagist::PackagistRegistry, pub_dev::PubDevRegistry,
-        pypi::PyPiRegistry, rubygems::RubyGemsRegistry,
+        Registry, crates_io::CratesIoRegistry, go_proxy::GoProxyRegistry,
+        maven_central::MavenCentralRegistry, npm::NpmRegistry, nuget::NuGetRegistry,
+        packagist::PackagistRegistry, pub_dev::PubDevRegistry, pypi::PyPiRegistry,
+        rubygems::RubyGemsRegistry,
     };
     use dependi_lsp::vulnerabilities::{Ecosystem, VulnerabilityQuery, osv::OsvClient};
     use futures::future::join_all;
@@ -607,6 +614,8 @@ async fn run_profile_full(file: PathBuf, iterations: u32, verbose: bool) -> Exit
         Ecosystem::NuGet
     } else if file_name.ends_with("Gemfile") {
         Ecosystem::RubyGems
+    } else if file_name == "pom.xml" {
+        Ecosystem::Maven
     } else {
         eprintln!("Unsupported file type: {file_name}");
         return ExitCode::FAILURE;
@@ -630,6 +639,7 @@ async fn run_profile_full(file: PathBuf, iterations: u32, verbose: bool) -> Exit
             Ecosystem::Pub => DartParser::new().parse(&content),
             Ecosystem::NuGet => CsharpParser::new().parse(&content),
             Ecosystem::RubyGems => RubyParser::new().parse(&content),
+            Ecosystem::Maven => MavenParser::new().parse(&content),
         };
         let parse_elapsed = parse_start.elapsed();
 
@@ -688,6 +698,10 @@ async fn run_profile_full(file: PathBuf, iterations: u32, verbose: bool) -> Exit
                         }
                         Ecosystem::RubyGems => {
                             let reg = RubyGemsRegistry::with_client(client);
+                            reg.get_version_info(&name).await
+                        }
+                        Ecosystem::Maven => {
+                            let reg = MavenCentralRegistry::with_client(client);
                             reg.get_version_info(&name).await
                         }
                     }

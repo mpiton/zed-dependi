@@ -13,8 +13,7 @@
 //! - BOM (`<scope>import</scope>`) resolution from remote POMs
 //! - Plugin dependencies
 
-use std::collections::HashMap;
-
+use hashbrown::HashMap;
 use quick_xml::events::Event;
 use quick_xml::reader::Reader;
 
@@ -79,23 +78,20 @@ fn extract_properties(content: &str) -> HashMap<String, String> {
                 // which is itself a child of <project>. Path: project > properties > <key>.
                 // depth_stack represents the path of open elements excluding the current.
                 let is_key = depth_stack.last().map(|v| v.as_slice()) == Some(b"properties");
-                if is_key {
-                    // Only accept if the grandparent is project.
-                    if depth_stack.len() >= 2
-                        && depth_stack[depth_stack.len() - 2] == b"project"
-                    {
-                        if let Ok(s) = std::str::from_utf8(&name) {
-                            current_key = Some(s.to_string());
-                        }
-                    }
+                if is_key
+                    && depth_stack.len() >= 2
+                    && depth_stack[depth_stack.len() - 2] == b"project"
+                    && let Ok(s) = std::str::from_utf8(&name)
+                {
+                    current_key = Some(s.to_string());
                 }
                 depth_stack.push(name);
             }
             Ok(Event::Text(e)) => {
-                if let Some(ref key) = current_key {
-                    if let Ok(text) = e.decode() {
-                        out.insert(key.clone(), text.into_owned());
-                    }
+                if let Some(ref key) = current_key
+                    && let Ok(text) = e.decode()
+                {
+                    out.insert(key.clone(), text.into_owned());
                 }
             }
             Ok(Event::End(_)) => {
@@ -111,10 +107,7 @@ fn extract_properties(content: &str) -> HashMap<String, String> {
 
 /// Pass 2: extract dependencies from `<dependencies>` and
 /// `<dependencyManagement><dependencies>`, substituting `${property}` placeholders.
-fn extract_dependencies(
-    content: &str,
-    properties: &HashMap<String, String>,
-) -> Vec<Dependency> {
+fn extract_dependencies(content: &str, properties: &HashMap<String, String>) -> Vec<Dependency> {
     let mut reader = Reader::from_str(content);
     reader.config_mut().trim_text(true);
 
@@ -203,26 +196,24 @@ fn extract_dependencies(
                 }
                 current_tag = None;
             }
-            Ok(Event::Text(e)) => {
-                if in_dependency {
-                    let text = match e.decode() {
-                        Ok(s) => s.into_owned(),
-                        Err(_) => continue,
-                    };
-                    match current_tag.as_deref() {
-                        Some(b"groupId") => cur_group = Some(text),
-                        Some(b"artifactId") => cur_artifact = Some(text),
-                        Some(b"version") => {
-                            // Capture byte offsets of the text content.
-                            let end = reader.buffer_position() as usize;
-                            let start = end.saturating_sub(text.len());
-                            cur_version_span = Some((start, end));
-                            cur_version = Some(text);
-                        }
-                        Some(b"scope") => cur_scope = Some(text),
-                        Some(b"optional") => cur_optional = text.trim() == "true",
-                        _ => {}
+            Ok(Event::Text(e)) if in_dependency => {
+                let text = match e.decode() {
+                    Ok(s) => s.into_owned(),
+                    Err(_) => continue,
+                };
+                match current_tag.as_deref() {
+                    Some(b"groupId") => cur_group = Some(text),
+                    Some(b"artifactId") => cur_artifact = Some(text),
+                    Some(b"version") => {
+                        // Capture byte offsets of the text content.
+                        let end = reader.buffer_position() as usize;
+                        let start = end.saturating_sub(text.len());
+                        cur_version_span = Some((start, end));
+                        cur_version = Some(text);
                     }
+                    Some(b"scope") => cur_scope = Some(text),
+                    Some(b"optional") => cur_optional = text.trim() == "true",
+                    _ => {}
                 }
             }
             _ => {}
@@ -504,7 +495,11 @@ mod tests {
         assert_eq!(deps.len(), 1);
         // The version line should be zero-indexed; the exact line varies with the raw string,
         // so we just sanity-check it is non-zero and the span is reasonable.
-        assert!(deps[0].line > 0, "line should be tracked (got {})", deps[0].line);
+        assert!(
+            deps[0].line > 0,
+            "line should be tracked (got {})",
+            deps[0].line
+        );
         assert!(
             deps[0].version_end > deps[0].version_start,
             "version span should be non-empty"

@@ -31,6 +31,8 @@ pub enum FileType {
     Csharp,
     /// Ruby gems (Gemfile)
     Ruby,
+    /// Java packages (Maven, pom.xml)
+    Maven,
 }
 
 impl FileType {
@@ -60,6 +62,9 @@ impl FileType {
             Some(FileType::Csharp)
         } else if path.ends_with("Gemfile") {
             Some(FileType::Ruby)
+        } else if filename == "pom.xml" {
+            // Maven project object model; the filename is always `pom.xml`.
+            Some(FileType::Maven)
         } else if filename == "hatch.toml" {
             // Hatch project-level config; the filename is always `hatch.toml`.
             // Routed to FileType::Python because dependencies resolve via PyPI.
@@ -82,6 +87,7 @@ impl FileType {
             FileType::Dart => Ecosystem::Pub,
             FileType::Csharp => Ecosystem::NuGet,
             FileType::Ruby => Ecosystem::RubyGems,
+            FileType::Maven => Ecosystem::Maven,
         }
     }
 
@@ -98,6 +104,10 @@ impl FileType {
             FileType::Dart => write!(f, "https://pub.dev/packages/{name}"),
             FileType::Ruby => write!(f, "https://rubygems.org/gems/{name}"),
             FileType::Csharp => write!(f, "https://www.nuget.org/packages/{name}"),
+            FileType::Maven => {
+                let url_path = name.replace(':', "/");
+                write!(f, "https://mvnrepository.com/artifact/{url_path}")
+            }
         })
     }
 
@@ -112,6 +122,7 @@ impl FileType {
             FileType::Dart => "pub.dev",
             FileType::Ruby => "RubyGems",
             FileType::Csharp => "NuGet",
+            FileType::Maven => "Maven Central",
         }
     }
 
@@ -141,6 +152,7 @@ impl FileType {
             FileType::Dart => write!(f, "pub:{package_name}"),
             FileType::Csharp => write!(f, "nuget:{package_name}"),
             FileType::Ruby => write!(f, "rubygems:{package_name}"),
+            FileType::Maven => write!(f, "maven:{package_name}"),
         })
     }
 }
@@ -250,6 +262,44 @@ mod tests {
         // is intentionally NOT matched (rsplit behaviour ensures full filename match).
         let uri = Url::parse("file:///project/not-hatch.toml").unwrap();
         assert_eq!(FileType::detect(&uri), None);
+    }
+
+    #[test]
+    fn test_detect_maven() {
+        let uri = Url::parse("file:///project/pom.xml").unwrap();
+        assert_eq!(FileType::detect(&uri), Some(FileType::Maven));
+
+        let uri = Url::parse("file:///project/subdir/pom.xml").unwrap();
+        assert_eq!(FileType::detect(&uri), Some(FileType::Maven));
+
+        let uri = Url::parse("file:///project/mypom.xml").unwrap();
+        assert_eq!(FileType::detect(&uri), None);
+    }
+
+    #[test]
+    fn test_to_ecosystem_maven() {
+        assert_eq!(FileType::Maven.to_ecosystem(), Ecosystem::Maven);
+    }
+
+    #[test]
+    fn test_cache_key_maven() {
+        assert_eq!(
+            FileType::Maven.cache_key("org.slf4j:slf4j-api"),
+            "maven:org.slf4j:slf4j-api"
+        );
+    }
+
+    #[test]
+    fn test_registry_package_url_maven() {
+        assert_eq!(
+            FileType::Maven.registry_package_url("org.slf4j:slf4j-api"),
+            "https://mvnrepository.com/artifact/org.slf4j/slf4j-api"
+        );
+    }
+
+    #[test]
+    fn test_registry_name_maven() {
+        assert_eq!(FileType::Maven.registry_name(), "Maven Central");
     }
 
     #[test]
