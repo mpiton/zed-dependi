@@ -181,6 +181,23 @@ pub struct CargoRegistryConfig {
     pub registries: HashMap<String, CargoCustomRegistryConfig>,
 }
 
+/// Maven registry configuration
+#[derive(Debug, Clone, Deserialize)]
+#[serde(default)]
+pub struct MavenRegistryConfig {
+    /// Base URL for the Maven repository (no trailing slash).
+    /// Defaults to Maven Central. Configure to point at Nexus/Artifactory mirrors.
+    pub url: String,
+}
+
+impl Default for MavenRegistryConfig {
+    fn default() -> Self {
+        Self {
+            url: "https://repo1.maven.org/maven2".to_string(),
+        }
+    }
+}
+
 /// Package registries configuration
 #[derive(Debug, Clone, Deserialize, Default)]
 #[serde(default)]
@@ -190,6 +207,9 @@ pub struct RegistriesConfig {
     /// Cargo alternative registries configuration
     #[serde(default)]
     pub cargo: CargoRegistryConfig,
+    /// Maven registry configuration (Maven Central by default)
+    #[serde(default)]
+    pub maven: MavenRegistryConfig,
 }
 
 impl Default for SecurityConfig {
@@ -584,5 +604,30 @@ mod tests {
 
         assert!(!auth.is_configured());
         assert!(auth.get_token().is_none());
+    }
+
+    #[test]
+    fn test_maven_registry_config_default() {
+        let config = Config::default();
+        assert_eq!(
+            config.registries.maven.url,
+            "https://repo1.maven.org/maven2"
+        );
+    }
+
+    #[test]
+    fn test_maven_registry_config_custom_url() {
+        let json = json!({
+            "registries": {
+                "maven": {
+                    "url": "https://nexus.internal.corp/repository/maven-public"
+                }
+            }
+        });
+        let config = Config::from_init_options(Some(json));
+        assert_eq!(
+            config.registries.maven.url,
+            "https://nexus.internal.corp/repository/maven-public"
+        );
     }
 }
