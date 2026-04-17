@@ -1450,16 +1450,28 @@ impl LanguageServer for DependiBackend {
 
         let file_type = doc.file_type;
 
-        // Find dependency at this position
-        let dep = doc.dependencies.iter().find(|d| {
-            d.name_span.contains_lsp_position(&position)
-                || d.version_span.contains_lsp_position(&position)
-        });
+        enum HoveredSpan {
+            Name,
+            Version,
+        }
 
-        let Some(dep) = dep.cloned() else {
+        // Find dependency at this position
+        let Some((dep, hovered_span)) = doc.dependencies.iter().find_map(|d| {
+            if d.name_span.contains_lsp_position(&position) {
+                Some((d.clone(), HoveredSpan::Name))
+            } else if d.version_span.contains_lsp_position(&position) {
+                Some((d.clone(), HoveredSpan::Version))
+            } else {
+                None
+            }
+        }) else {
             return Ok(None);
         };
         let dep_name = &*dep.name;
+        let hovered_span = match hovered_span {
+            HoveredSpan::Name => dep.name_span,
+            HoveredSpan::Version => dep.version_span,
+        };
 
         // Drop the lock before async call
         drop(doc);
@@ -1474,11 +1486,6 @@ impl LanguageServer for DependiBackend {
             None => format!("## {dep_name}\n\nCould not fetch package information."),
         };
 
-        let hovered_span = if dep.name_span.contains_lsp_position(&position) {
-            &dep.name_span
-        } else {
-            &dep.version_span
-        };
         Ok(Some(Hover {
             contents: HoverContents::Markup(MarkupContent {
                 kind: MarkupKind::Markdown,

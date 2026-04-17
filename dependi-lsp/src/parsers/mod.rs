@@ -25,7 +25,7 @@ pub struct Dependency {
     pub resolved_version: Option<String>,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, Serialize, Deserialize)]
 pub struct Span {
     /// Line number in the file (0-indexed)
     pub line: u32,
