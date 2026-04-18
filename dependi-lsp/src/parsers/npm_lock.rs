@@ -1186,7 +1186,7 @@ packages:
         let graph = parse_pnpm_lock_graph(content);
         let names: Vec<&str> = graph.packages.iter().map(|p| p.name.as_str()).collect();
         assert!(
-            names.iter().any(|n| *n == "@types/node"),
+            names.contains(&"@types/node"),
             "quoted key should yield unquoted name, got {names:?}"
         );
         let ty = graph.packages.iter().find(|p| p.name == "@types/node").unwrap();

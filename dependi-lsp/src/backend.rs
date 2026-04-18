@@ -1050,13 +1050,17 @@ impl DependiBackend {
         }
 
         // Build queries for transitive packages not in vulnerability cache.
+        // Cached transitives are tracked separately so we can still attribute their vulns.
         let mut transitive_queries: Vec<VulnerabilityQuery> = Vec::new();
         let mut transitive_query_pkgs: Vec<&crate::parsers::lockfile_graph::LockfilePackage> =
+            Vec::new();
+        let mut transitive_cached_pkgs: Vec<&crate::parsers::lockfile_graph::LockfilePackage> =
             Vec::new();
         for t in transitives.iter() {
             let normalized_version = normalize_version_for_osv(&t.version);
             let vuln_key = VulnCacheKey::new(ecosystem, &t.name, &normalized_version);
             if vuln_cache.contains(&vuln_key) {
+                transitive_cached_pkgs.push(t);
                 continue;
             }
             transitive_queries.push(VulnerabilityQuery {
@@ -1070,11 +1074,6 @@ impl DependiBackend {
         let direct_count = direct_queries.len();
         let mut all_queries = direct_queries;
         all_queries.extend(transitive_queries);
-
-        if all_queries.is_empty() {
-            tracing::debug!("Background: All vulnerability info cached, skipping OSV query");
-            return;
-        }
 
         tracing::info!(
             "Background: Querying OSV.dev for {} packages ({} direct, {} transitive)",
@@ -1192,6 +1191,52 @@ impl DependiBackend {
                                     tpkg.version,
                                     parent
                                 );
+                            }
+                        }
+                    }
+
+                    // Attribute transitive vulns for packages already in vuln_cache.
+                    // Their vuln data lives in version_cache under the ecosystem-prefixed key.
+                    // This ensures re-processing a document never drops transitive attribution
+                    // just because the OSV query was skipped.
+                    for tpkg in &transitive_cached_pkgs {
+                        let cache_key = file_type.cache_key(&tpkg.name);
+                        if let Some(info) = cache.get(&cache_key) {
+                            if info.vulnerabilities.is_empty() {
+                                continue;
+                            }
+                            let parents = inverse.get(&tpkg.name).cloned().unwrap_or_default();
+                            if parents.is_empty() {
+                                for v in &info.vulnerabilities {
+                                    transitive_vulns_by_direct
+                                        .entry_ref("(unknown)")
+                                        .or_default()
+                                        .push(TransitiveVuln {
+                                            package_name: tpkg.name.clone(),
+                                            package_version: tpkg.version.clone(),
+                                            vulnerability: v.clone(),
+                                        });
+                                }
+                            } else {
+                                for parent in &parents {
+                                    for v in &info.vulnerabilities {
+                                        transitive_vulns_by_direct
+                                            .entry_ref(parent.as_str())
+                                            .or_default()
+                                            .push(TransitiveVuln {
+                                                package_name: tpkg.name.clone(),
+                                                package_version: tpkg.version.clone(),
+                                                vulnerability: v.clone(),
+                                            });
+                                    }
+                                    tracing::debug!(
+                                        "Background: Re-attributed (cached) {} transitive vulns from {}@{} to direct dep {}",
+                                        info.vulnerabilities.len(),
+                                        tpkg.name,
+                                        tpkg.version,
+                                        parent
+                                    );
+                                }
                             }
                         }
                     }

@@ -70,10 +70,22 @@ pub fn create_diagnostics(
                     })
                     .collect();
 
-                let transitive_vulns = doc_transitive_vulns
-                    .get(&dep.name)
-                    .map(|v| v.as_slice())
-                    .unwrap_or(&[]);
+                let filtered_transitive_vulns: Vec<TransitiveVuln>;
+                let transitive_vulns: &[TransitiveVuln] =
+                    match (doc_transitive_vulns.get(&dep.name), min_severity.as_ref()) {
+                        (Some(tvs), Some(min)) => {
+                            filtered_transitive_vulns = tvs
+                                .iter()
+                                .filter(|tv| {
+                                    meets_severity_threshold(&tv.vulnerability.severity, min)
+                                })
+                                .cloned()
+                                .collect();
+                            &filtered_transitive_vulns
+                        }
+                        (Some(tvs), None) => tvs.as_slice(),
+                        (None, _) => &[],
+                    };
 
                 if !filtered_vulns.is_empty() || !transitive_vulns.is_empty() {
                     diagnostics.push(create_vulnerability_summary_diagnostic(
@@ -1378,5 +1390,80 @@ mod tests {
             vuln_diags[0].message
         );
         assert_eq!(vuln_diags[0].severity, Some(DiagnosticSeverity::ERROR));
+    }
+
+    #[test]
+    fn test_transitive_vulns_respect_min_severity() {
+        let deps = vec![create_test_dependency("my-dep", "1.0.0", 5)];
+        let cache = MemoryCache::new();
+        cache.insert(
+            "test:my-dep".to_string(),
+            VersionInfo {
+                latest: Some("1.0.0".to_string()),
+                ..Default::default()
+            },
+        );
+
+        let mut doc_transitives: hashbrown::HashMap<String, Vec<TransitiveVuln>> =
+            hashbrown::HashMap::new();
+        doc_transitives.insert(
+            "my-dep".to_string(),
+            vec![
+                TransitiveVuln {
+                    package_name: "low-pkg".into(),
+                    package_version: "1.0".into(),
+                    vulnerability: Vulnerability {
+                        id: "LOW-1".into(),
+                        severity: VulnerabilitySeverity::Low,
+                        description: "low".into(),
+                        url: None,
+                    },
+                },
+                TransitiveVuln {
+                    package_name: "high-pkg".into(),
+                    package_version: "2.0".into(),
+                    vulnerability: Vulnerability {
+                        id: "HIGH-1".into(),
+                        severity: VulnerabilitySeverity::High,
+                        description: "high".into(),
+                        url: None,
+                    },
+                },
+            ],
+        );
+
+        let diagnostics = create_diagnostics(
+            &deps,
+            &cache,
+            |name| format!("test:{name}"),
+            Some(VulnerabilitySeverity::High),
+            FileType::Cargo,
+            &doc_transitives,
+        );
+
+        let vuln_diags: Vec<_> = diagnostics
+            .iter()
+            .filter(|d| {
+                d.code
+                    .as_ref()
+                    .is_some_and(|c| matches!(c, NumberOrString::String(s) if s.contains("vulns")))
+            })
+            .collect();
+
+        assert_eq!(
+            vuln_diags.len(),
+            1,
+            "Should emit exactly one diagnostic for the high-severity transitive vuln"
+        );
+        assert!(
+            vuln_diags[0].message.contains("HIGH-1"),
+            "Message should contain HIGH-1, got: {}",
+            vuln_diags[0].message
+        );
+        assert!(
+            !vuln_diags[0].message.contains("LOW-1"),
+            "Message should NOT contain LOW-1 when min_severity=High, got: {}",
+            vuln_diags[0].message
+        );
     }
 }
