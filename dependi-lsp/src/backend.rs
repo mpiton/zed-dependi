@@ -1023,8 +1023,7 @@ impl DependiBackend {
                 for (dep, result) in direct_query_deps.iter().zip(direct_results.iter()) {
                     let normalized_version = normalize_version_for_osv(dep.effective_version());
                     // Mark this package as queried in vuln_cache
-                    let vuln_key =
-                        VulnCacheKey::new(ecosystem, &dep.name, &normalized_version);
+                    let vuln_key = VulnCacheKey::new(ecosystem, &dep.name, &normalized_version);
                     vuln_cache.insert(vuln_key);
 
                     // Store vulnerabilities and deprecated status in version_cache

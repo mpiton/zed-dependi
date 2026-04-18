@@ -67,8 +67,7 @@ pub fn create_diagnostics(
                     })
                     .collect();
 
-                if !filtered_vulns.is_empty()
-                    || !version_info.transitive_vulnerabilities.is_empty()
+                if !filtered_vulns.is_empty() || !version_info.transitive_vulnerabilities.is_empty()
                 {
                     diagnostics.push(create_vulnerability_summary_diagnostic(
                         dep,
@@ -1288,7 +1287,9 @@ mod tests {
 
     #[test]
     fn test_diagnostic_fires_on_transitive_only_vulns() {
-        use crate::registries::{TransitiveVuln, Vulnerability, VulnerabilitySeverity, VersionInfo};
+        use crate::registries::{
+            TransitiveVuln, VersionInfo, Vulnerability, VulnerabilitySeverity,
+        };
 
         let deps = vec![create_test_dependency("my-dep", "1.0.0", 5)];
         let cache = MemoryCache::new();
@@ -1327,7 +1328,11 @@ mod tests {
             })
             .collect();
 
-        assert_eq!(vuln_diags.len(), 1, "Should emit diagnostic for transitive-only vulns");
+        assert_eq!(
+            vuln_diags.len(),
+            1,
+            "Should emit diagnostic for transitive-only vulns"
+        );
         assert!(
             vuln_diags[0].message.contains("transitive"),
             "Message should contain 'transitive', got: {}",

@@ -285,9 +285,16 @@ mod tests {
 }"#;
         let graph = parse_composer_lock_graph(content);
         let names: Vec<&str> = graph.packages.iter().map(|p| p.name.as_str()).collect();
-        assert!(names.contains(&"vendor/package"), "main name should be lowercased, got {names:?}");
+        assert!(
+            names.contains(&"vendor/package"),
+            "main name should be lowercased, got {names:?}"
+        );
         assert!(names.contains(&"dep/other"));
-        let vp = graph.packages.iter().find(|p| p.name == "vendor/package").unwrap();
+        let vp = graph
+            .packages
+            .iter()
+            .find(|p| p.name == "vendor/package")
+            .unwrap();
         assert!(
             vp.dependencies.contains(&"dep/other".to_string()),
             "require names must also be normalized, got {:?}",

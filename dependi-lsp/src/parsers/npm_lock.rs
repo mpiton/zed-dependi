@@ -442,7 +442,12 @@ pub fn parse_pnpm_lock_graph(content: &str) -> LockfileGraph {
 
     for line in content.lines() {
         // Exit packages section on any new top-level key (e.g. "snapshots:", "settings:", etc.)
-        if in_packages && !line.is_empty() && !line.starts_with(' ') && !line.starts_with('\t') && line != "packages:" {
+        if in_packages
+            && !line.is_empty()
+            && !line.starts_with(' ')
+            && !line.starts_with('\t')
+            && line != "packages:"
+        {
             in_packages = false;
             if let Some(finish) = current.take() {
                 graph.packages.push(finish);
@@ -1142,8 +1147,10 @@ snapshots:
         let names: Vec<&str> = graph.packages.iter().map(|p| p.name.as_str()).collect();
         // Should include react but NOT react-dom (which lives under snapshots:)
         assert!(names.contains(&"react"));
-        assert!(!names.iter().any(|n| n.contains('(')),
-            "no entry name should contain a peer-suffix paren, got {names:?}");
+        assert!(
+            !names.iter().any(|n| n.contains('(')),
+            "no entry name should contain a peer-suffix paren, got {names:?}"
+        );
     }
 
     #[test]
@@ -1156,7 +1163,12 @@ packages:
     resolution: {integrity: sha512-xxx}
 "#;
         let graph = parse_pnpm_lock_graph(content);
-        assert!(graph.packages.iter().any(|p| p.name == "react-dom" && p.version == "18.2.0"));
+        assert!(
+            graph
+                .packages
+                .iter()
+                .any(|p| p.name == "react-dom" && p.version == "18.2.0")
+        );
     }
 
     #[test]

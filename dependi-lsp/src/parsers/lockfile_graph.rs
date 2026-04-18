@@ -16,12 +16,14 @@ pub async fn read_lockfile_capped(path: &std::path::Path) -> std::io::Result<Str
     if buf.len() as u64 > MAX_LOCKFILE_BYTES {
         return Err(std::io::Error::new(
             std::io::ErrorKind::InvalidData,
-            format!("lockfile exceeds {} MiB cap", MAX_LOCKFILE_BYTES / (1024 * 1024)),
+            format!(
+                "lockfile exceeds {} MiB cap",
+                MAX_LOCKFILE_BYTES / (1024 * 1024)
+            ),
         ));
     }
-    String::from_utf8(buf).map_err(|e| {
-        std::io::Error::new(std::io::ErrorKind::InvalidData, e.utf8_error())
-    })
+    String::from_utf8(buf)
+        .map_err(|e| std::io::Error::new(std::io::ErrorKind::InvalidData, e.utf8_error()))
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]

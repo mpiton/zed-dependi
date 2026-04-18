@@ -491,8 +491,16 @@ GEM
     rack (3.0.0)
 "#;
         let graph = parse_gemfile_lock_graph(content);
-        let nokogiri = graph.packages.iter().find(|p| p.name == "nokogiri").unwrap();
-        assert_eq!(nokogiri.version, "1.15.4", "platform suffix must be stripped, got {:?}", nokogiri.version);
+        let nokogiri = graph
+            .packages
+            .iter()
+            .find(|p| p.name == "nokogiri")
+            .unwrap();
+        assert_eq!(
+            nokogiri.version, "1.15.4",
+            "platform suffix must be stripped, got {:?}",
+            nokogiri.version
+        );
         let rack = graph.packages.iter().find(|p| p.name == "rack").unwrap();
         assert_eq!(rack.version, "3.0.0");
     }
