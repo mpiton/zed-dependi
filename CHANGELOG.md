@@ -30,29 +30,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   for debugging or when only the manifest should be inspected.
 - `VersionInfo.transitive_vulnerabilities: Vec<TransitiveVuln>` and new public
   `TransitiveVuln` type in `registries` for consumers of the public API.
-
-### Fixed
-
-- `dependi-lsp scan` now uses `effective_version()` (the resolved lockfile
-  version when available) instead of the declared version specifier when
-  querying OSV — previously the CLI queried using the specifier string (e.g.
-  `^1.0`), which caused false negatives.
-
-### Security
-
-- Lockfile reads are now capped at 50 MiB to prevent out-of-memory on hostile
-  or corrupted inputs (both in CLI and LSP backend).
-
 - Support for Java/Maven projects (pom.xml):
   - Parse direct dependencies with `${properties}` substitution
   - Scope awareness (`test`/`provided` marked as dev dependencies)
   - Fetch versions and metadata from Maven Central (`maven-metadata.xml` + best-effort POM)
   - Vulnerability scanning via OSV.dev (Maven ecosystem)
-
-### Security
-
-- Bump transitive `rand` from 0.9.2 to 0.9.4 via `cargo update` to address [RUSTSEC-2026-0097](https://rustsec.org/advisories/RUSTSEC-2026-0097.html) / [GHSA-cq8v-f236-94qc](https://github.com/rust-random/rand/security/advisories/GHSA-cq8v-f236-94qc) — unsoundness when the `log` and `thread_rng` features are combined with a custom logger that calls `rand::rng()` during a reseed cycle
-- Bump transitive `rustls-webpki` from 0.103.10 to 0.103.12 via `cargo update` to address [RUSTSEC-2026-0098](https://rustsec.org/advisories/RUSTSEC-2026-0098.html) / [GHSA-965h-392x-2mh5](https://github.com/rustls/webpki/security/advisories/GHSA-965h-392x-2mh5) (URI name constraints ignored) and [RUSTSEC-2026-0099](https://rustsec.org/advisories/RUSTSEC-2026-0099.html) / [GHSA-xgp8-3hg3-c2mh](https://github.com/rustls/webpki/security/advisories/GHSA-xgp8-3hg3-c2mh) (wildcard DNS name constraints bypass)
 
 ### Changed
 
@@ -64,7 +46,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- `dependi-lsp scan` now uses `effective_version()` (the resolved lockfile
+  version when available) instead of the declared version specifier when
+  querying OSV — previously the CLI queried using the specifier string (e.g.
+  `^1.0`), which caused false negatives.
 - Respect the `package` field of `Cargo.toml` dependencies
+
+### Security
+
+- Lockfile reads are now capped at 50 MiB to prevent out-of-memory on hostile
+  or corrupted inputs (both in CLI and LSP backend).
+- Bump transitive `rand` from 0.9.2 to 0.9.4 via `cargo update` to address [RUSTSEC-2026-0097](https://rustsec.org/advisories/RUSTSEC-2026-0097.html) / [GHSA-cq8v-f236-94qc](https://github.com/rust-random/rand/security/advisories/GHSA-cq8v-f236-94qc) — unsoundness when the `log` and `thread_rng` features are combined with a custom logger that calls `rand::rng()` during a reseed cycle
+- Bump transitive `rustls-webpki` from 0.103.10 to 0.103.12 via `cargo update` to address [RUSTSEC-2026-0098](https://rustsec.org/advisories/RUSTSEC-2026-0098.html) / [GHSA-965h-392x-2mh5](https://github.com/rustls/webpki/security/advisories/GHSA-965h-392x-2mh5) (URI name constraints ignored) and [RUSTSEC-2026-0099](https://rustsec.org/advisories/RUSTSEC-2026-0099.html) / [GHSA-xgp8-3hg3-c2mh](https://github.com/rustls/webpki/security/advisories/GHSA-xgp8-3hg3-c2mh) (wildcard DNS name constraints bypass)
 
 ## [1.7.0] - 2026-04-07
 

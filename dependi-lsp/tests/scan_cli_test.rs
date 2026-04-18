@@ -59,7 +59,13 @@ async fn test_scan_uses_lockfile_and_reports_transitive() {
     let stderr = String::from_utf8_lossy(&output.stderr);
     assert!(
         stdout.contains("\"transitive\""),
-        "expected transitive array in JSON output. stdout=\n{stdout}\nstderr=\n{stderr}"
+        "expected transitive key in JSON. stdout=\n{stdout}"
+    );
+    // The npm fixture has `react` as direct and `scheduler` as transitive. The mock
+    // returns a vuln on the second query (the transitive). Confirm:
+    assert!(
+        stdout.contains("scheduler") || stdout.contains("CVE-TEST-001"),
+        "expected transitive CVE to appear in output, got:\n{stdout}"
     );
     assert!(
         stdout.contains("\"direct\""),
