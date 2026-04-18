@@ -191,8 +191,7 @@ fn extract_dependencies(content: &str, properties: &HashMap<String, String>) -> 
                         // from a parent POM's `<dependencyManagement>`, which the MVP
                         // doesn't resolve) — emitting them with empty positions would
                         // surface diagnostics on line 0.
-                        if let (Some(g), Some(a), Some((vs, ve))) =
-                            (g_opt, a_opt, version_span_raw)
+                        if let (Some(g), Some(a), Some((vs, ve))) = (g_opt, a_opt, version_span_raw)
                             && !g.is_empty()
                             && !a.is_empty()
                         {
@@ -216,15 +215,27 @@ fn extract_dependencies(content: &str, properties: &HashMap<String, String>) -> 
 
                             let (line, line_start) = offset_to_position(&offsets, vs);
                             let (_, line_end) = offset_to_position(&offsets, ve);
-                            let version_span = Span { line, line_start, line_end };
+                            let version_span = Span {
+                                line,
+                                line_start,
+                                line_end,
+                            };
 
                             let name_span = match artifact_span {
                                 Some((s, e_)) => {
                                     let (line, line_start) = offset_to_position(&offsets, s);
                                     let (_, line_end) = offset_to_position(&offsets, e_);
-                                    Span { line, line_start, line_end }
+                                    Span {
+                                        line,
+                                        line_start,
+                                        line_end,
+                                    }
                                 }
-                                None => Span { line: 0, line_start: 0, line_end: 0 },
+                                None => Span {
+                                    line: 0,
+                                    line_start: 0,
+                                    line_end: 0,
+                                },
                             };
 
                             out.push(Dependency {
