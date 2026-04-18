@@ -1,10 +1,9 @@
 //! Parsers for dependency files (Cargo.toml, package.json, etc.)
 
-use serde::{Deserialize, Serialize};
 use tower_lsp::lsp_types;
 
 /// Represents a dependency extracted from a manifest file
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone)]
 pub struct Dependency {
     /// Package name
     pub name: String,
@@ -21,11 +20,10 @@ pub struct Dependency {
     /// Custom registry name (Cargo only, e.g., "kellnr")
     pub registry: Option<String>,
     /// Resolved version from the lock file (e.g., Cargo.lock), if available
-    #[serde(default)]
     pub resolved_version: Option<String>,
 }
 
-#[derive(Debug, Clone, Copy, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy)]
 pub struct Span {
     /// Line number in the file (0-indexed)
     pub line: u32,
