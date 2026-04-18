@@ -10,6 +10,8 @@ use std::path::{Path, PathBuf};
 
 use hashbrown::HashMap;
 
+use crate::parsers::lockfile_graph::{LockfileGraph, LockfilePackage};
+
 /// Type of Node.js lockfile detected.
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub enum NpmLockfileType {
@@ -380,6 +382,189 @@ fn clean_jsonc(content: &str) -> String {
     }
 
     result
+}
+
+// ---------------------------------------------------------------------------
+// Graph extraction — package-lock.json, pnpm-lock.yaml, yarn.lock v1
+// ---------------------------------------------------------------------------
+
+/// Parse a `package-lock.json` (lockfile v2/v3 flat `packages` format) into a graph.
+///
+/// v1 nested format is intentionally not supported here (superseded since npm 7, 2020).
+pub fn parse_package_lock_graph(content: &str) -> LockfileGraph {
+    let mut graph = LockfileGraph::default();
+    let value: serde_json::Value = match serde_json::from_str(content) {
+        Ok(v) => v,
+        Err(_) => return graph,
+    };
+
+    let Some(packages) = value.get("packages").and_then(|p| p.as_object()) else {
+        return graph;
+    };
+
+    for (key, entry) in packages {
+        if key.is_empty() {
+            continue; // root entry represents the manifest itself
+        }
+        // Key form "node_modules/<name>" or "node_modules/@scope/name"
+        let name = match key.rsplit_once("node_modules/") {
+            Some((_, rest)) => rest.to_string(),
+            None => continue,
+        };
+        let Some(version) = entry.get("version").and_then(|v| v.as_str()) else {
+            continue;
+        };
+        let dependencies: Vec<String> = entry
+            .get("dependencies")
+            .and_then(|d| d.as_object())
+            .map(|obj| obj.keys().cloned().collect())
+            .unwrap_or_default();
+
+        graph.packages.push(LockfilePackage {
+            name,
+            version: version.to_string(),
+            dependencies,
+            is_root: false,
+        });
+    }
+
+    graph
+}
+
+/// Parse a pnpm-lock.yaml into a graph. Uses a minimal line-based walker because the
+/// project has no YAML parser in dependencies; this mirrors the approach of existing
+/// pnpm parsing in the file.
+pub fn parse_pnpm_lock_graph(content: &str) -> LockfileGraph {
+    let mut graph = LockfileGraph::default();
+    let mut in_packages = false;
+    let mut current: Option<LockfilePackage> = None;
+    let mut in_deps = false;
+
+    for line in content.lines() {
+        if line == "packages:" {
+            in_packages = true;
+            continue;
+        }
+        if !in_packages {
+            continue;
+        }
+        // Package entry: "  /name@ver:" or "  /@scope/name@ver:"
+        if let Some(rest) = line.strip_prefix("  /") {
+            if let Some(finish) = current.take() {
+                graph.packages.push(finish);
+            }
+            let key = rest.trim_end_matches(':').trim();
+            if let Some((name, version)) = split_pnpm_key(key) {
+                current = Some(LockfilePackage {
+                    name,
+                    version,
+                    dependencies: Vec::new(),
+                    is_root: false,
+                });
+            }
+            in_deps = false;
+            continue;
+        }
+        if line.trim() == "dependencies:" {
+            in_deps = true;
+            continue;
+        }
+        if in_deps && line.starts_with("      ") {
+            let trimmed = line.trim_start();
+            let dep_name = trimmed
+                .split_once(':')
+                .map(|(n, _)| n.trim())
+                .unwrap_or(trimmed.trim());
+            if !dep_name.is_empty()
+                && let Some(cur) = current.as_mut()
+            {
+                cur.dependencies.push(dep_name.to_string());
+            }
+        } else if !line.starts_with("      ") {
+            in_deps = false;
+        }
+    }
+
+    if let Some(finish) = current {
+        graph.packages.push(finish);
+    }
+    graph
+}
+
+/// Split a pnpm key like "react@18.2.0" or "@babel/core@7.0.0" into (name, version).
+fn split_pnpm_key(key: &str) -> Option<(String, String)> {
+    let at = key.rfind('@')?;
+    if at == 0 {
+        return None; // scoped name starts with '@' — first '@' is not the separator
+    }
+    Some((key[..at].to_string(), key[at + 1..].to_string()))
+}
+
+/// Parse yarn.lock (v1 format) into a graph. v2+ (Berry) uses a different format,
+/// out of scope here.
+pub fn parse_yarn_lock_graph(content: &str) -> LockfileGraph {
+    let mut graph = LockfileGraph::default();
+    let mut current: Option<LockfilePackage> = None;
+    let mut in_deps = false;
+
+    for line in content.lines() {
+        let trimmed = line.trim_start();
+
+        if !line.starts_with(' ')
+            && line.contains('@')
+            && line.ends_with(':')
+            && !line.starts_with('#')
+        {
+            if let Some(finished) = current.take() {
+                graph.packages.push(finished);
+            }
+            let header = line.trim_end_matches(':').trim();
+            // Multiple keys comma-separated; take the first
+            let first_key_raw = header.split(',').next().unwrap_or(header).trim();
+            let first_key = first_key_raw.trim_matches('"');
+            if let Some(at_pos) = first_key.rfind('@')
+                && at_pos != 0
+            {
+                current = Some(LockfilePackage {
+                    name: first_key[..at_pos].to_string(),
+                    version: String::new(),
+                    dependencies: Vec::new(),
+                    is_root: false,
+                });
+            }
+            in_deps = false;
+            continue;
+        }
+
+        if let Some(cur) = current.as_mut() {
+            if let Some(v) = trimmed.strip_prefix("version ") {
+                cur.version = v.trim().trim_matches('"').to_string();
+                in_deps = false;
+                continue;
+            }
+            if trimmed == "dependencies:" {
+                in_deps = true;
+                continue;
+            }
+            if in_deps && line.starts_with("    ") {
+                let name = trimmed
+                    .split_whitespace()
+                    .next()
+                    .unwrap_or("")
+                    .trim_matches('"');
+                if !name.is_empty() {
+                    cur.dependencies.push(name.to_string());
+                }
+            } else if !line.starts_with("  ") {
+                in_deps = false;
+            }
+        }
+    }
+
+    if let Some(finished) = current {
+        graph.packages.push(finished);
+    }
+    graph
 }
 
 // ---------------------------------------------------------------------------
@@ -818,5 +1003,85 @@ packages:
         let content = r#"{"packages": {"a": ["a@1.2.3"]}}"#;
         let map = parse_npm_lockfile(content, NpmLockfileType::BunLock);
         assert_eq!(map.get("a").map(|s| s.as_str()), Some("1.2.3"));
+    }
+
+    // -----------------------------------------------------------------------
+    // parse_package_lock_graph
+    // -----------------------------------------------------------------------
+
+    #[test]
+    fn test_parse_package_lock_graph_v3() {
+        let content = r#"{
+  "name": "demo",
+  "lockfileVersion": 3,
+  "packages": {
+    "": { "name": "demo", "version": "1.0.0", "dependencies": { "react": "^18.0.0" } },
+    "node_modules/react": { "version": "18.2.0", "dependencies": { "scheduler": "^0.23.0" } },
+    "node_modules/scheduler": { "version": "0.23.0" }
+  }
+}"#;
+        let graph = parse_package_lock_graph(content);
+        let names: Vec<&str> = graph.packages.iter().map(|p| p.name.as_str()).collect();
+        assert!(names.contains(&"react"));
+        assert!(names.contains(&"scheduler"));
+        let react = graph.packages.iter().find(|p| p.name == "react").unwrap();
+        assert_eq!(react.version, "18.2.0");
+        assert_eq!(react.dependencies, vec!["scheduler".to_string()]);
+    }
+
+    // -----------------------------------------------------------------------
+    // parse_pnpm_lock_graph
+    // -----------------------------------------------------------------------
+
+    #[test]
+    fn test_parse_pnpm_lock_graph() {
+        let content = r#"
+lockfileVersion: '9.0'
+
+importers:
+  .:
+    dependencies:
+      react:
+        specifier: ^18.0.0
+        version: 18.2.0
+
+packages:
+  /react@18.2.0:
+    resolution: {integrity: sha512-xxx}
+    dependencies:
+      scheduler: 0.23.0
+  /scheduler@0.23.0:
+    resolution: {integrity: sha512-yyy}
+"#;
+        let graph = parse_pnpm_lock_graph(content);
+        let names: Vec<&str> = graph.packages.iter().map(|p| p.name.as_str()).collect();
+        assert!(names.contains(&"react"));
+        assert!(names.contains(&"scheduler"));
+        let react = graph.packages.iter().find(|p| p.name == "react").unwrap();
+        assert_eq!(react.version, "18.2.0");
+        assert_eq!(react.dependencies, vec!["scheduler".to_string()]);
+    }
+
+    // -----------------------------------------------------------------------
+    // parse_yarn_lock_graph
+    // -----------------------------------------------------------------------
+
+    #[test]
+    fn test_parse_yarn_lock_graph_v1() {
+        let content = r#"
+# THIS IS AN AUTOGENERATED FILE
+
+"react@^18.0.0":
+  version "18.2.0"
+  dependencies:
+    scheduler "^0.23.0"
+
+"scheduler@^0.23.0":
+  version "0.23.0"
+"#;
+        let graph = parse_yarn_lock_graph(content);
+        assert!(graph.packages.iter().any(|p| p.name == "react" && p.version == "18.2.0"));
+        let react = graph.packages.iter().find(|p| p.name == "react").unwrap();
+        assert!(react.dependencies.contains(&"scheduler".to_string()));
     }
 }
