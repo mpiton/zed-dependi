@@ -153,7 +153,7 @@ fn extract_dependencies(content: &str, properties: &HashMap<String, String>) -> 
             Ok(Event::Start(e)) => {
                 let name = e.name().as_ref().to_vec();
                 match name.as_slice() {
-                    b"dependencies" => in_dependencies = true,
+                    b"dependencies" if !in_plugins => in_dependencies = true,
                     b"dependencyManagement" => in_dep_mgmt = true,
                     b"plugins" | b"pluginManagement" => in_plugins = true,
                     b"parent" => has_parent = true,
@@ -179,13 +179,46 @@ fn extract_dependencies(content: &str, properties: &HashMap<String, String>) -> 
                     b"plugins" | b"pluginManagement" => in_plugins = false,
                     b"dependency" if in_dependency => {
                         in_dependency = false;
-                        if let (Some(g), Some(a)) = (cur_group.take(), cur_artifact.take()) {
-                            let raw_version = cur_version.take().unwrap_or_default();
-                            let version = substitute(&raw_version, properties);
-                            let scope = cur_scope.take().unwrap_or_default();
+                        let g_opt = cur_group.take();
+                        let a_opt = cur_artifact.take();
+                        let raw_version = cur_version.take().unwrap_or_default();
+                        let scope = cur_scope.take().unwrap_or_default();
+                        let optional = cur_optional;
+                        let artifact_span = cur_artifact_span.take();
+                        let version_span_raw = cur_version_span.take();
+
+                        // Skip dependencies that lack a `<version>` (typically inherited
+                        // from a parent POM's `<dependencyManagement>`, which the MVP
+                        // doesn't resolve) — emitting them with empty positions would
+                        // surface diagnostics on line 0.
+                        if let (Some(g), Some(a), Some((vs, ve))) =
+                            (g_opt, a_opt, version_span_raw)
+                            && !g.is_empty()
+                            && !a.is_empty()
+                        {
                             let dev = scope == "test" || scope == "provided";
+                            let resolved = substitute(&raw_version, properties);
 
-                            let version_span = match cur_version_span.take() {
+                            // Preserve property placeholders (`${prop}`) verbatim in
+                            // `version` so the code-action layer can detect them and skip
+                            // the "update version" quick-fix — replacing the placeholder
+                            // text with a literal would silently break the property
+                            // indirection for every other artifact sharing the same
+                            // property. The substituted value is cached in
+                            // `resolved_version` for hover and registry comparisons via
+                            // `Dependency::effective_version()`.
+                            let (version, resolved_version) =
+                                if raw_version != resolved && !resolved.contains("${") {
+                                    (raw_version, Some(resolved))
+                                } else {
+                                    (resolved, None)
+                                };
+
+                            let (line, line_start) = offset_to_position(&offsets, vs);
+                            let (_, line_end) = offset_to_position(&offsets, ve);
+                            let version_span = Span { line, line_start, line_end };
+
+                            let name_span = match artifact_span {
                                 Some((s, e_)) => {
                                     let (line, line_start) = offset_to_position(&offsets, s);
                                     let (_, line_end) = offset_to_position(&offsets, e_);
@@ -194,27 +227,16 @@ fn extract_dependencies(content: &str, properties: &HashMap<String, String>) -> 
                                 None => Span { line: 0, line_start: 0, line_end: 0 },
                             };
 
-                            let name_span = match cur_artifact_span.take() {
-                                Some((s, e_)) => {
-                                    let (line, line_start) = offset_to_position(&offsets, s);
-                                    let (_, line_end) = offset_to_position(&offsets, e_);
-                                    Span { line, line_start, line_end }
-                                }
-                                None => Span { line: 0, line_start: 0, line_end: 0 },
-                            };
-
-                            if !a.is_empty() && !g.is_empty() {
-                                out.push(Dependency {
-                                    name: format!("{g}:{a}"),
-                                    version,
-                                    name_span,
-                                    version_span,
-                                    dev,
-                                    optional: cur_optional,
-                                    registry: None,
-                                    resolved_version: None,
-                                });
-                            }
+                            out.push(Dependency {
+                                name: format!("{g}:{a}"),
+                                version,
+                                name_span,
+                                version_span,
+                                dev,
+                                optional,
+                                registry: None,
+                                resolved_version,
+                            });
                         }
                     }
                     _ => {}
@@ -275,10 +297,27 @@ fn trimmed_span(bytes: &[u8], reader: &Reader<&[u8]>, raw_len: usize) -> (usize,
 
 /// Substitute `${property}` placeholders in a version string with values from `properties`.
 /// Unresolved placeholders are preserved verbatim.
+///
+/// Resolves nested references like `<revision>${project.version}</revision>` by
+/// re-running substitution until the result stabilises. Bounded at 8 iterations
+/// to bail out safely on circular references (`${a}=${b}`, `${b}=${a}`).
 fn substitute(raw: &str, properties: &HashMap<String, String>) -> String {
     if !raw.contains("${") || properties.is_empty() {
         return raw.to_string();
     }
+    let mut current = raw.to_string();
+    for _ in 0..8 {
+        let next = substitute_once(&current, properties);
+        if next == current {
+            return current;
+        }
+        current = next;
+    }
+    current
+}
+
+/// Single pass of placeholder resolution. Caller iterates to fixed point.
+fn substitute_once(raw: &str, properties: &HashMap<String, String>) -> String {
     let mut out = String::with_capacity(raw.len());
     let mut rest = raw;
     while let Some(start) = rest.find("${") {
@@ -360,7 +399,55 @@ mod tests {
 "#;
         let deps = parser.parse(pom);
         assert_eq!(deps.len(), 1);
-        assert_eq!(deps[0].version, "6.1.0");
+        // `version` keeps the source placeholder so the code-action layer can skip
+        // the "update version" quick-fix; the resolved value is exposed via
+        // `effective_version()` for hover and registry comparisons.
+        assert_eq!(deps[0].version, "${spring.version}");
+        assert_eq!(deps[0].resolved_version.as_deref(), Some("6.1.0"));
+        assert_eq!(deps[0].effective_version(), "6.1.0");
+    }
+
+    #[test]
+    fn test_parse_nested_properties_resolved() {
+        let parser = MavenParser::new();
+        let pom = r#"<?xml version="1.0"?>
+<project>
+    <properties>
+        <revision>${spring.version}</revision>
+        <spring.version>6.1.0</spring.version>
+    </properties>
+    <dependencies>
+        <dependency>
+            <groupId>org.springframework</groupId>
+            <artifactId>spring-core</artifactId>
+            <version>${revision}</version>
+        </dependency>
+    </dependencies>
+</project>
+"#;
+        let deps = parser.parse(pom);
+        assert_eq!(deps.len(), 1);
+        assert_eq!(deps[0].effective_version(), "6.1.0");
+    }
+
+    #[test]
+    fn test_parse_dependency_without_version_is_skipped() {
+        // Dependencies omitting <version> typically inherit from a parent POM's
+        // <dependencyManagement>; the MVP does not resolve parents, so emitting
+        // them with empty positions would surface diagnostics on line 0.
+        let parser = MavenParser::new();
+        let pom = r#"<?xml version="1.0"?>
+<project>
+    <dependencies>
+        <dependency>
+            <groupId>org.slf4j</groupId>
+            <artifactId>slf4j-api</artifactId>
+        </dependency>
+    </dependencies>
+</project>
+"#;
+        let deps = parser.parse(pom);
+        assert!(deps.is_empty());
     }
 
     #[test]

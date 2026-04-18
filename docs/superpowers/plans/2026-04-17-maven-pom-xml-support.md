@@ -227,7 +227,7 @@ Expected: PASS.
 Also verify the match in `parse_document` / `process_document` now triggers an `unreachable` / non-exhaustive warning because Maven has no branch yet. This will be resolved in Task 8. For now ensure the library still compiles:
 
 Run: `cd dependi-lsp && cargo build --lib 2>&1 | head -30`
-Expected: Build succeeds. Non-exhaustive match errors are expected in `backend.rs`; they will be fixed in Task 8. If you see them, stop at this task for review — the test is the green target of this step only.
+Expected: Build fails with non-exhaustive `match` errors in `backend.rs` — those branches will be added in Task 8. Stop at this task for review if anything else is reported.
 
 Note: The match arms in `backend.rs::parse_document` and `ProcessingContext::parse_document` and `get_version_info` do not use a wildcard `_` — they enumerate all variants explicitly, so adding `Maven` triggers compile errors. This is INTENTIONAL and will be addressed in Task 8.
 
@@ -1536,7 +1536,7 @@ mod tests {
 - [ ] **Step 3: Run tests**
 
 Run: `cd dependi-lsp && cargo test --lib registries::maven_central::tests`
-Expected: All 6 tests PASS.
+Expected: All 7 tests PASS.
 
 - [ ] **Step 4: Update registries/mod.rs doc table**
 

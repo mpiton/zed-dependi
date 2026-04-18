@@ -41,7 +41,7 @@ Ajouter le support de l'écosystème Java/Maven à Zed Dependi : parsing de `pom
 
 ### Flux de données
 
-```
+```text
 pom.xml détecté (file_types.rs) → MavenParser.parse() → Vec<Dependency>
     ↓
 backend.rs dispatch → MavenCentralRegistry.get_version_info()

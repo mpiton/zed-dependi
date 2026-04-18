@@ -274,9 +274,9 @@ pub(crate) fn parse_pom_metadata(
 ///
 /// Recognizes the conventional Maven qualifiers written with either a `-` or `.`
 /// separator: `-SNAPSHOT`, `-alpha`, `-beta`, `-rc`, `-milestone`, and the
-/// `-M<digit>` milestone pattern (e.g. `5.3.0-M1`). The `-m` check is deliberately
-/// narrow — it must be followed by a digit to avoid false positives on versions
-/// like `1.0-metrics` or `2.4-mixed`.
+/// `M<digit>` milestone pattern with either separator (`5.3.0-M1`, `5.0.0.M1`).
+/// The `m` check is deliberately narrow — it must be followed by a digit to
+/// avoid false positives on versions like `1.0-metrics` or `2.4-mixed`.
 fn is_prerelease(version: &str) -> bool {
     let v = version.to_ascii_lowercase();
     for qualifier in ["snapshot", "alpha", "beta", "rc", "milestone"] {
@@ -284,11 +284,13 @@ fn is_prerelease(version: &str) -> bool {
             return true;
         }
     }
-    // Maven milestone convention: `-M<digits>` (e.g. `-M1`, `-M23`).
-    if let Some(idx) = v.find("-m") {
-        let rest = &v[idx + 2..];
-        if rest.chars().next().is_some_and(|c| c.is_ascii_digit()) {
-            return true;
+    // Maven milestone convention: `-M<digits>` or `.M<digits>` (e.g. `-M1`, `.M1`, `-M23`).
+    for marker in ["-m", ".m"] {
+        if let Some(idx) = v.find(marker) {
+            let rest = &v[idx + marker.len()..];
+            if rest.chars().next().is_some_and(|c| c.is_ascii_digit()) {
+                return true;
+            }
         }
     }
     false

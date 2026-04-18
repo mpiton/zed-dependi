@@ -380,13 +380,21 @@ fn test_maven_pom_detection_parse_and_cache_key() {
     let deps = parser.parse(pom);
     assert_eq!(deps.len(), 2);
 
-    let slf4j = &deps[0];
-    assert_eq!(slf4j.name, "org.slf4j:slf4j-api");
-    assert_eq!(slf4j.version, "2.0.9", "property must be substituted");
+    let slf4j = deps
+        .iter()
+        .find(|d| d.name == "org.slf4j:slf4j-api")
+        .expect("slf4j-api should be parsed");
+    assert_eq!(
+        slf4j.effective_version(),
+        "2.0.9",
+        "property must be substituted"
+    );
     assert!(!slf4j.dev);
 
-    let junit = &deps[1];
-    assert_eq!(junit.name, "junit:junit");
+    let junit = deps
+        .iter()
+        .find(|d| d.name == "junit:junit")
+        .expect("junit should be parsed");
     assert!(junit.dev, "test scope must be treated as dev");
 
     assert_eq!(

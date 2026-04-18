@@ -99,6 +99,7 @@ pub fn create_code_actions(
     let mut actions: Vec<CodeActionOrCommand> = dependencies
         .iter()
         .filter(|dep| (range.start.line..=range.end.line).contains(&dep.version_span.line))
+        .filter(|dep| !is_property_reference(dep))
         .filter_map(|dep| create_update_action(dep, cache, uri, file_type, &cache_key_fn))
         .collect();
 
@@ -109,6 +110,14 @@ pub fn create_code_actions(
     }
 
     actions
+}
+
+/// Whether the manifest text at `version_span` is a Maven property reference
+/// (e.g. `${spring.version}`). Replacing the placeholder with a literal would
+/// silently break property-driven version management for every other artifact
+/// sharing the same property — so the "update version" quick-fix is suppressed.
+fn is_property_reference(dep: &Dependency) -> bool {
+    dep.version.starts_with("${") && dep.version.ends_with('}')
 }
 
 /// Extract Python version operator prefix from a version string (e.g., "~=" from "~=14.3")
@@ -192,6 +201,7 @@ fn create_update_all_action(
 ) -> Option<CodeActionOrCommand> {
     let outdated_deps: Vec<(&Dependency, String)> = dependencies
         .iter()
+        .filter(|dep| !is_property_reference(dep))
         .filter_map(|dep| {
             let cache_key = cache_key_fn(&dep.name);
             let version_info = cache.get(&cache_key)?;
@@ -760,6 +770,7 @@ mod tests {
         assert_eq!(format_version("1.0.0", FileType::Dart), "1.0.0");
         assert_eq!(format_version("1.0.0", FileType::Csharp), "1.0.0");
         assert_eq!(format_version("1.0.0", FileType::Ruby), "1.0.0");
+        assert_eq!(format_version("1.0.0", FileType::Maven), "1.0.0");
     }
 
     #[test]
