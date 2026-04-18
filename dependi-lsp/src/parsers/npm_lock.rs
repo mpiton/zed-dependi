@@ -480,6 +480,8 @@ pub fn parse_pnpm_lock_graph(content: &str) -> LockfileGraph {
                 graph.packages.push(finish);
             }
             let key = rest.trim_end_matches(':').trim();
+            // Strip optional surrounding quotes (pnpm v9 may quote scoped names).
+            let key = key.trim_matches('\'').trim_matches('"');
             if let Some((name, version)) = split_pnpm_key(key) {
                 current = Some(LockfilePackage {
                     name,
@@ -1169,6 +1171,26 @@ packages:
                 .iter()
                 .any(|p| p.name == "react-dom" && p.version == "18.2.0")
         );
+    }
+
+    #[test]
+    fn test_parse_pnpm_lock_graph_strips_quoted_keys() {
+        let content = r#"
+lockfileVersion: '9.0'
+
+packages:
+
+  '@types/node@20.11.5':
+    resolution: {integrity: sha512-xxx}
+"#;
+        let graph = parse_pnpm_lock_graph(content);
+        let names: Vec<&str> = graph.packages.iter().map(|p| p.name.as_str()).collect();
+        assert!(
+            names.iter().any(|n| *n == "@types/node"),
+            "quoted key should yield unquoted name, got {names:?}"
+        );
+        let ty = graph.packages.iter().find(|p| p.name == "@types/node").unwrap();
+        assert_eq!(ty.version, "20.11.5");
     }
 
     #[test]
