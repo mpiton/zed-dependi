@@ -118,6 +118,9 @@ impl ProcessingContext {
 
         let mut dependencies = self.parse_document(uri, content);
 
+        // lockfile_graph is populated by the ecosystem-specific blocks below.
+        let mut lockfile_graph: Option<std::sync::Arc<crate::parsers::lockfile_graph::LockfileGraph>> = None;
+
         // Resolve versions from Cargo.lock for Cargo dependencies
         if file_type == FileType::Cargo
             && let Ok(cargo_toml_path) = uri.to_file_path()
@@ -126,24 +129,10 @@ impl ProcessingContext {
         {
             match tokio::fs::read_to_string(&lock_path).await {
                 Ok(lock_content) => {
-                    let root_package = match toml::from_str::<toml::Value>(content) {
-                        Ok(v) => v
-                            .get("package")
-                            .and_then(|p| p.get("name"))
-                            .and_then(|n| n.as_str())
-                            .map(String::from),
-                        Err(e) => {
-                            tracing::debug!("Could not parse Cargo.toml for package name: {e}");
-                            None
-                        }
-                    };
-                    let lock_versions = crate::parsers::cargo_lock::parse_cargo_lock(
-                        &lock_content,
-                        root_package.as_deref(),
-                    );
+                    let graph = crate::parsers::cargo_lock::parse_cargo_lock_graph(&lock_content);
                     for dep in &mut dependencies {
-                        if let Some(resolved) = lock_versions.get(&dep.name) {
-                            dep.resolved_version = Some(resolved.clone());
+                        if let Some(p) = graph.packages.iter().find(|p| p.name == dep.name) {
+                            dep.resolved_version = Some(p.version.clone());
                         }
                     }
                     tracing::debug!(
@@ -154,6 +143,7 @@ impl ProcessingContext {
                             .count(),
                         lock_path.display()
                     );
+                    lockfile_graph = Some(std::sync::Arc::new(graph));
                 }
                 Err(e) => {
                     tracing::debug!(
@@ -168,16 +158,46 @@ impl ProcessingContext {
         // Resolve versions from lockfile for npm dependencies
         if file_type == FileType::Npm
             && let Ok(package_json_path) = uri.to_file_path()
-            && let Some((lock_path, lockfile_type)) =
+            && let Some((lock_path, npm_lockfile_type)) =
                 crate::parsers::npm_lock::find_npm_lockfile(&package_json_path).await
         {
             match tokio::fs::read_to_string(&lock_path).await {
                 Ok(lock_content) => {
-                    let lock_versions =
-                        crate::parsers::npm_lock::parse_npm_lockfile(&lock_content, lockfile_type);
+                    use crate::parsers::npm_lock::NpmLockfileType;
+                    let graph = match npm_lockfile_type {
+                        NpmLockfileType::PackageLock => {
+                            crate::parsers::npm_lock::parse_package_lock_graph(&lock_content)
+                        }
+                        NpmLockfileType::PnpmLock => {
+                            crate::parsers::npm_lock::parse_pnpm_lock_graph(&lock_content)
+                        }
+                        NpmLockfileType::YarnLock => {
+                            crate::parsers::npm_lock::parse_yarn_lock_graph(&lock_content)
+                        }
+                        NpmLockfileType::BunLock => {
+                            // No graph parser for Bun — fall back to HashMap path
+                            let lock_versions = crate::parsers::npm_lock::parse_npm_lockfile(
+                                &lock_content,
+                                npm_lockfile_type,
+                            );
+                            crate::parsers::lockfile_graph::LockfileGraph {
+                                packages: lock_versions
+                                    .iter()
+                                    .map(|(name, version)| {
+                                        crate::parsers::lockfile_graph::LockfilePackage {
+                                            name: name.clone(),
+                                            version: version.clone(),
+                                            dependencies: Vec::new(),
+                                            is_root: false,
+                                        }
+                                    })
+                                    .collect(),
+                            }
+                        }
+                    };
                     for dep in &mut dependencies {
-                        if let Some(resolved) = lock_versions.get(&dep.name) {
-                            dep.resolved_version = Some(resolved.clone());
+                        if let Some(p) = graph.packages.iter().find(|p| p.name == dep.name) {
+                            dep.resolved_version = Some(p.version.clone());
                         }
                     }
                     tracing::debug!(
@@ -187,8 +207,9 @@ impl ProcessingContext {
                             .filter(|d| d.resolved_version.is_some())
                             .count(),
                         lock_path.display(),
-                        lockfile_type,
+                        npm_lockfile_type,
                     );
+                    lockfile_graph = Some(std::sync::Arc::new(graph));
                 }
                 Err(e) => {
                     tracing::debug!("Could not read lockfile at {}: {}", lock_path.display(), e);
@@ -201,20 +222,50 @@ impl ProcessingContext {
             && let Ok(manifest_path) = uri.to_file_path()
         {
             let preferred = crate::parsers::python_lock::detect_python_tool(content);
-            if let Some((lock_path, lockfile_type)) =
+            if let Some((lock_path, py_lockfile_type)) =
                 crate::parsers::python_lock::find_python_lockfile(&manifest_path, preferred).await
             {
                 match tokio::fs::read_to_string(&lock_path).await {
                     Ok(lock_content) => {
-                        let lock_versions = crate::parsers::python_lock::parse_python_lockfile(
-                            &lock_content,
-                            lockfile_type,
-                        );
+                        use crate::parsers::python_lock::PythonLockfileType;
+                        let graph = match py_lockfile_type {
+                            PythonLockfileType::PoetryLock => {
+                                crate::parsers::python_lock::parse_poetry_lock_graph(&lock_content)
+                            }
+                            PythonLockfileType::UvLock => {
+                                crate::parsers::python_lock::parse_uv_lock_graph(&lock_content)
+                            }
+                            PythonLockfileType::PipfileLock => {
+                                crate::parsers::python_lock::parse_pipfile_lock_graph(&lock_content)
+                            }
+                            PythonLockfileType::PdmLock => {
+                                // No graph parser for PDM — build minimal graph from HashMap
+                                let lock_versions = crate::parsers::python_lock::parse_python_lockfile(
+                                    &lock_content,
+                                    py_lockfile_type,
+                                );
+                                crate::parsers::lockfile_graph::LockfileGraph {
+                                    packages: lock_versions
+                                        .iter()
+                                        .map(|(name, version)| {
+                                            crate::parsers::lockfile_graph::LockfilePackage {
+                                                name: name.clone(),
+                                                version: version.clone(),
+                                                dependencies: Vec::new(),
+                                                is_root: false,
+                                            }
+                                        })
+                                        .collect(),
+                                }
+                            }
+                        };
                         for dep in &mut dependencies {
                             let normalized =
                                 crate::parsers::python_lock::normalize_python_name(&dep.name);
-                            if let Some(resolved) = lock_versions.get(&normalized) {
-                                dep.resolved_version = Some(resolved.clone());
+                            if let Some(p) =
+                                graph.packages.iter().find(|p| p.name == normalized)
+                            {
+                                dep.resolved_version = Some(p.version.clone());
                             }
                         }
                         tracing::debug!(
@@ -224,8 +275,9 @@ impl ProcessingContext {
                                 .filter(|d| d.resolved_version.is_some())
                                 .count(),
                             lock_path.display(),
-                            lockfile_type,
+                            py_lockfile_type,
                         );
+                        lockfile_graph = Some(std::sync::Arc::new(graph));
                     }
                     Err(e) => {
                         tracing::debug!(
@@ -246,6 +298,7 @@ impl ProcessingContext {
             match tokio::fs::read_to_string(&lock_path).await {
                 Ok(lock_content) => {
                     let lock_versions = crate::parsers::go_sum::parse_go_sum(&lock_content);
+                    let mut minimal_packages = Vec::new();
                     for dep in &mut dependencies {
                         if let Some(versions) = lock_versions.get(&dep.name) {
                             // Prefer dep.version when it appears among the
@@ -260,6 +313,17 @@ impl ProcessingContext {
                             }
                         }
                     }
+                    // Build minimal graph (no edge data available from go.sum)
+                    for (name, versions) in &lock_versions {
+                        for version in versions {
+                            minimal_packages.push(crate::parsers::lockfile_graph::LockfilePackage {
+                                name: name.clone(),
+                                version: version.clone(),
+                                dependencies: Vec::new(),
+                                is_root: false,
+                            });
+                        }
+                    }
                     tracing::debug!(
                         "Resolved {} versions from {}",
                         dependencies
@@ -268,6 +332,11 @@ impl ProcessingContext {
                             .count(),
                         lock_path.display()
                     );
+                    lockfile_graph = Some(std::sync::Arc::new(
+                        crate::parsers::lockfile_graph::LockfileGraph {
+                            packages: minimal_packages,
+                        },
+                    ));
                 }
                 Err(e) => {
                     tracing::debug!("Could not read go.sum at {}: {}", lock_path.display(), e);
@@ -283,13 +352,13 @@ impl ProcessingContext {
         {
             match tokio::fs::read_to_string(&lock_path).await {
                 Ok(lock_content) => {
-                    let lock_versions =
-                        crate::parsers::composer_lock::parse_composer_lock(&lock_content);
+                    let graph =
+                        crate::parsers::composer_lock::parse_composer_lock_graph(&lock_content);
                     for dep in &mut dependencies {
                         let normalized =
                             crate::parsers::composer_lock::normalize_composer_name(&dep.name);
-                        if let Some(resolved) = lock_versions.get(&normalized) {
-                            dep.resolved_version = Some(resolved.clone());
+                        if let Some(p) = graph.packages.iter().find(|p| p.name == normalized) {
+                            dep.resolved_version = Some(p.version.clone());
                         }
                     }
                     tracing::debug!(
@@ -300,6 +369,7 @@ impl ProcessingContext {
                             .count(),
                         lock_path.display()
                     );
+                    lockfile_graph = Some(std::sync::Arc::new(graph));
                 }
                 Err(e) => {
                     tracing::debug!(
@@ -334,6 +404,22 @@ impl ProcessingContext {
                             .count(),
                         lock_path.display()
                     );
+                    // No graph parser for Dart — build minimal graph from HashMap
+                    lockfile_graph = Some(std::sync::Arc::new(
+                        crate::parsers::lockfile_graph::LockfileGraph {
+                            packages: lock_versions
+                                .into_iter()
+                                .map(|(name, version)| {
+                                    crate::parsers::lockfile_graph::LockfilePackage {
+                                        name,
+                                        version,
+                                        dependencies: Vec::new(),
+                                        is_root: false,
+                                    }
+                                })
+                                .collect(),
+                        },
+                    ));
                 }
                 Err(e) => {
                     tracing::debug!(
@@ -369,6 +455,22 @@ impl ProcessingContext {
                             .count(),
                         lock_path.display()
                     );
+                    // No graph parser for C# — build minimal graph from HashMap
+                    lockfile_graph = Some(std::sync::Arc::new(
+                        crate::parsers::lockfile_graph::LockfileGraph {
+                            packages: lock_versions
+                                .into_iter()
+                                .map(|(name, version)| {
+                                    crate::parsers::lockfile_graph::LockfilePackage {
+                                        name,
+                                        version,
+                                        dependencies: Vec::new(),
+                                        is_root: false,
+                                    }
+                                })
+                                .collect(),
+                        },
+                    ));
                 }
                 Err(e) => {
                     tracing::debug!(
@@ -387,13 +489,13 @@ impl ProcessingContext {
         {
             match tokio::fs::read_to_string(&lock_path).await {
                 Ok(lock_content) => {
-                    let lock_versions =
-                        crate::parsers::gemfile_lock::parse_gemfile_lock(&lock_content);
+                    let graph =
+                        crate::parsers::gemfile_lock::parse_gemfile_lock_graph(&lock_content);
                     for dep in &mut dependencies {
                         let normalized =
                             crate::parsers::gemfile_lock::normalize_gem_name(&dep.name);
-                        if let Some(resolved) = lock_versions.get(&normalized) {
-                            dep.resolved_version = Some(resolved.clone());
+                        if let Some(p) = graph.packages.iter().find(|p| p.name == normalized) {
+                            dep.resolved_version = Some(p.version.clone());
                         }
                     }
                     tracing::debug!(
@@ -404,6 +506,7 @@ impl ProcessingContext {
                             .count(),
                         lock_path.display()
                     );
+                    lockfile_graph = Some(std::sync::Arc::new(graph));
                 }
                 Err(e) => {
                     tracing::debug!(
@@ -522,6 +625,7 @@ impl ProcessingContext {
             DocumentState {
                 dependencies: dependencies.clone(),
                 file_type,
+                lockfile_graph: lockfile_graph.clone(),
             },
         );
 
@@ -585,6 +689,7 @@ impl ProcessingContext {
             let osv_client_clone = Arc::clone(&self.osv_client);
             let vuln_cache_clone = Arc::clone(&self.vuln_cache);
             let client_clone = self.client.clone();
+            let lockfile_graph_clone = lockfile_graph.clone();
 
             tokio::spawn(async move {
                 DependiBackend::fetch_vulnerabilities_background(
@@ -594,6 +699,7 @@ impl ProcessingContext {
                     osv_client_clone,
                     vuln_cache_clone,
                     client_clone,
+                    lockfile_graph_clone,
                 )
                 .await;
             });
@@ -821,6 +927,7 @@ impl DependiBackend {
         osv_client: Arc<OsvClient>,
         vuln_cache: Arc<VulnerabilityCache>,
         client: Client,
+        lockfile_graph: Option<std::sync::Arc<crate::parsers::lockfile_graph::LockfileGraph>>,
     ) {
         use crate::vulnerabilities::cache::VulnCacheKey;
 
@@ -832,8 +939,15 @@ impl DependiBackend {
             .map(|dep| (dep.name.clone(), dep_cache_key(dep, file_type)))
             .collect();
 
-        // Build queries for packages not in vulnerability cache
-        let queries: Vec<VulnerabilityQuery> = dependencies
+        // Collect transitive packages from the lockfile graph
+        let direct_names: Vec<String> = dependencies.iter().map(|d| d.name.clone()).collect();
+        let transitives: Vec<crate::parsers::lockfile_graph::LockfilePackage> = lockfile_graph
+            .as_deref()
+            .map(|g| g.transitives_only(&direct_names).into_iter().cloned().collect())
+            .unwrap_or_default();
+
+        // Build queries for direct packages not in vulnerability cache
+        let direct_queries: Vec<VulnerabilityQuery> = dependencies
             .iter()
             .filter(|dep| {
                 let normalized_version = normalize_version_for_osv(dep.effective_version());
@@ -847,23 +961,41 @@ impl DependiBackend {
             })
             .collect();
 
-        if queries.is_empty() {
+        // Build queries for transitive packages
+        let transitive_queries: Vec<VulnerabilityQuery> = transitives
+            .iter()
+            .map(|t| VulnerabilityQuery {
+                ecosystem,
+                package_name: t.name.clone(),
+                version: normalize_version_for_osv(&t.version),
+            })
+            .collect();
+
+        let direct_count = direct_queries.len();
+        let mut all_queries = direct_queries;
+        all_queries.extend(transitive_queries);
+
+        if all_queries.is_empty() {
             tracing::debug!("Background: All vulnerability info cached, skipping OSV query");
             return;
         }
 
         tracing::info!(
-            "Background: Querying OSV.dev for {} packages",
-            queries.len()
+            "Background: Querying OSV.dev for {} packages ({} direct, {} transitive)",
+            all_queries.len(),
+            direct_count,
+            transitives.len()
         );
 
         // Batch query OSV.dev
-        match osv_client.query_batch(&queries).await {
+        match osv_client.query_batch(&all_queries).await {
             Ok(results) => {
                 let mut updated_count = 0;
 
-                // Update vulnerability cache and version_cache with results
-                for (query, result) in queries.iter().zip(results.iter()) {
+                let (direct_results, transitive_results) = results.split_at(direct_count);
+
+                // Update vulnerability cache and version_cache with direct results
+                for (query, result) in all_queries[..direct_count].iter().zip(direct_results.iter()) {
                     // Mark this package as queried in vuln_cache
                     let vuln_key =
                         VulnCacheKey::new(ecosystem, &query.package_name, &query.version);
@@ -900,6 +1032,59 @@ impl DependiBackend {
                         );
                     }
                 }
+
+                // Attach transitive vulnerabilities to the first direct parent that reaches them
+                if let Some(graph) = lockfile_graph.as_deref() {
+                    use crate::registries::TransitiveVuln;
+
+                    for (tpkg, result) in transitives.iter().zip(transitive_results.iter()) {
+                        if result.vulnerabilities.is_empty() {
+                            continue;
+                        }
+                        // Find the first direct dep that transitively reaches this package
+                        for dep in &dependencies {
+                            let reaches = graph
+                                .transitive_deps_of(&dep.name)
+                                .iter()
+                                .any(|p| p.name == tpkg.name);
+                            if !reaches {
+                                continue;
+                            }
+
+                            let cache_key = cache_key_map
+                                .get(&dep.name)
+                                .cloned()
+                                .unwrap_or_else(|| file_type.cache_key(&dep.name));
+                            if let Some(mut info) = cache.get(&cache_key) {
+                                for v in &result.vulnerabilities {
+                                    let new_tv = TransitiveVuln {
+                                        package_name: tpkg.name.clone(),
+                                        package_version: tpkg.version.clone(),
+                                        vulnerability: v.clone(),
+                                    };
+                                    if !info.transitive_vulnerabilities.iter().any(|existing| {
+                                        existing.package_name == new_tv.package_name
+                                            && existing.package_version == new_tv.package_version
+                                            && existing.vulnerability.id == new_tv.vulnerability.id
+                                    }) {
+                                        info.transitive_vulnerabilities.push(new_tv);
+                                    }
+                                }
+                                tracing::debug!(
+                                    "Background: Attached {} transitive vulns from {}@{} to direct dep {}",
+                                    result.vulnerabilities.len(),
+                                    tpkg.name,
+                                    tpkg.version,
+                                    dep.name
+                                );
+                                cache.insert(cache_key, info);
+                            }
+                            // Attach to first matching direct parent only (npm audit style)
+                            break;
+                        }
+                    }
+                }
+
                 tracing::info!(
                     "Background: Cached vulnerability info for {} packages",
                     updated_count
@@ -1107,6 +1292,22 @@ fn format_hover_content(
                     writeln!(f, "\n#### {id} - {severity_icon} {severity_str}")?;
                 }
                 f.write_str(&vuln.description)?;
+            }
+        }
+
+        // Add transitive vulnerability information if present
+        if !info.transitive_vulnerabilities.is_empty() {
+            writeln!(f, "\n## Transitive vulnerabilities")?;
+            for t in &info.transitive_vulnerabilities {
+                let link = match &t.vulnerability.url {
+                    Some(u) => format!("[{}]({u})", t.vulnerability.id),
+                    None => t.vulnerability.id.clone(),
+                };
+                let sev = t.vulnerability.severity.as_str();
+                let name = &t.package_name;
+                let ver = &t.package_version;
+                let desc = &t.vulnerability.description;
+                writeln!(f, "- {link} **{sev}** — {name}@{ver}: {desc}")?;
             }
         }
 
@@ -1706,6 +1907,40 @@ mod tests {
         assert!(
             content.contains("2025-01-15") || content.contains("ago"),
             "Release date should be found via effective_version lookup, got:\n{content}"
+        );
+    }
+
+    #[test]
+    fn test_hover_lists_transitive_vulnerabilities() {
+        use crate::registries::{TransitiveVuln, Vulnerability, VulnerabilitySeverity};
+
+        let dep = make_dep("react", "^18.0", Some("18.2.0"));
+        let info = VersionInfo {
+            latest: Some("18.2.0".to_string()),
+            transitive_vulnerabilities: vec![TransitiveVuln {
+                package_name: "scheduler".to_string(),
+                package_version: "1.2.3".to_string(),
+                vulnerability: Vulnerability {
+                    id: "CVE-1".to_string(),
+                    severity: VulnerabilitySeverity::High,
+                    description: "desc".to_string(),
+                    url: None,
+                },
+            }],
+            ..Default::default()
+        };
+        let content = format_hover_content(&dep, FileType::Npm, &info);
+        assert!(
+            content.contains("Transitive vulnerabilities"),
+            "Hover should contain transitive section, got:\n{content}"
+        );
+        assert!(
+            content.contains("scheduler@1.2.3"),
+            "Hover should contain transitive package, got:\n{content}"
+        );
+        assert!(
+            content.contains("CVE-1"),
+            "Hover should contain transitive vuln id, got:\n{content}"
         );
     }
 }

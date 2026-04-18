@@ -15,4 +15,7 @@ pub struct DocumentState {
     pub dependencies: Vec<Dependency>,
     /// The detected file type (determines which parser/registry to use).
     pub file_type: FileType,
+    /// Full dependency graph from the lockfile, if one was found.
+    /// Used to enumerate transitive dependencies for vulnerability scanning.
+    pub lockfile_graph: Option<std::sync::Arc<crate::parsers::lockfile_graph::LockfileGraph>>,
 }
