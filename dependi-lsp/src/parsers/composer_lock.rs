@@ -4,6 +4,8 @@ use std::path::{Path, PathBuf};
 
 use hashbrown::HashMap;
 
+use crate::parsers::lockfile_graph::{LockfileGraph, LockfilePackage};
+
 /// Normalize a Composer package name to lowercase.
 ///
 /// Composer package names are case-insensitive (e.g., "Vendor/Package" == "vendor/package").
@@ -53,6 +55,46 @@ pub fn parse_composer_lock(content: &str) -> HashMap<String, String> {
     }
 
     map
+}
+
+/// Parse composer.lock into a full dependency graph. Includes both `packages` and `packages-dev`.
+/// Skips platform requires (`php`, `ext-*`).
+pub fn parse_composer_lock_graph(content: &str) -> LockfileGraph {
+    let mut graph = LockfileGraph::default();
+    let value: serde_json::Value = match serde_json::from_str(content) {
+        Ok(v) => v,
+        Err(_) => return graph,
+    };
+
+    for key in &["packages", "packages-dev"] {
+        let Some(arr) = value.get(key).and_then(|p| p.as_array()) else {
+            continue;
+        };
+        for entry in arr {
+            let Some(name) = entry.get("name").and_then(|n| n.as_str()) else {
+                continue;
+            };
+            let Some(version) = entry.get("version").and_then(|v| v.as_str()) else {
+                continue;
+            };
+            let mut deps: Vec<String> = Vec::new();
+            if let Some(req) = entry.get("require").and_then(|r| r.as_object()) {
+                for dep_name in req.keys() {
+                    if dep_name != "php" && !dep_name.starts_with("ext-") {
+                        deps.push(dep_name.clone());
+                    }
+                }
+            }
+            graph.packages.push(LockfilePackage {
+                name: name.to_string(),
+                version: version.to_string(),
+                dependencies: deps,
+                is_root: false,
+            });
+        }
+    }
+
+    graph
 }
 
 /// Find the composer.lock file by walking up from a composer.json path.
@@ -192,5 +234,27 @@ mod tests {
             map.get("vendor/dev").map(|s| s.as_str()),
             Some("dev-master")
         );
+    }
+
+    #[test]
+    fn test_parse_composer_lock_graph() {
+        let content = r#"{
+  "packages": [
+    {
+      "name": "symfony/console",
+      "version": "v6.0.0",
+      "require": { "symfony/polyfill-php80": "^1.16", "php": ">=8.0" }
+    },
+    { "name": "symfony/polyfill-php80", "version": "v1.27.0", "require": { "ext-mbstring": "*" } }
+  ],
+  "packages-dev": []
+}"#;
+        let graph = parse_composer_lock_graph(content);
+        assert_eq!(graph.packages.len(), 2);
+        let console = graph.packages.iter().find(|p| p.name == "symfony/console").unwrap();
+        assert!(console.dependencies.contains(&"symfony/polyfill-php80".to_string()));
+        assert!(!console.dependencies.iter().any(|d| d == "php"));
+        let polyfill = graph.packages.iter().find(|p| p.name == "symfony/polyfill-php80").unwrap();
+        assert!(!polyfill.dependencies.iter().any(|d| d.starts_with("ext-")));
     }
 }
