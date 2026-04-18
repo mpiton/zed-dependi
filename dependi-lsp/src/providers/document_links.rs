@@ -28,12 +28,12 @@ pub fn create_document_links(deps: &[Dependency], file_type: &FileType) -> Vec<D
             Some(DocumentLink {
                 range: Range {
                     start: Position {
-                        line: dep.line,
-                        character: dep.name_start,
+                        line: dep.name_span.line,
+                        character: dep.name_span.line_start,
                     },
                     end: Position {
-                        line: dep.line,
-                        character: dep.name_end,
+                        line: dep.name_span.line,
+                        character: dep.name_span.line_end,
                     },
                 },
                 target: Some(url),
@@ -46,17 +46,24 @@ pub fn create_document_links(deps: &[Dependency], file_type: &FileType) -> Vec<D
 
 #[cfg(test)]
 mod tests {
+    use crate::parsers::Span;
+
     use super::*;
 
     fn make_dep(name: &str, line: u32, name_start: u32, name_end: u32) -> Dependency {
         Dependency {
             name: name.to_string(),
             version: "1.0.0".to_string(),
-            line,
-            name_start,
-            name_end,
-            version_start: name_end + 2,
-            version_end: name_end + 7,
+            name_span: Span {
+                line,
+                line_start: name_start,
+                line_end: name_end,
+            },
+            version_span: Span {
+                line,
+                line_start: name_end + 2,
+                line_end: name_end + 7,
+            },
             dev: false,
             optional: false,
             registry: None,

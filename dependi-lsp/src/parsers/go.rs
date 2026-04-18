@@ -2,7 +2,7 @@
 //!
 //! Optimized for performance with pre-allocation and reduced string searches.
 
-use super::{Dependency, Parser};
+use super::{Dependency, Parser, Span};
 
 /// Parser for Go go.mod dependency files
 #[derive(Debug, Default)]
@@ -129,11 +129,16 @@ fn parse_require_with_positions(
     Some(Dependency {
         name: module_path.to_string(),
         version: version.to_string(),
-        line: line_num,
-        name_start,
-        name_end,
-        version_start,
-        version_end,
+        name_span: Span {
+            line: line_num,
+            line_start: name_start,
+            line_end: name_end,
+        },
+        version_span: Span {
+            line: line_num,
+            line_start: version_start,
+            line_end: version_end,
+        },
         dev: false,
         optional: is_indirect,
         registry: None,
@@ -230,10 +235,12 @@ require github.com/pkg/c v3.0.0
         assert_eq!(deps.len(), 1);
 
         let dep = &deps[0];
-        assert_eq!(dep.name_start, 8);
-        assert_eq!(dep.name_end, 29);
-        assert_eq!(dep.version_start, 30);
-        assert_eq!(dep.version_end, 36);
+        assert_eq!(dep.name_span.line, 0);
+        assert_eq!(dep.name_span.line_start, 8);
+        assert_eq!(dep.name_span.line_end, 29);
+        assert_eq!(dep.version_span.line, 0);
+        assert_eq!(dep.version_span.line_start, 30);
+        assert_eq!(dep.version_span.line_end, 36);
     }
 
     #[test]

@@ -98,7 +98,7 @@ pub fn create_code_actions(
 ) -> Vec<CodeActionOrCommand> {
     let mut actions: Vec<CodeActionOrCommand> = dependencies
         .iter()
-        .filter(|dep| dep.line >= range.start.line && dep.line <= range.end.line)
+        .filter(|dep| (range.start.line..=range.end.line).contains(&dep.version_span.line))
         .filter_map(|dep| create_update_action(dep, cache, uri, file_type, &cache_key_fn))
         .collect();
 
@@ -140,12 +140,12 @@ fn create_update_action(
             let edit = TextEdit {
                 range: Range {
                     start: Position {
-                        line: dep.line,
-                        character: dep.version_start,
+                        line: dep.version_span.line,
+                        character: dep.version_span.line_start,
                     },
                     end: Position {
-                        line: dep.line,
-                        character: dep.version_end,
+                        line: dep.version_span.line,
+                        character: dep.version_span.line_end,
                     },
                 },
                 new_text,
@@ -214,12 +214,12 @@ fn create_update_all_action(
             TextEdit {
                 range: Range {
                     start: Position {
-                        line: dep.line,
-                        character: dep.version_start,
+                        line: dep.version_span.line,
+                        character: dep.version_span.line_start,
                     },
                     end: Position {
-                        line: dep.line,
-                        character: dep.version_end,
+                        line: dep.version_span.line,
+                        character: dep.version_span.line_end,
                     },
                 },
                 new_text,
@@ -306,17 +306,23 @@ fn format_version_for_dep(
 mod tests {
     use super::*;
     use crate::cache::{MemoryCache, WriteCache};
+    use crate::parsers::Span;
     use crate::registries::VersionInfo;
 
     fn create_test_dependency(name: &str, version: &str, line: u32) -> Dependency {
         Dependency {
             name: name.to_string(),
             version: version.to_string(),
-            line,
-            name_start: 0,
-            name_end: name.len() as u32,
-            version_start: name.len() as u32 + 4,
-            version_end: name.len() as u32 + 4 + version.len() as u32,
+            name_span: Span {
+                line,
+                line_start: 0,
+                line_end: name.len() as u32,
+            },
+            version_span: Span {
+                line,
+                line_start: name.len() as u32 + 4,
+                line_end: name.len() as u32 + 4 + version.len() as u32,
+            },
             dev: false,
             optional: false,
             registry: None,

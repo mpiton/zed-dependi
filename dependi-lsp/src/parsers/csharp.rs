@@ -1,6 +1,6 @@
 //! Parser for C# .csproj files (NuGet PackageReference format)
 
-use super::{Dependency, Parser};
+use super::{Dependency, Parser, Span};
 
 /// Parser for C# .csproj files
 #[derive(Debug, Default)]
@@ -71,11 +71,16 @@ fn parse_package_reference(line: &str, line_num: u32) -> Option<Dependency> {
     Some(Dependency {
         name: name.to_string(),
         version,
-        line: line_num,
-        name_start,
-        name_end,
-        version_start,
-        version_end,
+        name_span: Span {
+            line: line_num,
+            line_start: name_start,
+            line_end: name_end,
+        },
+        version_span: Span {
+            line: line_num,
+            line_start: version_start,
+            line_end: version_end,
+        },
         dev: false, // NuGet doesn't have explicit dev dependencies in .csproj
         optional: false,
         registry: None,
@@ -143,7 +148,7 @@ mod tests {
 
         assert_eq!(deps.len(), 1);
         let dep = &deps[0];
-        assert!(dep.version_start > dep.name_end);
+        assert!(dep.version_span.line_start > dep.name_span.line_end);
     }
 
     #[test]

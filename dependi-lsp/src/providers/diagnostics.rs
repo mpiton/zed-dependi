@@ -98,12 +98,12 @@ fn create_outdated_diagnostic(
         VersionStatus::UpdateAvailable(new_version) => Some(Diagnostic {
             range: Range {
                 start: Position {
-                    line: dep.line,
-                    character: dep.version_start,
+                    line: dep.version_span.line,
+                    character: dep.version_span.line_start,
                 },
                 end: Position {
-                    line: dep.line,
-                    character: dep.version_end,
+                    line: dep.version_span.line,
+                    character: dep.version_span.line_end,
                 },
             },
             severity: Some(DiagnosticSeverity::HINT),
@@ -127,12 +127,12 @@ fn create_local_dependency_diagnostic(dep: &Dependency) -> Diagnostic {
     Diagnostic {
         range: Range {
             start: Position {
-                line: dep.line,
-                character: dep.version_start,
+                line: dep.version_span.line,
+                character: dep.version_span.line_start,
             },
             end: Position {
-                line: dep.line,
-                character: dep.version_end,
+                line: dep.version_span.line,
+                character: dep.version_span.line_end,
             },
         },
         severity: Some(DiagnosticSeverity::HINT),
@@ -188,12 +188,12 @@ fn create_deprecation_diagnostic(dep: &Dependency, version_info: &VersionInfo) -
     Diagnostic {
         range: Range {
             start: Position {
-                line: dep.line,
-                character: dep.version_start,
+                line: dep.version_span.line,
+                character: dep.version_span.line_start,
             },
             end: Position {
-                line: dep.line,
-                character: dep.version_end,
+                line: dep.version_span.line,
+                character: dep.version_span.line_end,
             },
         },
         severity: Some(DiagnosticSeverity::WARNING),
@@ -292,12 +292,12 @@ fn create_yanked_diagnostic(
     Diagnostic {
         range: Range {
             start: Position {
-                line: dep.line,
-                character: dep.version_start,
+                line: dep.version_span.line,
+                character: dep.version_span.line_start,
             },
             end: Position {
-                line: dep.line,
-                character: dep.version_end,
+                line: dep.version_span.line,
+                character: dep.version_span.line_end,
             },
         },
         severity: Some(DiagnosticSeverity::WARNING),
@@ -369,12 +369,12 @@ fn create_vulnerability_summary_diagnostic(
     Diagnostic {
         range: Range {
             start: Position {
-                line: dep.line,
-                character: dep.version_start,
+                line: dep.version_span.line,
+                character: dep.version_span.line_start,
             },
             end: Position {
-                line: dep.line,
-                character: dep.version_end,
+                line: dep.version_span.line,
+                character: dep.version_span.line_end,
             },
         },
         severity: Some(diagnostic_severity),
@@ -397,17 +397,23 @@ mod tests {
     use super::*;
     use crate::cache::{MemoryCache, WriteCache};
     use crate::file_types::FileType;
+    use crate::parsers::Span;
     use crate::registries::VersionInfo;
 
     fn create_test_dependency(name: &str, version: &str, line: u32) -> Dependency {
         Dependency {
             name: name.to_string(),
             version: version.to_string(),
-            line,
-            name_start: 0,
-            name_end: name.len() as u32,
-            version_start: name.len() as u32 + 4,
-            version_end: name.len() as u32 + 4 + version.len() as u32,
+            name_span: Span {
+                line,
+                line_start: 0,
+                line_end: name.len() as u32,
+            },
+            version_span: Span {
+                line,
+                line_start: name.len() as u32 + 4,
+                line_end: name.len() as u32 + 4 + version.len() as u32,
+            },
             dev: false,
             optional: false,
             registry: None,

@@ -1,6 +1,6 @@
 //! Parser for Python dependency files (requirements.txt, constraints.txt, pyproject.toml, hatch.toml)
 
-use super::{Dependency, Parser};
+use super::{Dependency, Parser, Span};
 
 /// Parser for Python dependency files
 #[derive(Debug, Default)]
@@ -219,11 +219,16 @@ fn parse_requirement_line(line: &str, line_num: u32, dev: bool) -> Option<Depend
     Some(Dependency {
         name: name.to_string(),
         version,
-        line: line_num,
-        name_start,
-        name_end,
-        version_start,
-        version_end,
+        name_span: Span {
+            line: line_num,
+            line_start: name_start,
+            line_end: name_end,
+        },
+        version_span: Span {
+            line: line_num,
+            line_start: version_start,
+            line_end: version_end,
+        },
         dev,
         optional: false,
         registry: None,
@@ -579,11 +584,16 @@ fn find_dependency_position(
                 return Some(Dependency {
                     name: name.to_string(),
                     version: version.to_string(),
-                    line: line_num,
-                    name_start,
-                    name_end,
-                    version_start,
-                    version_end,
+                    name_span: Span {
+                        line: line_num,
+                        line_start: name_start,
+                        line_end: name_end,
+                    },
+                    version_span: Span {
+                        line: line_num,
+                        line_start: version_start,
+                        line_end: version_end,
+                    },
                     dev,
                     optional,
                     registry: None,
@@ -622,11 +632,16 @@ fn find_poetry_dependency_position(
                 return Some(Dependency {
                     name: name.to_string(),
                     version: version.to_string(),
-                    line: line_num,
-                    name_start,
-                    name_end,
-                    version_start,
-                    version_end,
+                    name_span: Span {
+                        line: line_num,
+                        line_start: name_start,
+                        line_end: name_end,
+                    },
+                    version_span: Span {
+                        line: line_num,
+                        line_start: version_start,
+                        line_end: version_end,
+                    },
                     dev,
                     optional: false,
                     registry: None,
@@ -765,11 +780,13 @@ pytest = "^7.0.0"
 
         let dep = &deps[0];
         assert_eq!(dep.version, "==2.0.0");
-        assert_eq!(dep.name_start, 0);
-        assert_eq!(dep.name_end, 5);
+        assert_eq!(dep.name_span.line, 0);
+        assert_eq!(dep.name_span.line_start, 0);
+        assert_eq!(dep.name_span.line_end, 5);
         // version_start now includes the operator "=="
-        assert_eq!(dep.version_start, 5);
-        assert_eq!(dep.version_end, 12);
+        assert_eq!(dep.version_span.line, 0);
+        assert_eq!(dep.version_span.line_start, 5);
+        assert_eq!(dep.version_span.line_end, 12);
     }
 
     #[test]

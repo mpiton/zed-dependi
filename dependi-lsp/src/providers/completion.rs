@@ -79,11 +79,9 @@ pub fn get_completions(
     cache_key_fn: impl Fn(&str) -> String,
 ) -> Option<Vec<CompletionItem>> {
     // Find if we're inside a version field
-    let dep = dependencies.iter().find(|d| {
-        d.line == position.line
-            && position.character >= d.version_start
-            && position.character <= d.version_end
-    })?;
+    let dep = dependencies
+        .iter()
+        .find(|d| d.version_span.contains_lsp_position(&position))?;
 
     let cache_key = cache_key_fn(&dep.name);
     let version_info = cache.get(&cache_key)?;
@@ -160,6 +158,7 @@ pub fn get_completions(
 mod tests {
     use super::*;
     use crate::cache::{MemoryCache, WriteCache};
+    use crate::parsers::Span;
     use crate::registries::VersionInfo;
     use chrono::Duration;
     use hashbrown::HashMap;
@@ -168,11 +167,16 @@ mod tests {
         Dependency {
             name: name.to_string(),
             version: version.to_string(),
-            line,
-            name_start: 0,
-            name_end: name.len() as u32,
-            version_start: name.len() as u32 + 4,
-            version_end: name.len() as u32 + 4 + version.len() as u32,
+            name_span: Span {
+                line,
+                line_start: 0,
+                line_end: name.len() as u32,
+            },
+            version_span: Span {
+                line,
+                line_start: name.len() as u32 + 4,
+                line_end: name.len() as u32 + 4 + version.len() as u32,
+            },
             dev: false,
             optional: false,
             registry: None,

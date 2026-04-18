@@ -9,36 +9,45 @@ fn validate_deps(deps: &[dependi_lsp::parsers::Dependency], content: &str, parse
     let lines: Vec<&str> = content.lines().collect();
     let lines_len = lines.len();
     for dep in deps {
-        let dep_line = dep.line;
+        let dep_name_line = dep.name_span.line;
         assert!(
-            (dep_line as usize) < lines_len,
-            "{parser_name}: dep.line {dep_line} >= lines.len() {lines_len}"
+            (dep_name_line as usize) < lines_len,
+            "{parser_name}: dep.name_span.line {dep_name_line} >= lines.len() {lines_len}"
         );
 
-        let line = lines[dep.line as usize];
-        let line_len = line.len() as u32;
+        let name_line = lines[dep_name_line as usize];
+        let name_line_len = name_line.len() as u32;
 
         let dep_name = &*dep.name;
-        let dep_name_start = dep.name_start;
-        let dep_name_end = dep.name_end;
+        let dep_name_start = dep.name_span.line_start;
+        let dep_name_end = dep.name_span.line_end;
         assert!(
             dep_name_start <= dep_name_end,
             "{parser_name}: name_start {dep_name_start} > name_end {dep_name_end}"
         );
         assert!(
-            dep_name_end <= line_len,
-            "{parser_name}: name_end {dep_name_end} > line_len {line_len} for dep {dep_name} on line '{line}'"
+            dep_name_end <= name_line_len,
+            "{parser_name}: name_end {dep_name_end} > line_len {name_line_len} for dep {dep_name} on line '{name_line}'"
         );
 
-        let dep_version_start = dep.version_start;
-        let dep_version_end = dep.version_end;
+        let dep_version_line = dep.version_span.line;
+        assert!(
+            (dep_version_line as usize) < lines_len,
+            "{parser_name}: dep.version_span.line {dep_version_line} >= lines.len() {lines_len}"
+        );
+
+        let version_line = lines[dep_version_line as usize];
+        let version_line_len = version_line.len() as u32;
+
+        let dep_version_start = dep.version_span.line_start;
+        let dep_version_end = dep.version_span.line_end;
         assert!(
             dep_version_start <= dep_version_end,
             "{parser_name}: version_start {dep_version_start} > version_end {dep_version_end}"
         );
         assert!(
-            dep_version_end <= line_len,
-            "{parser_name}: version_end {dep_version_end} > line_len {line_len} for dep {dep_name} on line '{line}'"
+            dep_version_end <= version_line_len,
+            "{parser_name}: version_end {dep_version_end} > line_len {version_line_len} for dep {dep_name} on line '{version_line}'"
         );
     }
 }

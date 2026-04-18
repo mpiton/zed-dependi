@@ -1,8 +1,13 @@
 //! Parser for Cargo.toml files using structured TOML parsing
 
-use super::{Dependency, Parser};
 use taplo::dom::Node;
+use taplo::dom::node::{Bool, DomNode, Key, Str};
 use taplo::parser::parse;
+use taplo::rowan::TextRange;
+use taplo::rowan::TextSize;
+use taplo::syntax::SyntaxElement;
+
+use super::{Dependency, Parser, Span};
 
 /// Parser for Rust Cargo.toml dependency files
 #[derive(Debug, Default)]
@@ -23,6 +28,17 @@ impl Parser for CargoParser {
             return Vec::new();
         }
 
+        let line_ranges = content
+            .split_inclusive('\n')
+            .map({
+                let mut offset: usize = 0;
+                move |line| {
+                    let range = TextRange::at((offset as u32).into(), (line.len() as u32).into());
+                    offset += line.len();
+                    range
+                }
+            })
+            .collect::<Box<[_]>>();
         let dom = parsed.into_dom();
 
         let mut dependencies = Vec::new();
@@ -36,64 +52,15 @@ impl Parser for CargoParser {
 
         for (section_name, is_dev) in sections {
             // Parse regular section dependencies (e.g., [dependencies])
-            if let Some(section) = dom.get(section_name).as_table() {
-                let entries = section.entries().read();
-                for (key, value) in entries.iter() {
-                    let name = key.value().to_string();
-                    if let Some(dep) = parse_dependency(&name, value, content, is_dev) {
-                        dependencies.push(dep);
-                    }
-                }
-            }
-
-            // Parse table-style dependencies (e.g., [dependencies.reqwest])
-            let pattern = format!("{section_name}.*");
-            if let Ok(keys) = pattern.parse::<taplo::dom::Keys>()
-                && let Ok(matches) = dom.find_all_matches(keys, false)
-            {
-                for (key_path, node) in matches {
-                    // Extract the dependency name from the key path
-                    let key_str = key_path.to_string();
-                    let name = key_str
-                        .split('.')
-                        .next_back()
-                        .unwrap_or(&key_str)
-                        .to_string();
-
-                    // For table dependencies, look for the version key
-                    if let Some(table) = node.as_table()
-                        && let Some(version_node) = table.get("version")
-                        && let Some(version_str) = version_node.as_str()
-                    {
-                        let version = version_str.value().to_string();
-                        let optional = table
-                            .get("optional")
-                            .and_then(|n| n.as_bool().map(|b| b.value()))
-                            .unwrap_or(false);
-                        let registry = table
-                            .get("registry")
-                            .and_then(|n| n.as_str().map(|s| s.value().to_string()));
-
-                        if let Some((line, name_start, name_end, version_start, version_end)) =
-                            find_table_dependency_positions(content, &name, &version)
-                        {
-                            dependencies.push(Dependency {
-                                name,
-                                version,
-                                line,
-                                name_start,
-                                name_end,
-                                version_start,
-                                version_end,
-                                dev: is_dev,
-                                optional,
-                                registry,
-                                resolved_version: None,
-                            });
-                        }
-                    }
-                }
-            }
+            let section_node = dom.get(section_name);
+            let Some(section) = section_node.as_table() else {
+                continue;
+            };
+            let entries = section.entries().read();
+            let deps = entries
+                .iter()
+                .filter_map(|(name, value)| parse_dependency(name, value, &line_ranges, is_dev));
+            dependencies.extend(deps);
         }
 
         // Parse workspace.dependencies section
@@ -102,12 +69,10 @@ impl Parser for CargoParser {
             && let Some(deps_table) = deps_node.as_table()
         {
             let entries = deps_table.entries().read();
-            for (key, value) in entries.iter() {
-                let name = key.value().to_string();
-                if let Some(dep) = parse_dependency(&name, value, content, false) {
-                    dependencies.push(dep);
-                }
-            }
+            let workspace_deps = entries
+                .iter()
+                .filter_map(|(name, value)| parse_dependency(name, value, &line_ranges, false));
+            dependencies.extend(workspace_deps);
         }
 
         dependencies
@@ -115,22 +80,25 @@ impl Parser for CargoParser {
 }
 
 /// Parse a single dependency from a TOML node
-fn parse_dependency(name: &str, node: &Node, content: &str, is_dev: bool) -> Option<Dependency> {
+fn parse_dependency(
+    name: &Key,
+    node: &Node,
+    line_spans: &[TextRange],
+    is_dev: bool,
+) -> Option<Dependency> {
     match node {
-        Node::Str(s) => {
+        Node::Str(version) => {
             // Simple dependency: name = "1.0.0"
-            let version = s.value().to_string();
-            let (line, name_start, name_end, version_start, version_end) =
-                find_simple_dependency_positions(content, name, &version)?;
+            let TablePositions {
+                name_span,
+                version_span,
+            } = find_dependency_positions(line_spans, name, None, version)?;
 
             Some(Dependency {
-                name: name.to_string(),
-                version,
-                line,
-                name_start,
-                name_end,
-                version_start,
-                version_end,
+                name: name.value().to_owned(),
+                version: version.value().to_owned(),
+                name_span,
+                version_span,
                 dev: is_dev,
                 optional: false,
                 registry: None,
@@ -138,31 +106,39 @@ fn parse_dependency(name: &str, node: &Node, content: &str, is_dev: bool) -> Opt
             })
         }
         Node::Table(table) => {
+            let package_node = table.get("package");
+            let package_str = package_node.as_ref().and_then(Node::as_str);
+
             // Inline table: name = { version = "1.0.0", ... }
             let version_node = table.get("version")?;
             let version_str = version_node.as_str()?;
-            let version = version_str.value().to_string();
 
             let optional = table
                 .get("optional")
-                .and_then(|n| n.as_bool().map(|b| b.value()))
+                .as_ref()
+                .and_then(Node::as_bool)
+                .map(Bool::value)
                 .unwrap_or(false);
 
             let registry = table
                 .get("registry")
-                .and_then(|n| n.as_str().map(|s| s.value().to_string()));
+                .as_ref()
+                .and_then(Node::as_str)
+                .map(|s| s.value().to_owned());
 
-            let (line, name_start, name_end, version_start, version_end) =
-                find_inline_table_positions(content, name, &version)?;
+            let TablePositions {
+                name_span,
+                version_span,
+            } = find_dependency_positions(line_spans, name, package_str, version_str)?;
 
             Some(Dependency {
-                name: name.to_string(),
-                version,
-                line,
-                name_start,
-                name_end,
-                version_start,
-                version_end,
+                name: package_str
+                    .map(Str::value)
+                    .unwrap_or_else(|| name.value())
+                    .to_owned(),
+                version: version_str.value().to_owned(),
+                name_span,
+                version_span,
                 dev: is_dev,
                 optional,
                 registry,
@@ -173,146 +149,57 @@ fn parse_dependency(name: &str, node: &Node, content: &str, is_dev: bool) -> Opt
     }
 }
 
-/// Find positions for a simple dependency: `name = "version"`
-fn find_simple_dependency_positions(
-    content: &str,
-    name: &str,
-    version: &str,
-) -> Option<(u32, u32, u32, u32, u32)> {
-    for (line_idx, line) in content.lines().enumerate() {
-        // Look for pattern: name = "version" or name = 'version'
-        let trimmed = line.trim();
-        if !trimmed.starts_with(name) {
-            continue;
-        }
-
-        // Check if this line has the exact name followed by =
-        let after_name = trimmed[name.len()..].trim_start();
-        if !after_name.starts_with('=') {
-            continue;
-        }
-
-        // Check for simple string value (not inline table)
-        let after_eq = after_name[1..].trim_start();
-        if after_eq.starts_with('{') {
-            continue; // This is an inline table, skip
-        }
-
-        // Check if version is in this line
-        if !line.contains(version) {
-            continue;
-        }
-
-        // Calculate positions
-        let name_start = line.find(name)? as u32;
-        let name_end = name_start + name.len() as u32;
-
-        // Find version position (inside quotes)
-        let version_start = line.find(version)? as u32;
-        let version_end = version_start + version.len() as u32;
-
-        return Some((
-            line_idx as u32,
-            name_start,
-            name_end,
-            version_start,
-            version_end,
-        ));
-    }
-    None
+struct TablePositions {
+    name_span: Span,
+    version_span: Span,
 }
 
-/// Find positions for an inline table dependency: `name = { version = "1.0.0", ... }`
-fn find_inline_table_positions(
-    content: &str,
-    name: &str,
-    version: &str,
-) -> Option<(u32, u32, u32, u32, u32)> {
-    for (line_idx, line) in content.lines().enumerate() {
-        let trimmed = line.trim();
-        if !trimmed.starts_with(name) {
-            continue;
-        }
+/// Find positions for a dependency
+/// - simple: `name = "version"`
+/// - inline: `name = { version = "1.0.0", package = "...", ... }`
+/// - table: `[dependencies.name]` with `version = "x.y.z"` & `package = "..."`
+fn find_dependency_positions(
+    line_ranges: &[TextRange],
+    name: &Key,
+    package: Option<&Str>,
+    version: &Str,
+) -> Option<TablePositions> {
+    let name_range = package
+        .and_then(str_content_range)
+        .or_else(|| name.syntax().map(SyntaxElement::text_range))?;
+    let version_range = str_content_range(version)?;
 
-        // Check if this line has the name followed by = and {
-        let after_name = trimmed[name.len()..].trim_start();
-        if !after_name.starts_with('=') {
-            continue;
-        }
+    let name_span = find_range_span(line_ranges, name_range)?;
+    let version_span = find_range_span(line_ranges, version_range)?;
 
-        let after_eq = after_name[1..].trim_start();
-        if !after_eq.starts_with('{') {
-            continue;
-        }
-
-        // Check if version is in this line
-        if !line.contains(version) {
-            continue;
-        }
-
-        // Calculate positions
-        let name_start = line.find(name)? as u32;
-        let name_end = name_start + name.len() as u32;
-
-        // Find version position (inside quotes after "version =")
-        let version_start = line.find(version)? as u32;
-        let version_end = version_start + version.len() as u32;
-
-        return Some((
-            line_idx as u32,
-            name_start,
-            name_end,
-            version_start,
-            version_end,
-        ));
-    }
-    None
+    Some(TablePositions {
+        name_span,
+        version_span,
+    })
 }
 
-/// Find positions for a table dependency: `[dependencies.name]` with `version = "x.y.z"`
-///
-/// For table-style dependencies, the name is in the header `[dependencies.name]`
-/// and the version is on a separate line. We return the version line as the primary
-/// line since that's what gets highlighted, and set name positions to 0 since the
-/// name is on a different line.
-fn find_table_dependency_positions(
-    content: &str,
-    name: &str,
-    version: &str,
-) -> Option<(u32, u32, u32, u32, u32)> {
-    let mut found_table = false;
+fn str_content_range(s: &Str) -> Option<TextRange> {
+    let quoted_range = s.syntax()?.text_range();
+    Some(TextRange::new(
+        quoted_range.start() + TextSize::from(1),
+        quoted_range.end() - TextSize::from(1),
+    ))
+}
 
-    for (line_idx, line) in content.lines().enumerate() {
-        let trimmed = line.trim();
+fn find_range_span(haystack: &[TextRange], needle: TextRange) -> Option<Span> {
+    let line_idx = line_range_position(haystack, needle)?;
+    let line_range = haystack[line_idx];
+    Some(Span {
+        line: line_idx as u32,
+        line_start: (needle.start() - line_range.start()).into(),
+        line_end: (needle.end() - line_range.start()).into(),
+    })
+}
 
-        // Look for the table header containing the dependency name
-        if trimmed.starts_with('[') && trimmed.ends_with(']') && trimmed.contains(name) {
-            // Check if this is a dependencies table
-            let inner = &trimmed[1..trimmed.len() - 1];
-            if inner.contains("dependencies.") && inner.ends_with(name) {
-                found_table = true;
-                continue;
-            }
-        }
-
-        // If we found the table, look for version = "x.y.z"
-        if found_table {
-            // Check if we hit a new section
-            if trimmed.starts_with('[') {
-                break;
-            }
-
-            if trimmed.starts_with("version") && line.contains(version) {
-                let version_start = line.find(version)? as u32;
-                let version_end = version_start + version.len() as u32;
-
-                // For table dependencies, name is in header (different line)
-                // Set name positions to 0 since we can only return one line number
-                return Some((line_idx as u32, 0, 0, version_start, version_end));
-            }
-        }
-    }
-    None
+fn line_range_position(haystack: &[TextRange], needle: TextRange) -> Option<usize> {
+    haystack
+        .binary_search_by(|line_range| line_range.ordering(needle))
+        .ok()
 }
 
 #[cfg(test)]
@@ -343,6 +230,22 @@ serde = { version = "1.0.0", features = ["derive"] }
         let deps = parser.parse(content);
         assert_eq!(deps.len(), 1);
         assert_eq!(deps[0].name, "serde");
+        assert_eq!(deps[0].name_span.line_start, 0);
+        assert_eq!(deps[0].version, "1.0.0");
+    }
+
+    #[test]
+    fn test_inline_table_alias_dependency() {
+        let parser = CargoParser::new();
+        let content = r#"
+[dependencies]
+serde1 = { package = "serde", version = "1.0.0", features = ["derive"] }
+"#;
+        let deps = parser.parse(content);
+        assert_eq!(deps.len(), 1);
+        assert_eq!(deps[0].name, "serde");
+        assert_eq!(deps[0].name_span.line_start, 22);
+        assert_eq!(deps[0].name_span.line_end, 27);
         assert_eq!(deps[0].version, "1.0.0");
     }
 
@@ -374,7 +277,7 @@ tokio = { version = "1.0", features = ["full"] }
 criterion = "0.5"
 "#;
         let deps = parser.parse(content);
-        assert_eq!(deps.len(), 3);
+        assert_eq!(deps.len(), 3, "{deps:#?}");
 
         let serde = deps.iter().find(|d| d.name == "serde").unwrap();
         assert_eq!(serde.version, "1.0");
@@ -400,6 +303,25 @@ features = ["json"]
         let deps = parser.parse(content);
         assert_eq!(deps.len(), 1);
         assert_eq!(deps[0].name, "reqwest");
+        assert_eq!(deps[0].name_span.line, 1);
+        assert_eq!(deps[0].version, "0.12");
+    }
+
+    #[test]
+    fn test_table_alias_dependency() {
+        let parser = CargoParser::new();
+        let content = r#"
+[dependencies.reqwest1]
+package = "reqwest"
+version = "0.12"
+features = ["json"]
+"#;
+        let deps = parser.parse(content);
+        assert_eq!(deps.len(), 1);
+        assert_eq!(deps[0].name, "reqwest");
+        assert_eq!(deps[0].name_span.line, 2);
+        assert_eq!(deps[0].name_span.line_start, 11);
+        assert_eq!(deps[0].name_span.line_end, 18);
         assert_eq!(deps[0].version, "0.12");
     }
 
@@ -481,7 +403,7 @@ my-crate = { version = "0.1.0", registry = "kellnr" }
         assert_eq!(deps.len(), 1);
         assert_eq!(deps[0].name, "my-crate");
         assert_eq!(deps[0].version, "0.1.0");
-        assert_eq!(deps[0].registry, Some("kellnr".to_string()));
+        assert_eq!(deps[0].registry.as_deref(), Some("kellnr"));
     }
 
     #[test]

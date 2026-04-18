@@ -1386,8 +1386,7 @@ impl LanguageServer for DependiBackend {
             .iter()
             .filter(|dep| {
                 // Only show hints for dependencies in the visible range
-                let line = dep.line;
-                line >= params.range.start.line && line <= params.range.end.line
+                (params.range.start.line..=params.range.end.line).contains(&dep.version_span.line)
             })
             .filter(|dep| {
                 // Skip ignored packages
@@ -1451,17 +1450,28 @@ impl LanguageServer for DependiBackend {
 
         let file_type = doc.file_type;
 
-        // Find dependency at this position
-        let dep = doc.dependencies.iter().find(|d| {
-            d.line == position.line
-                && position.character >= d.name_start
-                && position.character <= d.version_end
-        });
+        enum HoveredSpan {
+            Name,
+            Version,
+        }
 
-        let Some(dep) = dep.cloned() else {
+        // Find dependency at this position
+        let Some((dep, hovered_span)) = doc.dependencies.iter().find_map(|d| {
+            if d.name_span.contains_lsp_position(&position) {
+                Some((d.clone(), HoveredSpan::Name))
+            } else if d.version_span.contains_lsp_position(&position) {
+                Some((d.clone(), HoveredSpan::Version))
+            } else {
+                None
+            }
+        }) else {
             return Ok(None);
         };
         let dep_name = &*dep.name;
+        let hovered_span = match hovered_span {
+            HoveredSpan::Name => dep.name_span,
+            HoveredSpan::Version => dep.version_span,
+        };
 
         // Drop the lock before async call
         drop(doc);
@@ -1483,12 +1493,12 @@ impl LanguageServer for DependiBackend {
             }),
             range: Some(Range {
                 start: Position {
-                    line: dep.line,
-                    character: dep.name_start,
+                    line: hovered_span.line,
+                    character: hovered_span.line_start,
                 },
                 end: Position {
-                    line: dep.line,
-                    character: dep.version_end,
+                    line: hovered_span.line,
+                    character: hovered_span.line_end,
                 },
             }),
         }))
@@ -1572,17 +1582,22 @@ impl LanguageServer for DependiBackend {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::parsers::Dependency;
+    use crate::parsers::{Dependency, Span};
 
     fn make_dep(name: &str, version: &str, resolved: Option<&str>) -> Dependency {
         Dependency {
             name: name.to_string(),
             version: version.to_string(),
-            line: 0,
-            name_start: 0,
-            name_end: name.len() as u32,
-            version_start: name.len() as u32 + 3,
-            version_end: name.len() as u32 + 3 + version.len() as u32,
+            name_span: Span {
+                line: 0,
+                line_start: 0,
+                line_end: name.len() as u32,
+            },
+            version_span: Span {
+                line: 0,
+                line_start: name.len() as u32 + 3,
+                line_end: name.len() as u32 + 3 + version.len() as u32,
+            },
             dev: false,
             optional: false,
             registry: None,
