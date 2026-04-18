@@ -93,13 +93,35 @@ impl LockfileGraph {
         out
     }
 
-    /// Packages that are not declared in the manifest (pure transitives).
+    /// Packages that are reachable from any manifest dep but not declared directly
+    /// in the manifest (pure transitives). Workspace lockfiles can contain packages
+    /// from unrelated projects; those are excluded because they are not reachable
+    /// from any direct dependency.
     pub fn transitives_only(&self, manifest_deps: &[String]) -> Vec<&LockfilePackage> {
-        let set: HashSet<&str> = manifest_deps.iter().map(String::as_str).collect();
-        self.packages
-            .iter()
-            .filter(|p| !set.contains(p.name.as_str()))
-            .collect()
+        // Build the set of direct package names
+        let direct_set: HashSet<&str> = manifest_deps.iter().map(String::as_str).collect();
+
+        // Collect packages reachable from any direct dep. We de-dup by (name, version)
+        // to avoid returning the same package multiple times when several direct deps
+        // reach it.
+        let mut seen: HashSet<(&str, &str)> = HashSet::new();
+        let mut out: Vec<&LockfilePackage> = Vec::new();
+
+        for direct in manifest_deps {
+            for pkg in self.transitive_deps_of(direct) {
+                // Skip packages whose name is itself in the manifest — they are
+                // direct deps, not transitives.
+                if direct_set.contains(pkg.name.as_str()) {
+                    continue;
+                }
+                let key = (pkg.name.as_str(), pkg.version.as_str());
+                if seen.insert(key) {
+                    out.push(pkg);
+                }
+            }
+        }
+
+        out
     }
 
     /// Build an inverse index: for each transitive package name, the set of direct
@@ -222,6 +244,9 @@ mod tests {
             packages: vec![
                 pkg("react", &["react-dom"], true),
                 pkg("react-dom", &[], false),
+                // "scheduler" is NOT reachable from "react" in this graph, so it
+                // should no longer be returned now that transitives_only uses
+                // reachability rather than a simple name exclusion.
                 pkg("scheduler", &[], false),
             ],
         };
@@ -233,7 +258,33 @@ mod tests {
             .collect();
         assert!(!names.contains(&"react".to_string()));
         assert!(names.contains(&"react-dom".to_string()));
-        assert!(names.contains(&"scheduler".to_string()));
+        assert!(!names.contains(&"scheduler".to_string()), "unreachable package must be excluded");
+    }
+
+    #[test]
+    fn test_transitives_only_excludes_unreachable_packages() {
+        let graph = LockfileGraph {
+            packages: vec![
+                LockfilePackage {
+                    name: "react".into(), version: "18.2.0".into(),
+                    dependencies: vec!["scheduler".into()], is_root: true,
+                },
+                LockfilePackage {
+                    name: "scheduler".into(), version: "0.23.0".into(),
+                    dependencies: vec![], is_root: false,
+                },
+                LockfilePackage {
+                    // Not reachable from "react" — workspace noise
+                    name: "unrelated".into(), version: "1.0.0".into(),
+                    dependencies: vec![], is_root: false,
+                },
+            ],
+        };
+        let manifest: Vec<String> = vec!["react".to_string()];
+        let names: Vec<&str> = graph.transitives_only(&manifest).iter().map(|p| p.name.as_str()).collect();
+        assert!(names.contains(&"scheduler"), "reachable transitive should be included");
+        assert!(!names.contains(&"unrelated"), "unreachable package should NOT be returned");
+        assert!(!names.contains(&"react"), "direct dep should be excluded");
     }
 
     #[tokio::test]
