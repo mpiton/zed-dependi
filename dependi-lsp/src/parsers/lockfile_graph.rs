@@ -1,21 +1,27 @@
 //! Shared graph representation for lockfile contents.
 
 use hashbrown::HashSet;
+use tokio::io::AsyncReadExt;
 
-/// Read a lockfile with a size cap (50 MiB) to prevent OOM on hostile inputs.
+/// Read a lockfile with a 50 MiB size cap to prevent OOM on hostile inputs.
+/// The cap is enforced DURING the read, not before, to avoid TOCTOU races.
 pub async fn read_lockfile_capped(path: &std::path::Path) -> std::io::Result<String> {
     const MAX_LOCKFILE_BYTES: u64 = 50 * 1024 * 1024;
-    let metadata = tokio::fs::metadata(path).await?;
-    if metadata.len() > MAX_LOCKFILE_BYTES {
+    let file = tokio::fs::File::open(path).await?;
+    // `take` yields at most MAX+1 bytes; if the source is longer, the extra byte
+    // signals the overflow and we reject.
+    let mut buf = Vec::with_capacity(4096);
+    let mut reader = file.take(MAX_LOCKFILE_BYTES + 1);
+    reader.read_to_end(&mut buf).await?;
+    if buf.len() as u64 > MAX_LOCKFILE_BYTES {
         return Err(std::io::Error::new(
             std::io::ErrorKind::InvalidData,
-            format!(
-                "lockfile exceeds {} MiB cap",
-                MAX_LOCKFILE_BYTES / (1024 * 1024)
-            ),
+            format!("lockfile exceeds {} MiB cap", MAX_LOCKFILE_BYTES / (1024 * 1024)),
         ));
     }
-    tokio::fs::read_to_string(path).await
+    String::from_utf8(buf).map_err(|e| {
+        std::io::Error::new(std::io::ErrorKind::InvalidData, e.utf8_error())
+    })
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -204,5 +210,26 @@ mod tests {
         assert!(!names.contains(&"react".to_string()));
         assert!(names.contains(&"react-dom".to_string()));
         assert!(names.contains(&"scheduler".to_string()));
+    }
+
+    #[tokio::test]
+    async fn test_read_lockfile_capped_rejects_oversized() {
+        use std::io::Write;
+        let tmp = tempfile::NamedTempFile::new().unwrap();
+        // Write 51 MiB (just over the cap)
+        let size = 51 * 1024 * 1024;
+        let data = vec![b'a'; size];
+        tmp.as_file().write_all(&data).unwrap();
+        let err = read_lockfile_capped(tmp.path()).await.err().unwrap();
+        assert_eq!(err.kind(), std::io::ErrorKind::InvalidData);
+        assert!(err.to_string().contains("MiB cap"));
+    }
+
+    #[tokio::test]
+    async fn test_read_lockfile_capped_accepts_small_file() {
+        let tmp = tempfile::NamedTempFile::new().unwrap();
+        std::fs::write(tmp.path(), "hello").unwrap();
+        let out = read_lockfile_capped(tmp.path()).await.unwrap();
+        assert_eq!(out, "hello");
     }
 }
