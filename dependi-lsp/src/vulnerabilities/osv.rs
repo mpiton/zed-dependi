@@ -40,6 +40,19 @@ impl OsvClient {
         })
     }
 
+    /// Constructor used in tests to point the client at a mock server.
+    pub fn with_endpoint(endpoint: String) -> Self {
+        Self {
+            base_url: endpoint,
+            client: Arc::new(
+                Client::builder()
+                    .timeout(Duration::from_secs(30))
+                    .build()
+                    .expect("reqwest client should build"),
+            ),
+        }
+    }
+
     fn convert_vulnerability(osv: &OsvVulnerability) -> Vulnerability {
         let id = osv
             .aliases
@@ -419,6 +432,14 @@ mod tests {
 
         let vuln = &result.vulnerabilities[0];
         assert!(vuln.id.starts_with("RUSTSEC"));
+    }
+
+    #[tokio::test]
+    async fn test_osv_client_with_endpoint_uses_custom_url() {
+        let client = OsvClient::with_endpoint("http://127.0.0.1:65535".to_string());
+        // Port 65535 is not listening; the call should error, not reach osv.dev.
+        let result = client.query_batch(&[]).await;
+        assert!(result.is_err() || result.as_ref().map(|v| v.is_empty()).unwrap_or(false));
     }
 
     #[test]

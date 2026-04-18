@@ -41,6 +41,8 @@ quick-xml = "0.38"
 [dev-dependencies]
 serial_test = "3"
 criterion = { version = "0.8.2", features = ["html_reports"] }
+wiremock = "0.6"
+tempfile = "3"
 
 [[bench]]
 name = "benchmarks"
