@@ -11,7 +11,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - Lockfile-based vulnerability scanning in the `dependi-lsp scan` CLI and in
   the LSP editor: when a manifest has an adjacent lockfile (`Cargo.lock`,
-  `package-lock.json`, `pnpm-lock.yaml` v6/v9, `yarn.lock` v1, `poetry.lock`,
+  `package-lock.json` (v2/v3 flat format; v1 legacy format not supported), `pnpm-lock.yaml` v6/v9, `yarn.lock` v1, `poetry.lock`,
   `uv.lock`, `Pipfile.lock`, `composer.lock`, `Gemfile.lock`), the scanner now
   uses the exact resolved versions **and** walks the full dependency graph to
   check transitive dependencies via OSV.dev.

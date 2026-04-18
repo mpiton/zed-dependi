@@ -436,10 +436,20 @@ mod tests {
 
     #[tokio::test]
     async fn test_osv_client_with_endpoint_uses_custom_url() {
-        let client = OsvClient::with_endpoint("http://127.0.0.1:65535".to_string());
-        // Port 65535 is not listening; the call should error, not reach osv.dev.
-        let result = client.query_batch(&[]).await;
-        assert!(result.is_err() || result.as_ref().map(|v| v.is_empty()).unwrap_or(false));
+        let client = OsvClient::with_endpoint("http://127.0.0.1:1".to_string());
+        // Port 1 is not listening; a real query must error, proving the client
+        // actually attempted to reach the custom URL (and not fallen back to
+        // api.osv.dev).
+        let query = VulnerabilityQuery {
+            ecosystem: Ecosystem::CratesIo,
+            package_name: "serde".to_string(),
+            version: "1.0.0".to_string(),
+        };
+        let result = client.query_batch(&[query]).await;
+        assert!(
+            result.is_err(),
+            "query to unreachable endpoint should error, got {result:?}"
+        );
     }
 
     #[test]
