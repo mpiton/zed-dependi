@@ -9,6 +9,40 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- Lockfile-based vulnerability scanning in the `dependi-lsp scan` CLI and in
+  the LSP editor: when a manifest has an adjacent lockfile (`Cargo.lock`,
+  `package-lock.json`, `pnpm-lock.yaml` v6/v9, `yarn.lock` v1, `poetry.lock`,
+  `uv.lock`, `Pipfile.lock`, `composer.lock`, `Gemfile.lock`), the scanner now
+  uses the exact resolved versions **and** walks the full dependency graph to
+  check transitive dependencies via OSV.dev.
+- Transitive vulnerabilities are attributed to the direct dependency that
+  introduces them (`npm audit` style) and surfaced in:
+  - CLI reports (`summary`, `markdown`, `json`) under a distinct
+    `Transitive dependencies` section, each entry tagged with the direct
+    parent via `via_direct`.
+  - LSP diagnostics on the direct dependency line, with the message
+    summarizing up to 3 transitive CVEs (`N transitive CVE(s): pkg@ver (CVE-ID), ...`)
+    and escalating severity when a transitive CVE is more critical than the
+    direct ones.
+  - LSP hover content, with a dedicated `Transitive vulnerabilities` section
+    listing each CVE with severity, package@version, description, and link.
+- `--no-use-lockfile` flag on `dependi-lsp scan` to disable lockfile detection
+  for debugging or when only the manifest should be inspected.
+- `VersionInfo.transitive_vulnerabilities: Vec<TransitiveVuln>` and new public
+  `TransitiveVuln` type in `registries` for consumers of the public API.
+
+### Fixed
+
+- `dependi-lsp scan` now uses `effective_version()` (the resolved lockfile
+  version when available) instead of the declared version specifier when
+  querying OSV — previously the CLI queried using the specifier string (e.g.
+  `^1.0`), which caused false negatives.
+
+### Security
+
+- Lockfile reads are now capped at 50 MiB to prevent out-of-memory on hostile
+  or corrupted inputs (both in CLI and LSP backend).
+
 - Support for Java/Maven projects (pom.xml):
   - Parse direct dependencies with `${properties}` substitution
   - Scope awareness (`test`/`provided` marked as dev dependencies)
