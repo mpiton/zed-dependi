@@ -176,6 +176,21 @@ fn print_markdown_entry(v: &serde_json::Value, via: Option<&str>) {
     }
 }
 
+fn canonical_name(eco: dependi_lsp::vulnerabilities::Ecosystem, name: &str) -> String {
+    use dependi_lsp::parsers::{
+        composer_lock::normalize_composer_name,
+        gemfile_lock::normalize_gem_name,
+        python_lock::normalize_python_name,
+    };
+    use dependi_lsp::vulnerabilities::Ecosystem;
+    match eco {
+        Ecosystem::PyPI => normalize_python_name(name),
+        Ecosystem::Packagist => normalize_composer_name(name),
+        Ecosystem::RubyGems => normalize_gem_name(name),
+        _ => name.to_string(),
+    }
+}
+
 async fn run_scan(
     file: PathBuf,
     output: String,
@@ -347,13 +362,17 @@ async fn run_scan(
 
     let mut dependencies = dependencies;
     for dep in dependencies.iter_mut() {
-        if let Some(v) = version_map.get(&dep.name) {
+        let key = canonical_name(ecosystem, &dep.name);
+        if let Some(v) = version_map.get(&key) {
             dep.resolved_version = Some(v.clone());
         }
     }
 
     // Flag graph's root packages (matching manifest deps)
-    let direct_names: HashSet<String> = dependencies.iter().map(|d| d.name.clone()).collect();
+    let direct_names: HashSet<String> = dependencies
+        .iter()
+        .map(|d| canonical_name(ecosystem, &d.name))
+        .collect();
     for pkg in lockfile_graph.packages.iter_mut() {
         if direct_names.contains(&pkg.name) {
             pkg.is_root = true;
@@ -361,7 +380,14 @@ async fn run_scan(
     }
 
     // Extract transitives (packages in the lockfile but not in the manifest)
-    let direct_names_vec: Vec<String> = dependencies.iter().map(|d| d.name.clone()).collect();
+    let direct_names_vec: Vec<String> = dependencies
+        .iter()
+        .map(|d| canonical_name(ecosystem, &d.name))
+        .collect();
+    let normalized_to_raw: HashMap<String, String> = dependencies
+        .iter()
+        .map(|d| (canonical_name(ecosystem, &d.name), d.name.clone()))
+        .collect();
     let transitives: Vec<LockfilePackage> = lockfile_graph
         .transitives_only(&direct_names_vec)
         .into_iter()
@@ -461,6 +487,7 @@ async fn run_scan(
             let via_direct = inverse
                 .get(&pkg.name)
                 .and_then(|parents| parents.first())
+                .and_then(|n| normalized_to_raw.get(n))
                 .cloned()
                 .unwrap_or_else(|| "(unknown)".to_string());
 
