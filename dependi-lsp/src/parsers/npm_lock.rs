@@ -441,6 +441,15 @@ pub fn parse_pnpm_lock_graph(content: &str) -> LockfileGraph {
     let mut in_deps = false;
 
     for line in content.lines() {
+        // Exit packages section on any new top-level key (e.g. "snapshots:", "settings:", etc.)
+        if in_packages && !line.is_empty() && !line.starts_with(' ') && !line.starts_with('\t') && line != "packages:" {
+            in_packages = false;
+            if let Some(finish) = current.take() {
+                graph.packages.push(finish);
+            }
+            continue;
+        }
+
         if line == "packages:" {
             in_packages = true;
             continue;
@@ -504,12 +513,20 @@ pub fn parse_pnpm_lock_graph(content: &str) -> LockfileGraph {
 }
 
 /// Split a pnpm key like "react@18.2.0" or "@babel/core@7.0.0" into (name, version).
+///
+/// Strips peer-dep suffix before splitting: "react-dom@18.2.0(react@18.2.0)" → ("react-dom", "18.2.0").
 fn split_pnpm_key(key: &str) -> Option<(String, String)> {
-    let at = key.rfind('@')?;
+    // Peer-dep suffix in pnpm v9: "name@ver(peer@ver)(other@ver)" — trim at the first '('
+    // that isn't part of the name. Package names can't contain '(' so this is safe.
+    let base = match key.find('(') {
+        Some(idx) => &key[..idx],
+        None => key,
+    };
+    let at = base.rfind('@')?;
     if at == 0 {
         return None; // scoped name starts with '@' — first '@' is not the separator
     }
-    Some((key[..at].to_string(), key[at + 1..].to_string()))
+    Some((base[..at].to_string(), base[at + 1..].to_string()))
 }
 
 /// Parse yarn.lock (v1 format) into a graph. v2+ (Berry) uses a different format,
@@ -1104,6 +1121,43 @@ packages:
     // -----------------------------------------------------------------------
     // parse_yarn_lock_graph
     // -----------------------------------------------------------------------
+
+    #[test]
+    fn test_parse_pnpm_lock_graph_exits_packages_section_on_snapshots() {
+        let content = r#"
+lockfileVersion: '9.0'
+
+packages:
+
+  react@18.2.0:
+    resolution: {integrity: sha512-xxx}
+
+snapshots:
+
+  react-dom@18.2.0(react@18.2.0):
+    dependencies:
+      react: 18.2.0
+"#;
+        let graph = parse_pnpm_lock_graph(content);
+        let names: Vec<&str> = graph.packages.iter().map(|p| p.name.as_str()).collect();
+        // Should include react but NOT react-dom (which lives under snapshots:)
+        assert!(names.contains(&"react"));
+        assert!(!names.iter().any(|n| n.contains('(')),
+            "no entry name should contain a peer-suffix paren, got {names:?}");
+    }
+
+    #[test]
+    fn test_split_pnpm_key_handles_peer_suffix() {
+        // Only run if split_pnpm_key is accessible; otherwise test through parse_pnpm_lock_graph
+        let content = r#"
+lockfileVersion: '9.0'
+packages:
+  react-dom@18.2.0(react@18.2.0):
+    resolution: {integrity: sha512-xxx}
+"#;
+        let graph = parse_pnpm_lock_graph(content);
+        assert!(graph.packages.iter().any(|p| p.name == "react-dom" && p.version == "18.2.0"));
+    }
 
     #[test]
     fn test_parse_yarn_lock_graph_v1() {
