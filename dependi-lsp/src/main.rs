@@ -310,7 +310,8 @@ async fn run_scan(
                 }
             }
             Ecosystem::PyPI => {
-                if let Some((path, kind)) = python_lock::find_python_lockfile(&file, None).await
+                let hint = python_lock::detect_python_tool(&content);
+                if let Some((path, kind)) = python_lock::find_python_lockfile(&file, hint).await
                     && let Ok(lock_content) = read_lockfile_capped(&path).await
                 {
                     lockfile_graph = match kind {
