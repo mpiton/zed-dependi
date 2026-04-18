@@ -258,7 +258,10 @@ mod tests {
             .collect();
         assert!(!names.contains(&"react".to_string()));
         assert!(names.contains(&"react-dom".to_string()));
-        assert!(!names.contains(&"scheduler".to_string()), "unreachable package must be excluded");
+        assert!(
+            !names.contains(&"scheduler".to_string()),
+            "unreachable package must be excluded"
+        );
     }
 
     #[test]
@@ -266,24 +269,40 @@ mod tests {
         let graph = LockfileGraph {
             packages: vec![
                 LockfilePackage {
-                    name: "react".into(), version: "18.2.0".into(),
-                    dependencies: vec!["scheduler".into()], is_root: true,
+                    name: "react".into(),
+                    version: "18.2.0".into(),
+                    dependencies: vec!["scheduler".into()],
+                    is_root: true,
                 },
                 LockfilePackage {
-                    name: "scheduler".into(), version: "0.23.0".into(),
-                    dependencies: vec![], is_root: false,
+                    name: "scheduler".into(),
+                    version: "0.23.0".into(),
+                    dependencies: vec![],
+                    is_root: false,
                 },
                 LockfilePackage {
                     // Not reachable from "react" — workspace noise
-                    name: "unrelated".into(), version: "1.0.0".into(),
-                    dependencies: vec![], is_root: false,
+                    name: "unrelated".into(),
+                    version: "1.0.0".into(),
+                    dependencies: vec![],
+                    is_root: false,
                 },
             ],
         };
         let manifest: Vec<String> = vec!["react".to_string()];
-        let names: Vec<&str> = graph.transitives_only(&manifest).iter().map(|p| p.name.as_str()).collect();
-        assert!(names.contains(&"scheduler"), "reachable transitive should be included");
-        assert!(!names.contains(&"unrelated"), "unreachable package should NOT be returned");
+        let names: Vec<&str> = graph
+            .transitives_only(&manifest)
+            .iter()
+            .map(|p| p.name.as_str())
+            .collect();
+        assert!(
+            names.contains(&"scheduler"),
+            "reachable transitive should be included"
+        );
+        assert!(
+            !names.contains(&"unrelated"),
+            "unreachable package should NOT be returned"
+        );
         assert!(!names.contains(&"react"), "direct dep should be excluded");
     }
 

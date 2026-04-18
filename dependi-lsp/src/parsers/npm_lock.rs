@@ -1189,7 +1189,11 @@ packages:
             names.contains(&"@types/node"),
             "quoted key should yield unquoted name, got {names:?}"
         );
-        let ty = graph.packages.iter().find(|p| p.name == "@types/node").unwrap();
+        let ty = graph
+            .packages
+            .iter()
+            .find(|p| p.name == "@types/node")
+            .unwrap();
         assert_eq!(ty.version, "20.11.5");
     }
 
