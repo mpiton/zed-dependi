@@ -1196,6 +1196,17 @@ impl DependiBackend {
                             VulnCacheKey::new(ecosystem, &tpkg.name, &normalized_version);
                         vuln_cache.insert(vuln_key);
 
+                        // Always store vuln data (even empty) so the cached-attribution loop
+                        // below can find a transitive_vuln_data entry for every vuln_cache hit.
+                        let vuln_data_key = VulnCacheKey::new(
+                            ecosystem,
+                            &tpkg.name,
+                            &normalize_version_for_osv(&tpkg.version),
+                        );
+                        bg_ctx
+                            .transitive_vuln_data
+                            .insert(vuln_data_key, result.vulnerabilities.clone());
+
                         if result.vulnerabilities.is_empty() {
                             continue;
                         }
@@ -1241,19 +1252,6 @@ impl DependiBackend {
                                     raw_parent
                                 );
                             }
-                        }
-
-                        // Also store per-(ecosystem, name, version) so cached re-attribution can
-                        // retrieve the vuln list on subsequent document opens (FIX C).
-                        if !result.vulnerabilities.is_empty() {
-                            let vuln_data_key = VulnCacheKey::new(
-                                ecosystem,
-                                &tpkg.name,
-                                &normalize_version_for_osv(&tpkg.version),
-                            );
-                            bg_ctx
-                                .transitive_vuln_data
-                                .insert(vuln_data_key, result.vulnerabilities.clone());
                         }
                     }
 
@@ -1309,6 +1307,12 @@ impl DependiBackend {
                                     );
                                 }
                             }
+                        } else {
+                            tracing::debug!(
+                                "vuln_cache hit without transitive_vuln_data for {}@{} — skipping attribution",
+                                tpkg.name,
+                                tpkg.version
+                            );
                         }
                     }
 
