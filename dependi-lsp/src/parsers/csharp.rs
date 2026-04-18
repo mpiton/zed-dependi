@@ -3,7 +3,7 @@
 use super::{Dependency, Parser, Span};
 
 /// Parser for C# .csproj files
-#[derive(Debug, Default)]
+#[derive(Debug, Clone, Copy, Default)]
 pub struct CsharpParser;
 
 impl CsharpParser {

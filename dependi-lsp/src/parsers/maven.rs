@@ -20,7 +20,7 @@ use quick_xml::reader::Reader;
 use crate::parsers::{Dependency, Parser, Span};
 
 /// Parser for Maven `pom.xml` files.
-#[derive(Debug, Default)]
+#[derive(Debug, Clone, Copy, Default)]
 pub struct MavenParser;
 
 impl MavenParser {

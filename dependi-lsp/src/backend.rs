@@ -1,9 +1,7 @@
 use core::fmt;
+use std::path::PathBuf;
+use std::sync::{Arc, RwLock};
 use std::time::Duration;
-use std::{
-    path::PathBuf,
-    sync::{Arc, RwLock},
-};
 
 use dashmap::DashMap;
 use hashbrown::HashMap;
@@ -12,11 +10,11 @@ use tower_lsp::jsonrpc::Result;
 use tower_lsp::lsp_types::*;
 use tower_lsp::{Client, LanguageServer};
 
+use crate::auth::{EnvTokenProvider, TokenProviderManager, cargo_credentials, fmt_redact_token};
 use crate::cache::{HybridCache, ReadCache, WriteCache};
 use crate::config::Config;
 use crate::document::DocumentState;
 use crate::file_types::FileType;
-use crate::parsers::Parser;
 use crate::parsers::cargo::CargoParser;
 use crate::parsers::csharp::CsharpParser;
 use crate::parsers::dart::DartParser;
@@ -26,6 +24,7 @@ use crate::parsers::npm::NpmParser;
 use crate::parsers::php::PhpParser;
 use crate::parsers::python::PythonParser;
 use crate::parsers::ruby::RubyParser;
+use crate::parsers::{Dependency, Parser};
 use crate::providers::code_actions::create_code_actions;
 use crate::providers::completion::{fmt_release_age, get_completions};
 use crate::providers::diagnostics::create_diagnostics;
@@ -43,20 +42,16 @@ use crate::registries::pub_dev::PubDevRegistry;
 use crate::registries::pypi::PyPiRegistry;
 use crate::registries::rubygems::RubyGemsRegistry;
 use crate::registries::{Registry, VersionInfo, VulnerabilitySeverity};
-use crate::reports::{VulnerabilityReportEntry, VulnerabilitySummary};
+use crate::reports::{VulnerabilityReportEntry, VulnerabilitySummary, fmt_markdown_report};
 use crate::vulnerabilities::cache::VulnerabilityCache;
-use crate::vulnerabilities::osv::OsvClient;
+use crate::vulnerabilities::osv::{self, OsvClient};
 use crate::vulnerabilities::{VulnerabilityQuery, normalize_version_for_osv};
-use crate::{
-    auth::{EnvTokenProvider, TokenProviderManager, cargo_credentials, fmt_redact_token},
-    reports::fmt_markdown_report,
-};
 
 /// Compute cache key for a dependency, including registry for Cargo alternative registries.
 ///
 /// For Cargo deps with `registry = "name"`, the key is `crates:{registry}:{name}` to avoid
 /// collisions between crates.io and private registries. All other deps use the standard key.
-fn dep_cache_key(dep: &crate::parsers::Dependency, file_type: FileType) -> String {
+fn dep_cache_key(dep: &Dependency, file_type: FileType) -> String {
     let dep_name = &*dep.name;
     match (dep.registry.as_deref(), file_type) {
         (Some(registry), FileType::Cargo) => format!("crates:{registry}:{dep_name}"),
@@ -72,31 +67,31 @@ struct ProcessingContext {
     config: Arc<RwLock<Config>>,
     documents: Arc<DashMap<Url, DocumentState>>,
     version_cache: Arc<HybridCache>,
-    cargo_parser: Arc<CargoParser>,
-    npm_parser: Arc<NpmParser>,
-    python_parser: Arc<PythonParser>,
-    go_parser: Arc<GoParser>,
-    php_parser: Arc<PhpParser>,
-    dart_parser: Arc<DartParser>,
-    csharp_parser: Arc<CsharpParser>,
-    ruby_parser: Arc<RubyParser>,
-    maven_parser: Arc<MavenParser>,
-    crates_io: Arc<CratesIoRegistry>,
+    cargo_parser: CargoParser,
+    npm_parser: NpmParser,
+    python_parser: PythonParser,
+    go_parser: GoParser,
+    php_parser: PhpParser,
+    dart_parser: DartParser,
+    csharp_parser: CsharpParser,
+    ruby_parser: RubyParser,
+    maven_parser: MavenParser,
+    crates_io: CratesIoRegistry,
     cargo_custom_registries: Arc<DashMap<String, Arc<CargoSparseRegistry>>>,
     npm_registry: Arc<tokio::sync::RwLock<NpmRegistry>>,
-    pypi: Arc<PyPiRegistry>,
-    go_proxy: Arc<GoProxyRegistry>,
-    packagist: Arc<PackagistRegistry>,
-    pub_dev: Arc<PubDevRegistry>,
-    nuget: Arc<NuGetRegistry>,
-    rubygems: Arc<RubyGemsRegistry>,
+    pypi: PyPiRegistry,
+    go_proxy: GoProxyRegistry,
+    packagist: PackagistRegistry,
+    pub_dev: PubDevRegistry,
+    nuget: NuGetRegistry,
+    rubygems: RubyGemsRegistry,
     maven_central: Arc<tokio::sync::RwLock<MavenCentralRegistry>>,
-    osv_client: Arc<OsvClient>,
+    osv_client: OsvClient,
     vuln_cache: Arc<VulnerabilityCache>,
 }
 
 impl ProcessingContext {
-    fn parse_document(&self, uri: &Url, content: &str) -> Vec<crate::parsers::Dependency> {
+    fn parse_document(&self, uri: &Url, content: &str) -> Vec<Dependency> {
         match FileType::detect(uri) {
             Some(FileType::Cargo) => self.cargo_parser.parse(content),
             Some(FileType::Npm) => self.npm_parser.parse(content),
@@ -421,15 +416,15 @@ impl ProcessingContext {
         );
 
         // Clone Arc references for async tasks
-        let crates_io = Arc::clone(&self.crates_io);
+        let crates_io = self.crates_io.clone();
         let cargo_custom_registries = Arc::clone(&self.cargo_custom_registries);
         let npm_registry = Arc::clone(&self.npm_registry);
-        let pypi = Arc::clone(&self.pypi);
-        let go_proxy = Arc::clone(&self.go_proxy);
-        let packagist = Arc::clone(&self.packagist);
-        let pub_dev = Arc::clone(&self.pub_dev);
-        let nuget = Arc::clone(&self.nuget);
-        let rubygems = Arc::clone(&self.rubygems);
+        let pypi = self.pypi.clone();
+        let go_proxy = self.go_proxy.clone();
+        let packagist = self.packagist.clone();
+        let pub_dev = self.pub_dev.clone();
+        let nuget = self.nuget.clone();
+        let rubygems = self.rubygems.clone();
         let maven_central = Arc::clone(&self.maven_central);
         let cache = Arc::clone(&self.version_cache);
 
@@ -439,15 +434,15 @@ impl ProcessingContext {
                 let name = dep.name.clone();
                 let registry = dep.registry.clone();
                 let cache_key = dep_cache_key(dep, file_type);
-                let crates_io = Arc::clone(&crates_io);
+                let crates_io = crates_io.clone();
                 let cargo_custom_registries = Arc::clone(&cargo_custom_registries);
                 let npm_registry = Arc::clone(&npm_registry);
-                let pypi = Arc::clone(&pypi);
-                let go_proxy = Arc::clone(&go_proxy);
-                let packagist = Arc::clone(&packagist);
-                let pub_dev = Arc::clone(&pub_dev);
-                let nuget = Arc::clone(&nuget);
-                let rubygems = Arc::clone(&rubygems);
+                let pypi = pypi.clone();
+                let go_proxy = go_proxy.clone();
+                let packagist = packagist.clone();
+                let pub_dev = pub_dev.clone();
+                let nuget = nuget.clone();
+                let rubygems = rubygems.clone();
                 let maven_central = Arc::clone(&maven_central);
                 let cache = Arc::clone(&cache);
                 async move {
@@ -582,7 +577,7 @@ impl ProcessingContext {
         if security_enabled && !dependencies.is_empty() {
             let dependencies_clone = dependencies.clone();
             let cache_clone = Arc::clone(&self.version_cache);
-            let osv_client_clone = Arc::clone(&self.osv_client);
+            let osv_client_clone = self.osv_client.clone();
             let vuln_cache_clone = Arc::clone(&self.vuln_cache);
             let client_clone = self.client.clone();
 
@@ -609,35 +604,36 @@ pub struct DependiBackend {
     documents: Arc<DashMap<Url, DocumentState>>,
     /// Cache for version information (keyed by "registry:package")
     version_cache: Arc<HybridCache>,
-    /// Parsers (Arc-wrapped for sharing with debounce tasks)
-    cargo_parser: Arc<CargoParser>,
-    npm_parser: Arc<NpmParser>,
-    python_parser: Arc<PythonParser>,
-    go_parser: Arc<GoParser>,
-    php_parser: Arc<PhpParser>,
-    dart_parser: Arc<DartParser>,
-    csharp_parser: Arc<CsharpParser>,
-    ruby_parser: Arc<RubyParser>,
-    maven_parser: Arc<MavenParser>,
-    /// Registry clients
-    crates_io: Arc<CratesIoRegistry>,
+    // Parsers
+    // (Arc-wrap for sharing with debounce tasks, if stateful)
+    cargo_parser: CargoParser,
+    npm_parser: NpmParser,
+    python_parser: PythonParser,
+    go_parser: GoParser,
+    php_parser: PhpParser,
+    dart_parser: DartParser,
+    csharp_parser: CsharpParser,
+    ruby_parser: RubyParser,
+    maven_parser: MavenParser,
+    // Registry clients
+    crates_io: CratesIoRegistry,
     /// Cargo alternative registries (registry name -> sparse registry client)
     cargo_custom_registries: Arc<DashMap<String, Arc<CargoSparseRegistry>>>,
     /// npm registry (tokio::sync::RwLock-wrapped to allow reconfiguration during initialize)
     npm_registry: Arc<tokio::sync::RwLock<NpmRegistry>>,
-    pypi: Arc<PyPiRegistry>,
-    go_proxy: Arc<GoProxyRegistry>,
-    packagist: Arc<PackagistRegistry>,
-    pub_dev: Arc<PubDevRegistry>,
-    nuget: Arc<NuGetRegistry>,
-    rubygems: Arc<RubyGemsRegistry>,
+    pypi: PyPiRegistry,
+    go_proxy: GoProxyRegistry,
+    packagist: PackagistRegistry,
+    pub_dev: PubDevRegistry,
+    nuget: NuGetRegistry,
+    rubygems: RubyGemsRegistry,
     maven_central: Arc<tokio::sync::RwLock<MavenCentralRegistry>>,
     /// Shared HTTP client for creating new registry instances
-    http_client: Arc<HttpClient>,
+    http_client: HttpClient,
     /// Token provider manager for authentication across all ecosystems
     token_manager: Arc<TokenProviderManager>,
     /// Vulnerability scanning
-    osv_client: Arc<OsvClient>,
+    osv_client: OsvClient,
     vuln_cache: Arc<VulnerabilityCache>,
     /// Debounce tasks for did_change notifications (per-URI)
     /// Maps URI -> (generation, JoinHandle) for safe cleanup with racing tasks
@@ -666,18 +662,18 @@ impl DependiBackend {
         Self::with_http_client(client, None)
     }
 
-    pub fn with_http_client(client: Client, http_client: Option<Arc<HttpClient>>) -> Self {
+    pub fn with_http_client(client: Client, http_client: Option<HttpClient>) -> Self {
         let http_client = http_client.unwrap_or_else(|| {
             create_shared_client().expect("Failed to create shared HTTP client")
         });
 
         let config = Config::default();
         let npm_registry = Arc::new(tokio::sync::RwLock::new(
-            NpmRegistry::with_client_and_config(Arc::clone(&http_client), &config.registries.npm),
+            NpmRegistry::with_client_and_config(http_client.clone(), &config.registries.npm),
         ));
         let maven_central = Arc::new(tokio::sync::RwLock::new(
             MavenCentralRegistry::with_client_and_config(
-                Arc::clone(&http_client),
+                http_client.clone(),
                 &config.registries.maven,
             ),
         ));
@@ -690,28 +686,28 @@ impl DependiBackend {
             config: Arc::new(RwLock::new(config)),
             documents: Arc::new(DashMap::new()),
             version_cache: Arc::new(HybridCache::new()),
-            cargo_parser: Arc::new(CargoParser::new()),
-            npm_parser: Arc::new(NpmParser::new()),
-            python_parser: Arc::new(PythonParser::new()),
-            go_parser: Arc::new(GoParser::new()),
-            php_parser: Arc::new(PhpParser::new()),
-            dart_parser: Arc::new(DartParser::new()),
-            csharp_parser: Arc::new(CsharpParser::new()),
-            ruby_parser: Arc::new(RubyParser::new()),
-            maven_parser: Arc::new(MavenParser::new()),
-            crates_io: Arc::new(CratesIoRegistry::with_client(Arc::clone(&http_client))),
+            cargo_parser: CargoParser::new(),
+            npm_parser: NpmParser::new(),
+            python_parser: PythonParser::new(),
+            go_parser: GoParser::new(),
+            php_parser: PhpParser::new(),
+            dart_parser: DartParser::new(),
+            csharp_parser: CsharpParser::new(),
+            ruby_parser: RubyParser::new(),
+            maven_parser: MavenParser::new(),
+            crates_io: CratesIoRegistry::with_client(http_client.clone()),
             cargo_custom_registries: Arc::new(DashMap::new()),
             npm_registry,
-            pypi: Arc::new(PyPiRegistry::with_client(Arc::clone(&http_client))),
-            go_proxy: Arc::new(GoProxyRegistry::with_client(Arc::clone(&http_client))),
-            packagist: Arc::new(PackagistRegistry::with_client(Arc::clone(&http_client))),
-            pub_dev: Arc::new(PubDevRegistry::with_client(Arc::clone(&http_client))),
-            nuget: Arc::new(NuGetRegistry::with_client(Arc::clone(&http_client))),
-            rubygems: Arc::new(RubyGemsRegistry::with_client(Arc::clone(&http_client))),
+            pypi: PyPiRegistry::with_client(http_client.clone()),
+            go_proxy: GoProxyRegistry::with_client(http_client.clone()),
+            packagist: PackagistRegistry::with_client(http_client.clone()),
+            pub_dev: PubDevRegistry::with_client(http_client.clone()),
+            nuget: NuGetRegistry::with_client(http_client.clone()),
+            rubygems: RubyGemsRegistry::with_client(http_client.clone()),
             maven_central,
             http_client,
             token_manager,
-            osv_client: Arc::new(OsvClient::default()),
+            osv_client: OsvClient::default(),
             vuln_cache: Arc::new(VulnerabilityCache::new()),
             debounce_tasks: Arc::new(DashMap::new()),
             debounce_generation: Arc::new(std::sync::atomic::AtomicU64::new(0)),
@@ -725,26 +721,26 @@ impl DependiBackend {
             config: Arc::clone(&self.config),
             documents: Arc::clone(&self.documents),
             version_cache: Arc::clone(&self.version_cache),
-            cargo_parser: Arc::clone(&self.cargo_parser),
-            npm_parser: Arc::clone(&self.npm_parser),
-            python_parser: Arc::clone(&self.python_parser),
-            go_parser: Arc::clone(&self.go_parser),
-            php_parser: Arc::clone(&self.php_parser),
-            dart_parser: Arc::clone(&self.dart_parser),
-            csharp_parser: Arc::clone(&self.csharp_parser),
-            ruby_parser: Arc::clone(&self.ruby_parser),
-            maven_parser: Arc::clone(&self.maven_parser),
-            crates_io: Arc::clone(&self.crates_io),
+            cargo_parser: self.cargo_parser,
+            npm_parser: self.npm_parser,
+            python_parser: self.python_parser,
+            go_parser: self.go_parser,
+            php_parser: self.php_parser,
+            dart_parser: self.dart_parser,
+            csharp_parser: self.csharp_parser,
+            ruby_parser: self.ruby_parser,
+            maven_parser: self.maven_parser,
+            crates_io: self.crates_io.clone(),
             cargo_custom_registries: Arc::clone(&self.cargo_custom_registries),
             npm_registry: Arc::clone(&self.npm_registry),
-            pypi: Arc::clone(&self.pypi),
-            go_proxy: Arc::clone(&self.go_proxy),
-            packagist: Arc::clone(&self.packagist),
-            pub_dev: Arc::clone(&self.pub_dev),
-            nuget: Arc::clone(&self.nuget),
-            rubygems: Arc::clone(&self.rubygems),
+            pypi: self.pypi.clone(),
+            go_proxy: self.go_proxy.clone(),
+            packagist: self.packagist.clone(),
+            pub_dev: self.pub_dev.clone(),
+            nuget: self.nuget.clone(),
+            rubygems: self.rubygems.clone(),
             maven_central: Arc::clone(&self.maven_central),
-            osv_client: Arc::clone(&self.osv_client),
+            osv_client: self.osv_client.clone(),
             vuln_cache: Arc::clone(&self.vuln_cache),
         }
     }
@@ -770,12 +766,10 @@ impl DependiBackend {
         // Fetch from appropriate registry
         let result = match file_type {
             FileType::Cargo => {
-                if let Some(reg_name) = cargo_registry {
-                    if let Some(reg) = self.cargo_custom_registries.get(reg_name) {
-                        reg.get_version_info(package_name).await
-                    } else {
-                        self.crates_io.get_version_info(package_name).await
-                    }
+                if let Some(reg_name) = cargo_registry
+                    && let Some(reg) = self.cargo_custom_registries.get(reg_name)
+                {
+                    reg.get_version_info(package_name).await
                 } else {
                     self.crates_io.get_version_info(package_name).await
                 }
@@ -808,17 +802,17 @@ impl DependiBackend {
                 Some(info)
             }
             Err(e) => {
-                tracing::warn!("Failed to fetch version info for {}: {}", package_name, e);
+                tracing::warn!("Failed to fetch version info for {package_name}: {e}");
                 None
             }
         }
     }
 
     async fn fetch_vulnerabilities_background(
-        dependencies: Vec<crate::parsers::Dependency>,
+        dependencies: Vec<Dependency>,
         file_type: FileType,
         cache: Arc<HybridCache>,
-        osv_client: Arc<OsvClient>,
+        osv_client: OsvClient,
         vuln_cache: Arc<VulnerabilityCache>,
         client: Client,
     ) {
@@ -863,46 +857,49 @@ impl DependiBackend {
                 let mut updated_count = 0;
 
                 // Update vulnerability cache and version_cache with results
-                for (query, result) in queries.iter().zip(results.iter()) {
+                for (
+                    VulnerabilityQuery {
+                        package_name,
+                        version,
+                        ecosystem,
+                    },
+                    osv::QueryResult {
+                        vulnerabilities,
+                        deprecated,
+                    },
+                ) in queries.into_iter().zip(results)
+                {
                     // Mark this package as queried in vuln_cache
-                    let vuln_key =
-                        VulnCacheKey::new(ecosystem, &query.package_name, &query.version);
+                    let vuln_key = VulnCacheKey::new(ecosystem, &package_name, &version);
                     vuln_cache.insert(vuln_key);
 
                     // Store vulnerabilities and deprecated status in version_cache
                     let cache_key = cache_key_map
-                        .get(&query.package_name)
+                        .get(&package_name)
                         .cloned()
-                        .unwrap_or_else(|| file_type.cache_key(&query.package_name));
+                        .unwrap_or_else(|| file_type.cache_key(&package_name));
                     if let Some(mut info) = cache.get(&cache_key) {
-                        info.vulnerabilities = result.vulnerabilities.clone();
-                        info.deprecated = result.deprecated;
-                        if result.deprecated {
+                        info.vulnerabilities = vulnerabilities.clone();
+                        info.deprecated = deprecated;
+                        if deprecated {
                             tracing::info!(
-                                "Background: Package {} {} is deprecated (unmaintained)",
-                                query.package_name,
-                                query.version
+                                "Background: Package {package_name} {version} is deprecated (unmaintained)",
                             );
                         }
                         tracing::debug!(
-                            "Background: Updated {} {} with {} vulnerabilities, deprecated={}",
-                            query.package_name,
-                            query.version,
-                            result.vulnerabilities.len(),
-                            result.deprecated
+                            "Background: Updated {package_name} {version} with {n} vulnerabilities, deprecated={deprecated}",
+                            n = vulnerabilities.len(),
                         );
                         cache.insert(cache_key, info);
                         updated_count += 1;
                     } else {
                         tracing::warn!(
-                            "Background: Could not update vulnerabilities for {}: not found in version cache",
-                            query.package_name
+                            "Background: Could not update vulnerabilities for {package_name}: not found in version cache",
                         );
                     }
                 }
                 tracing::info!(
-                    "Background: Cached vulnerability info for {} packages",
-                    updated_count
+                    "Background: Cached vulnerability info for {updated_count} packages",
                 );
 
                 // Refresh UI with new vulnerability data
@@ -919,10 +916,7 @@ impl DependiBackend {
                 tracing::info!("Background: Vulnerability check complete, UI updated");
             }
             Err(e) => {
-                tracing::warn!(
-                    "Background: Failed to fetch vulnerabilities from OSV.dev: {}",
-                    e
-                );
+                tracing::warn!("Background: Failed to fetch vulnerabilities from OSV.dev: {e}");
             }
         }
     }
@@ -1035,11 +1029,7 @@ impl DependiBackend {
 /// Format the hover content for a dependency with version info.
 ///
 /// Extracted from the hover handler to enable unit testing.
-fn format_hover_content(
-    dep: &crate::parsers::Dependency,
-    file_type: FileType,
-    info: &VersionInfo,
-) -> String {
+fn format_hover_content(dep: &Dependency, file_type: FileType, info: &VersionInfo) -> String {
     let dep_name = &*dep.name;
     let dep_version = dep.effective_version();
 
@@ -1154,7 +1144,7 @@ impl LanguageServer for DependiBackend {
         // Reconfigure npm registry with custom settings if provided
         {
             let new_npm_registry = NpmRegistry::with_client_and_config(
-                Arc::clone(&self.http_client),
+                self.http_client.clone(),
                 &config.registries.npm,
             );
             let mut registry = self.npm_registry.write().await;
@@ -1168,7 +1158,7 @@ impl LanguageServer for DependiBackend {
         // Reconfigure Maven Central registry with custom base URL if provided
         {
             let new_maven = MavenCentralRegistry::with_client_and_config(
-                Arc::clone(&self.http_client),
+                self.http_client.clone(),
                 &config.registries.maven,
             );
             let mut registry = self.maven_central.write().await;
@@ -1223,8 +1213,8 @@ impl LanguageServer for DependiBackend {
                 }
 
                 let registry = Arc::new(CargoSparseRegistry::with_client_and_config(
-                    Arc::clone(&self.http_client),
-                    registry_config.index_url.clone(),
+                    self.http_client.clone(),
+                    &registry_config.index_url,
                     token,
                 ));
 
@@ -1281,18 +1271,18 @@ impl LanguageServer for DependiBackend {
             .log_message(MessageType::INFO, "Dependi LSP initialized")
             .await;
 
-        // Verify all registries share the same HTTP client
-        let base_client = self.crates_io.http_client();
-        debug_assert!(Arc::ptr_eq(
-            &base_client,
-            &self.npm_registry.read().await.http_client()
-        ));
-        debug_assert!(Arc::ptr_eq(&base_client, &self.pypi.http_client()));
-        debug_assert!(Arc::ptr_eq(&base_client, &self.go_proxy.http_client()));
-        debug_assert!(Arc::ptr_eq(&base_client, &self.packagist.http_client()));
-        debug_assert!(Arc::ptr_eq(&base_client, &self.pub_dev.http_client()));
-        debug_assert!(Arc::ptr_eq(&base_client, &self.nuget.http_client()));
-        debug_assert!(Arc::ptr_eq(&base_client, &self.rubygems.http_client()));
+        // // Verify all registries share the same HTTP client
+        // let base_client = self.crates_io.http_client();
+        // debug_assert!(Arc::ptr_eq(
+        //     &base_client,
+        //     &self.npm_registry.read().await.http_client()
+        // ));
+        // debug_assert!(Arc::ptr_eq(&base_client, &self.pypi.http_client()));
+        // debug_assert!(Arc::ptr_eq(&base_client, &self.go_proxy.http_client()));
+        // debug_assert!(Arc::ptr_eq(&base_client, &self.packagist.http_client()));
+        // debug_assert!(Arc::ptr_eq(&base_client, &self.pub_dev.http_client()));
+        // debug_assert!(Arc::ptr_eq(&base_client, &self.nuget.http_client()));
+        // debug_assert!(Arc::ptr_eq(&base_client, &self.rubygems.http_client()));
 
         tracing::info!("Dependi LSP initialized");
     }

@@ -65,8 +65,6 @@
 //! - [PEP 440 - Version Identification](https://peps.python.org/pep-0440/)
 //! - [Trove Classifiers](https://pypi.org/classifiers/)
 
-use std::sync::Arc;
-
 use chrono::{DateTime, NaiveDateTime, Utc};
 use hashbrown::HashMap;
 use reqwest::Client;
@@ -77,10 +75,12 @@ use super::version_utils::is_prerelease_python;
 use super::{Registry, VersionInfo};
 
 /// Client for the PyPI registry
+#[derive(Clone)]
 pub struct PyPiRegistry {
-    client: Arc<Client>,
-    base_url: String,
+    client: Client,
 }
+
+const BASE_URL: &str = "https://pypi.org/pypi";
 
 impl PyPiRegistry {
     /// Constructs a PyPiRegistry using the provided shared HTTP client.
@@ -93,32 +93,24 @@ impl PyPiRegistry {
     ///
     /// # Examples
     ///
-    /// ```ignore
-    /// use std::sync::Arc;
+    /// ```no_run
     /// use dependi_lsp::registries::pypi::PyPiRegistry;
     /// use dependi_lsp::registries::http_client::create_shared_client;
     ///
     /// let client = create_shared_client().expect("failed to create client");
     /// let registry = PyPiRegistry::with_client(client);
     /// ```
-    pub fn with_client(client: Arc<Client>) -> Self {
-        Self {
-            client,
-            base_url: "https://pypi.org/pypi".to_string(),
-        }
+    pub fn with_client(client: Client) -> Self {
+        Self { client }
     }
 }
 
 impl Default for PyPiRegistry {
     /// Creates a PyPiRegistry configured with a shared HTTP client and the default PyPI base URL.
     ///
-    /// # Examples
+    /// # Panics
     ///
-    /// ```ignore
-    /// use dependi_lsp::registries::pypi::PyPiRegistry;
-    ///
-    /// let _registry = PyPiRegistry::default();
-    /// ```
+    /// This function will panic if creating the shared HTTP client fails.
     fn default() -> Self {
         Self::with_client(create_shared_client().expect("Failed to create HTTP client"))
     }
@@ -156,15 +148,15 @@ struct ReleaseFile {
 }
 
 impl Registry for PyPiRegistry {
-    fn http_client(&self) -> Arc<Client> {
-        Arc::clone(&self.client)
+    fn http_client(&self) -> Client {
+        self.client.clone()
     }
 
     async fn get_version_info(&self, package_name: &str) -> anyhow::Result<VersionInfo> {
         // Normalize package name (PyPI is case-insensitive, uses lowercase)
         let normalized_name = normalize_package_name(package_name);
 
-        let url = format!("{}/{normalized_name}/json", self.base_url);
+        let url = format!("{BASE_URL}/{normalized_name}/json");
 
         let response = self.client.get(&url).send().await?;
 

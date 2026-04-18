@@ -10,7 +10,7 @@
 use super::{Dependency, Parser, Span};
 
 /// Parser for Ruby Gemfile dependency files
-#[derive(Debug, Default)]
+#[derive(Debug, Clone, Copy, Default)]
 pub struct RubyParser;
 
 impl RubyParser {

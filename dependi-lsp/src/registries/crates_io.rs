@@ -92,11 +92,13 @@ impl RateLimiter {
 }
 
 /// Client for the crates.io registry
+#[derive(Clone)]
 pub struct CratesIoRegistry {
-    client: Arc<Client>,
+    client: Client,
     rate_limiter: Arc<Mutex<RateLimiter>>,
-    base_url: String,
 }
+
+const BASE_URL: &str = "https://crates.io/api/v1";
 
 impl CratesIoRegistry {
     /// Creates a CratesIoRegistry that uses the provided shared HTTP client.
@@ -107,19 +109,17 @@ impl CratesIoRegistry {
     ///
     /// # Examples
     ///
-    /// ```ignore
-    /// use std::sync::Arc;
+    /// ```no_run
     /// use dependi_lsp::registries::crates_io::CratesIoRegistry;
     /// use dependi_lsp::registries::http_client::create_shared_client;
     ///
     /// let client = create_shared_client().expect("failed to create client");
     /// let registry = CratesIoRegistry::with_client(client);
     /// ```
-    pub fn with_client(client: Arc<Client>) -> Self {
+    pub fn with_client(client: Client) -> Self {
         Self {
             client,
             rate_limiter: Arc::new(Mutex::new(RateLimiter::new(1.0))),
-            base_url: "https://crates.io/api/v1".to_string(),
         }
     }
 }
@@ -133,14 +133,6 @@ impl Default for CratesIoRegistry {
     /// # Panics
     ///
     /// This function will panic if creating the shared HTTP client fails.
-    ///
-    /// # Examples
-    ///
-    /// ```ignore
-    /// use dependi_lsp::registries::crates_io::CratesIoRegistry;
-    ///
-    /// let _registry = CratesIoRegistry::default();
-    /// ```
     fn default() -> Self {
         Self::with_client(create_shared_client().expect("Failed to create HTTP client"))
     }
@@ -171,8 +163,8 @@ struct VersionEntry {
 }
 
 impl Registry for CratesIoRegistry {
-    fn http_client(&self) -> Arc<Client> {
-        Arc::clone(&self.client)
+    fn http_client(&self) -> Client {
+        self.client.clone()
     }
 
     async fn get_version_info(&self, package_name: &str) -> anyhow::Result<VersionInfo> {
@@ -182,7 +174,7 @@ impl Registry for CratesIoRegistry {
             limiter.wait().await;
         }
 
-        let url = format!("{}/crates/{package_name}", self.base_url);
+        let url = format!("{BASE_URL}/crates/{package_name}");
 
         let response = self.client.get(&url).send().await?;
 

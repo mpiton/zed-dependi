@@ -3,8 +3,6 @@
 //! Client for alternative Cargo registries using the sparse index protocol.
 //! Supports registries like Kellnr, Cloudsmith, and other Cargo-compatible registries.
 
-use std::sync::Arc;
-
 use hashbrown::HashMap;
 use reqwest::Client;
 use reqwest::header::{AUTHORIZATION, HeaderMap, HeaderValue};
@@ -44,16 +42,30 @@ struct SparseIndexEntry {
 
 /// Client for Cargo sparse registries (alternative registries)
 pub struct CargoSparseRegistry {
-    client: Arc<Client>,
+    client: Client,
     index_url: String,
     auth_headers: Option<HeaderMap>,
 }
 
 impl CargoSparseRegistry {
     /// Create a new sparse registry client with the given configuration.
+    ///
+    /// # Examples
+    ///
+    /// ```no_run
+    /// use dependi_lsp::registries::cargo_sparse::CargoSparseRegistry;
+    /// use dependi_lsp::registries::http_client::create_shared_client;
+    ///
+    /// let client = create_shared_client().expect("failed to create client");
+    /// let registry = CargoSparseRegistry::with_client_and_config(
+    ///     client,
+    ///     "https://registry.example.com",
+    ///     None::<String>,
+    /// );
+    /// ```
     pub fn with_client_and_config(
-        client: Arc<Client>,
-        index_url: String,
+        client: Client,
+        index_url: &str,
         auth_token: Option<String>,
     ) -> Self {
         let auth_headers = auth_token.and_then(|token| {
@@ -76,18 +88,24 @@ impl CargoSparseRegistry {
 }
 
 impl Default for CargoSparseRegistry {
+    /// Creates a default `CargoSparseRegistry` configured with a shared HTTP client
+    /// and an empty cargo sparse index URL.
+    ///
+    /// # Panics
+    ///
+    /// This function will panic if creating the shared HTTP client fails.
     fn default() -> Self {
         Self::with_client_and_config(
             create_shared_client().expect("Failed to create HTTP client"),
-            String::new(),
+            "",
             None,
         )
     }
 }
 
 impl Registry for CargoSparseRegistry {
-    fn http_client(&self) -> Arc<Client> {
-        Arc::clone(&self.client)
+    fn http_client(&self) -> Client {
+        self.client.clone()
     }
 
     async fn get_version_info(&self, package_name: &str) -> anyhow::Result<VersionInfo> {

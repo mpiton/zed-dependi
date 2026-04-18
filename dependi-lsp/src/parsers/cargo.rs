@@ -10,7 +10,7 @@ use taplo::syntax::SyntaxElement;
 use super::{Dependency, Parser, Span};
 
 /// Parser for Rust Cargo.toml dependency files
-#[derive(Debug, Default)]
+#[derive(Debug, Clone, Copy, Default)]
 pub struct CargoParser;
 
 impl CargoParser {

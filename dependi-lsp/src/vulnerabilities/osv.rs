@@ -3,8 +3,7 @@
 //! OSV (Open Source Vulnerabilities) provides a unified API for querying
 //! vulnerability data across multiple ecosystems.
 
-use std::sync::Arc;
-use std::time::Duration;
+use core::time::Duration;
 
 use reqwest::Client;
 use serde::{Deserialize, Serialize};
@@ -22,9 +21,9 @@ pub struct QueryResult {
 }
 
 /// OSV.dev API client
+#[derive(Clone)]
 pub struct OsvClient {
-    client: Arc<Client>,
-    base_url: String,
+    client: Client,
 }
 
 impl OsvClient {
@@ -34,10 +33,7 @@ impl OsvClient {
             .timeout(Duration::from_secs(30))
             .build()?;
 
-        Ok(Self {
-            client: Arc::new(client),
-            base_url: OSV_API_BASE.to_string(),
-        })
+        Ok(Self { client })
     }
 
     fn convert_vulnerability(osv: &OsvVulnerability) -> Vulnerability {
@@ -121,7 +117,7 @@ impl OsvClient {
                 .collect(),
         };
 
-        let url = format!("{}/querybatch", self.base_url);
+        let url = format!("{OSV_API_BASE}/querybatch");
         let response = self.client.post(&url).json(&request).send().await?;
 
         if !response.status().is_success() {
@@ -175,8 +171,8 @@ impl OsvClient {
         let tasks: Vec<_> = ids
             .iter()
             .map(|id| {
-                let url = format!("{}/vulns/{id}", self.base_url);
-                let client = Arc::clone(&self.client);
+                let url = format!("{OSV_API_BASE}/vulns/{id}");
+                let client = self.client.clone();
                 let id_clone = id.clone();
 
                 tokio::spawn(async move {

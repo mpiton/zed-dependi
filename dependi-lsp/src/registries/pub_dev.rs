@@ -62,8 +62,6 @@
 //! - [Version Constraints](https://dart.dev/tools/pub/dependencies#version-constraints)
 //! - [Package Scoring](https://pub.dev/help/scoring)
 
-use std::sync::Arc;
-
 use chrono::{DateTime, Utc};
 use hashbrown::HashMap;
 use reqwest::Client;
@@ -74,41 +72,36 @@ use super::version_utils::is_prerelease_dart;
 use super::{Registry, VersionInfo};
 
 /// Client for the pub.dev registry
+#[derive(Clone)]
 pub struct PubDevRegistry {
-    client: Arc<Client>,
-    base_url: String,
+    client: Client,
 }
+
+const BASE_URL: &str = "https://pub.dev/api";
 
 impl PubDevRegistry {
     /// Creates a `PubDevRegistry` configured to use the given shared HTTP client.
     ///
     /// # Examples
     ///
-    /// ```ignore
-    /// use std::sync::Arc;
+    /// ```no_run
     /// use dependi_lsp::registries::pub_dev::PubDevRegistry;
+    /// use dependi_lsp::registries::http_client::create_shared_client;
     ///
-    /// let client = Arc::new(reqwest::Client::new());
-    /// let _registry = PubDevRegistry::with_client(client);
+    /// let client = create_shared_client().expect("failed to create client");
+    /// let registry = PubDevRegistry::with_client(client);
     /// ```
-    pub fn with_client(client: Arc<Client>) -> Self {
-        Self {
-            client,
-            base_url: "https://pub.dev/api".to_string(),
-        }
+    pub fn with_client(client: Client) -> Self {
+        Self { client }
     }
 }
 
 impl Default for PubDevRegistry {
-    /// Constructs a PubDevRegistry using a shared HTTP client created by `create_shared_client`.
+    /// Constructs a `PubDevRegistry` using a shared HTTP client created by [`create_shared_client`].
     ///
-    /// # Examples
+    /// # Panics
     ///
-    /// ```ignore
-    /// use dependi_lsp::registries::pub_dev::PubDevRegistry;
-    ///
-    /// let registry = PubDevRegistry::default();
-    /// ```
+    /// This function will panic if creating the shared HTTP client fails.
     fn default() -> Self {
         Self::with_client(create_shared_client().expect("Failed to create HTTP client"))
     }
@@ -142,8 +135,8 @@ struct PubPubspec {
 }
 
 impl Registry for PubDevRegistry {
-    fn http_client(&self) -> Arc<Client> {
-        Arc::clone(&self.client)
+    fn http_client(&self) -> Client {
+        self.client.clone()
     }
 
     /// Retrieve version metadata for a package from the pub.dev API.
@@ -155,17 +148,21 @@ impl Registry for PubDevRegistry {
     ///
     /// # Examples
     ///
-    /// ```ignore
+    /// ```no_run
+    /// use dependi_lsp::registries::Registry;
+    /// use dependi_lsp::registries::pub_dev::PubDevRegistry;
+    ///
     /// #[tokio::main]
-    /// async fn main() {
+    /// async fn main() -> anyhow::Result<()> {
     ///     let registry = PubDevRegistry::default();
-    ///     let info = registry.get_version_info("http").await.unwrap();
+    ///     let info = registry.get_version_info("http").await?;
     ///     // versions should contain at least one entry for a published package
     ///     assert!(!info.versions.is_empty());
+    ///     Ok(())
     /// }
     /// ```
     async fn get_version_info(&self, package_name: &str) -> anyhow::Result<VersionInfo> {
-        let url = format!("{}/packages/{package_name}", self.base_url);
+        let url = format!("{BASE_URL}/packages/{package_name}");
 
         let response = self.client.get(&url).send().await?;
 

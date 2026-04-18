@@ -18,8 +18,6 @@
 //! `org.slf4j:slf4j-api`). The `groupId` is converted to a path by replacing
 //! `.` with `/`.
 
-use std::sync::Arc;
-
 use quick_xml::events::Event;
 use quick_xml::reader::Reader;
 use reqwest::Client;
@@ -30,19 +28,19 @@ use super::{Registry, VersionInfo};
 
 /// Client for Maven Central (or a compatible Maven repository mirror).
 pub struct MavenCentralRegistry {
-    client: Arc<Client>,
+    client: Client,
     base_url: String,
 }
 
 impl MavenCentralRegistry {
-    pub fn with_client(client: Arc<Client>) -> Self {
+    pub fn with_client(client: Client) -> Self {
         Self {
             client,
             base_url: "https://repo1.maven.org/maven2".to_string(),
         }
     }
 
-    pub fn with_client_and_config(client: Arc<Client>, config: &MavenRegistryConfig) -> Self {
+    pub fn with_client_and_config(client: Client, config: &MavenRegistryConfig) -> Self {
         let trimmed = config.url.trim_end_matches('/').to_string();
         Self {
             client,
@@ -140,7 +138,7 @@ impl Registry for MavenCentralRegistry {
         })
     }
 
-    fn http_client(&self) -> Arc<Client> {
+    fn http_client(&self) -> Client {
         self.client.clone()
     }
 }

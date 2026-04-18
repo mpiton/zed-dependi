@@ -27,10 +27,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Bump `actions/github-script` from v8 to v9 in `contributor-experience.yml` workflow (Octokit v7; inline scripts unaffected — no `require()` or `getOctokit` shadowing)
 - Refresh all Cargo lockfiles (`dependi-lsp`, `dependi-zed`, `dependi-lsp/fuzz`) with latest semver-compatible transitive dependencies
 - Track dependency name and version lines separately
+- Reduce reference indirection and struct sizes
+  - `Arc`-unwrap `Parser`s, as those are ZSTs
+  - `Arc`-unwrap `reqwest::Client`, as it already contains `Arc`
+- Make relevant doc-tests `no_run` instead of `ignore`
 
 ### Fixed
 
 - Respect the `package` field of `Cargo.toml` dependencies
+
+### Removed
+
+- Redundant examples from `impl Default`s
 
 ## [1.7.0] - 2026-04-07
 

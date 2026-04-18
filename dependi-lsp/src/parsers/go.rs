@@ -5,7 +5,7 @@
 use super::{Dependency, Parser, Span};
 
 /// Parser for Go go.mod dependency files
-#[derive(Debug, Default)]
+#[derive(Debug, Clone, Copy, Default)]
 pub struct GoParser;
 
 impl GoParser {

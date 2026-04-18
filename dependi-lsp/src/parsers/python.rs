@@ -3,7 +3,7 @@
 use super::{Dependency, Parser, Span};
 
 /// Parser for Python dependency files
-#[derive(Debug, Default)]
+#[derive(Debug, Clone, Copy, Default)]
 pub struct PythonParser;
 
 impl PythonParser {

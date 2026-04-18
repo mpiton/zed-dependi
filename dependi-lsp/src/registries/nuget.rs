@@ -65,8 +65,6 @@
 //! - [NuGet Versioning](https://learn.microsoft.com/en-us/nuget/concepts/package-versioning)
 //! - [Version Ranges](https://learn.microsoft.com/en-us/nuget/concepts/package-versioning#version-ranges)
 
-use std::sync::Arc;
-
 use chrono::{DateTime, Utc};
 use hashbrown::HashMap;
 use reqwest::Client;
@@ -77,43 +75,36 @@ use super::version_utils::is_prerelease_nuget;
 use super::{Registry, VersionInfo};
 
 /// Client for the NuGet registry
+#[derive(Clone)]
 pub struct NuGetRegistry {
-    client: Arc<Client>,
-    base_url: String,
+    client: Client,
 }
+
+const BASE_URL: &str = "https://api.nuget.org/v3";
 
 impl NuGetRegistry {
     /// Constructs a NuGetRegistry configured to use the NuGet v3 API with the provided shared HTTP client.
     ///
     /// # Examples
     ///
-    /// ```ignore
-    /// use std::sync::Arc;
+    /// ```no_run
     /// use dependi_lsp::registries::nuget::NuGetRegistry;
+    /// use dependi_lsp::registries::http_client::create_shared_client;
     ///
-    /// let client = Arc::new(reqwest::Client::new());
-    /// let _registry = NuGetRegistry::with_client(client);
+    /// let client = create_shared_client().expect("failed to create client");
+    /// let registry = NuGetRegistry::with_client(client);
     /// ```
-    pub fn with_client(client: Arc<Client>) -> Self {
-        Self {
-            client,
-            base_url: "https://api.nuget.org/v3".to_string(),
-        }
+    pub fn with_client(client: Client) -> Self {
+        Self { client }
     }
 }
 
 impl Default for NuGetRegistry {
     /// Creates a `NuGetRegistry` configured with a shared HTTP client targeting the NuGet v3 API.
     ///
-    /// Panics if creating the shared HTTP client fails.
+    /// # Panics
     ///
-    /// # Examples
-    ///
-    /// ```ignore
-    /// use dependi_lsp::registries::nuget::NuGetRegistry;
-    ///
-    /// let _reg = NuGetRegistry::default();
-    /// ```
+    /// This function will panic if creating the shared HTTP client fails.
     fn default() -> Self {
         Self::with_client(create_shared_client().expect("Failed to create HTTP client"))
     }
@@ -164,8 +155,8 @@ struct NuGetDeprecation {
 }
 
 impl Registry for NuGetRegistry {
-    fn http_client(&self) -> Arc<Client> {
-        Arc::clone(&self.client)
+    fn http_client(&self) -> Client {
+        self.client.clone()
     }
 
     async fn get_version_info(&self, package_name: &str) -> anyhow::Result<VersionInfo> {
@@ -173,10 +164,7 @@ impl Registry for NuGetRegistry {
         let package_id = package_name.to_lowercase();
 
         // Get registration index
-        let url = format!(
-            "{}/registration5-semver1/{package_id}/index.json",
-            self.base_url
-        );
+        let url = format!("{BASE_URL}/registration5-semver1/{package_id}/index.json");
 
         let response = self.client.get(&url).send().await?;
 

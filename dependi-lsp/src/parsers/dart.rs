@@ -3,7 +3,7 @@
 use super::{Dependency, Parser, Span};
 
 /// Parser for Dart pubspec.yaml dependency files
-#[derive(Debug, Default)]
+#[derive(Debug, Clone, Copy, Default)]
 pub struct DartParser;
 
 impl DartParser {

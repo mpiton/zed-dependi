@@ -67,15 +67,17 @@
 //!
 //! ## Usage
 //!
-//! ```ignore
+//! ```no_run
 //! use dependi_lsp::registries::{Registry, crates_io::CratesIoRegistry};
 //!
-//! let registry = CratesIoRegistry::default();
-//! let info = registry.get_version_info("serde").await?;
-//! println!("Latest: {:?}", info.latest);
+//! #[tokio::main]
+//! async fn main() -> anyhow::Result<()> {
+//!     let registry = CratesIoRegistry::default();
+//!     let info = registry.get_version_info("serde").await?;
+//!     println!("Latest: {:?}", info.latest);
+//!     Ok(())
+//! }
 //! ```
-
-use std::sync::Arc;
 
 use chrono::{DateTime, Utc};
 use hashbrown::HashMap;
@@ -213,8 +215,8 @@ pub trait Registry: Send + Sync {
     /// Get version information for a package
     async fn get_version_info(&self, package_name: &str) -> anyhow::Result<VersionInfo>;
 
-    /// Get a reference to the HTTP client used by this registry
-    fn http_client(&self) -> Arc<Client>;
+    /// Get the HTTP client used by this registry
+    fn http_client(&self) -> Client;
 }
 
 pub mod cargo_sparse;

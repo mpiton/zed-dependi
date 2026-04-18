@@ -6,7 +6,7 @@ use super::{Dependency, Parser, Span};
 use serde_json::Value;
 
 /// Parser for PHP composer.json dependency files
-#[derive(Debug, Default)]
+#[derive(Debug, Clone, Copy, Default)]
 pub struct PhpParser;
 
 impl PhpParser {

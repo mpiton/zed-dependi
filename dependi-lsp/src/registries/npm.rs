@@ -60,8 +60,6 @@
 //! - [Package Metadata Specification](https://github.com/npm/registry/blob/main/docs/responses/package-metadata.md)
 //! - [npm CLI Documentation](https://docs.npmjs.com/cli)
 
-use std::sync::Arc;
-
 use chrono::{DateTime, Utc};
 use hashbrown::HashMap;
 use reqwest::Client;
@@ -77,7 +75,7 @@ use crate::config::NpmRegistryConfig;
 
 /// Client for the npm registry
 pub struct NpmRegistry {
-    client: Arc<Client>,
+    client: Client,
     base_url: String,
     /// Scope to URL mapping for scoped packages (e.g., "company" -> "https://npm.company.com")
     scoped_registries: HashMap<String, String>,
@@ -90,16 +88,16 @@ impl NpmRegistry {
     ///
     /// # Examples
     ///
-    /// ```ignore
-    /// use std::sync::Arc;
+    /// ```no_run
     /// use dependi_lsp::registries::npm::NpmRegistry;
     /// use dependi_lsp::config::NpmRegistryConfig;
+    /// use dependi_lsp::registries::http_client::create_shared_client;
     ///
-    /// let client = Arc::new(reqwest::Client::new());
+    /// let client = create_shared_client().expect("failed to create client");
     /// let config = NpmRegistryConfig::default();
     /// let registry = NpmRegistry::with_client_and_config(client, &config);
     /// ```
-    pub fn with_client_and_config(client: Arc<Client>, config: &NpmRegistryConfig) -> Self {
+    pub fn with_client_and_config(client: Client, config: &NpmRegistryConfig) -> Self {
         let base_url = if config.url.is_empty() {
             "https://registry.npmjs.org".to_string()
         } else {
@@ -185,15 +183,11 @@ impl NpmRegistry {
 }
 
 impl Default for NpmRegistry {
-    /// Creates a default NpmRegistry configured with a shared HTTP client and the standard npm registry base URL.
+    /// Creates a default `NpmRegistry` configured with a shared HTTP client and the standard npm registry base URL.
     ///
-    /// # Examples
+    /// # Panics
     ///
-    /// ```ignore
-    /// use dependi_lsp::registries::npm::NpmRegistry;
-    ///
-    /// let registry = NpmRegistry::default();
-    /// ```
+    /// This function will panic if creating the shared HTTP client fails.
     fn default() -> Self {
         Self {
             client: create_shared_client().expect("Failed to create HTTP client"),
@@ -277,8 +271,8 @@ fn normalize_repo_url(url: &str) -> String {
 }
 
 impl Registry for NpmRegistry {
-    fn http_client(&self) -> Arc<Client> {
-        Arc::clone(&self.client)
+    fn http_client(&self) -> Client {
+        self.client.clone()
     }
 
     async fn get_version_info(&self, package_name: &str) -> anyhow::Result<VersionInfo> {

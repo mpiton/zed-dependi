@@ -63,8 +63,6 @@
 //! - [Composer Version Constraints](https://getcomposer.org/doc/articles/versions.md)
 //! - [Composer Repositories](https://getcomposer.org/doc/05-repositories.md)
 
-use std::sync::Arc;
-
 use chrono::{DateTime, Utc};
 use hashbrown::HashMap;
 use reqwest::Client;
@@ -75,10 +73,12 @@ use super::version_utils::is_prerelease_php;
 use super::{Registry, VersionInfo};
 
 /// Client for the Packagist registry
+#[derive(Clone)]
 pub struct PackagistRegistry {
-    client: Arc<Client>,
-    base_url: String,
+    client: Client,
 }
+
+const BASE_URL: &str = "https://repo.packagist.org";
 
 impl PackagistRegistry {
     /// Creates a PackagistRegistry configured with the given shared HTTP client and the default Packagist API base URL.
@@ -87,31 +87,24 @@ impl PackagistRegistry {
     ///
     /// # Examples
     ///
-    /// ```ignore
-    /// use std::sync::Arc;
+    /// ```no_run
     /// use dependi_lsp::registries::packagist::PackagistRegistry;
+    /// use dependi_lsp::registries::http_client::create_shared_client;
     ///
-    /// let client = Arc::new(reqwest::Client::new());
+    /// let client = create_shared_client().expect("failed to create client");
     /// let registry = PackagistRegistry::with_client(client);
     /// ```
-    pub fn with_client(client: Arc<Client>) -> Self {
-        Self {
-            client,
-            base_url: "https://repo.packagist.org".to_string(),
-        }
+    pub fn with_client(client: Client) -> Self {
+        Self { client }
     }
 }
 
 impl Default for PackagistRegistry {
-    /// Create a PackagistRegistry configured with a shared HTTP client and the default Packagist API base URL.
+    /// Create a `PackagistRegistry` configured with a shared HTTP client and the default Packagist API base URL.
     ///
-    /// # Examples
+    /// # Panics
     ///
-    /// ```ignore
-    /// use dependi_lsp::registries::packagist::PackagistRegistry;
-    ///
-    /// let _registry = PackagistRegistry::default();
-    /// ```
+    /// This function will panic if creating the shared HTTP client fails.
     fn default() -> Self {
         Self::with_client(create_shared_client().expect("Failed to create HTTP client"))
     }
@@ -142,8 +135,8 @@ struct SourceInfo {
 }
 
 impl Registry for PackagistRegistry {
-    fn http_client(&self) -> Arc<Client> {
-        Arc::clone(&self.client)
+    fn http_client(&self) -> Client {
+        self.client.clone()
     }
 
     async fn get_version_info(&self, package_name: &str) -> anyhow::Result<VersionInfo> {
@@ -152,7 +145,7 @@ impl Registry for PackagistRegistry {
             anyhow::bail!("Invalid package name: {package_name} (expected vendor/package)");
         }
 
-        let url = format!("{}/p2/{package_name}.json", self.base_url);
+        let url = format!("{BASE_URL}/p2/{package_name}.json");
 
         let response = self.client.get(&url).send().await?;
 

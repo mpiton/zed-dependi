@@ -67,8 +67,6 @@
 //! - [Gem Specification](https://guides.rubygems.org/specification-reference/)
 //! - [Version Format](https://guides.rubygems.org/patterns/#semantic-versioning)
 
-use std::sync::Arc;
-
 use chrono::{DateTime, Utc};
 use hashbrown::HashMap;
 use reqwest::Client;
@@ -78,10 +76,12 @@ use super::http_client::create_shared_client;
 use super::{Registry, VersionInfo};
 
 /// Client for the RubyGems.org registry
+#[derive(Clone)]
 pub struct RubyGemsRegistry {
-    client: Arc<Client>,
-    base_url: String,
+    client: Client,
 }
+
+const BASE_URL: &str = "https://rubygems.org/api/v1";
 
 impl RubyGemsRegistry {
     /// Creates a RubyGemsRegistry that uses the provided shared HTTP client.
@@ -91,32 +91,24 @@ impl RubyGemsRegistry {
     ///
     /// # Examples
     ///
-    /// ```ignore
-    /// use std::sync::Arc;
+    /// ```no_run
     /// use dependi_lsp::registries::rubygems::RubyGemsRegistry;
+    /// use dependi_lsp::registries::http_client::create_shared_client;
     ///
-    /// let client = Arc::new(reqwest::Client::new());
-    /// let _registry = RubyGemsRegistry::with_client(client);
+    /// let client = create_shared_client().expect("failed to create client");
+    /// let registry = RubyGemsRegistry::with_client(client);
     /// ```
-    pub fn with_client(client: Arc<Client>) -> Self {
-        Self {
-            client,
-            base_url: "https://rubygems.org/api/v1".to_string(),
-        }
+    pub fn with_client(client: Client) -> Self {
+        Self { client }
     }
 }
 
 impl Default for RubyGemsRegistry {
     /// Creates a `RubyGemsRegistry` configured with the shared HTTP client used by the module.
     ///
-    /// # Examples
+    /// # Panics
     ///
-    /// ```ignore
-    /// use dependi_lsp::registries::rubygems::RubyGemsRegistry;
-    ///
-    /// let registry = RubyGemsRegistry::default();
-    /// // `registry` is ready to query the RubyGems API.
-    /// ```
+    /// This function will panic if creating the shared HTTP client fails.
     fn default() -> Self {
         Self::with_client(create_shared_client().expect("Failed to create HTTP client"))
     }
@@ -144,13 +136,13 @@ struct VersionResponse {
 }
 
 impl Registry for RubyGemsRegistry {
-    fn http_client(&self) -> Arc<Client> {
-        Arc::clone(&self.client)
+    fn http_client(&self) -> Client {
+        self.client.clone()
     }
 
     async fn get_version_info(&self, package_name: &str) -> anyhow::Result<VersionInfo> {
         // Fetch gem info (contains latest version)
-        let gem_url = format!("{}/gems/{package_name}.json", self.base_url);
+        let gem_url = format!("{BASE_URL}/gems/{package_name}.json");
         let gem_response = self.client.get(&gem_url).send().await?;
 
         anyhow::ensure!(
@@ -162,7 +154,7 @@ impl Registry for RubyGemsRegistry {
         let gem: GemResponse = gem_response.json().await?;
 
         // Fetch all versions with dates
-        let versions_url = format!("{}/versions/{package_name}.json", self.base_url);
+        let versions_url = format!("{BASE_URL}/versions/{package_name}.json");
         let (versions, release_dates) = match self.client.get(&versions_url).send().await {
             Ok(response) if response.status().is_success() => {
                 let version_list: Vec<VersionResponse> = response.json().await.unwrap_or_default();
