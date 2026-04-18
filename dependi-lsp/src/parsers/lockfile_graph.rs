@@ -42,32 +42,46 @@ pub struct LockfileGraph {
 }
 
 impl LockfileGraph {
-    /// DFS from `root_name`; returns unique transitive packages (excluding `root_name` itself).
-    /// Returns empty vec if root is unknown. Cycles are handled via a visited set.
+    /// Returns all packages sharing the given name (0 or more). Some lockfiles
+    /// pin multiple versions of the same crate/package — e.g. Cargo's
+    /// transitive resolution.
+    pub fn find_all(&self, name: &str) -> Vec<&LockfilePackage> {
+        self.packages.iter().filter(|p| p.name == name).collect()
+    }
+
+    /// DFS from `root_name`. Returns unique transitive packages (by identity
+    /// `(name, version)`), excluding roots themselves. Cycle-safe.
     ///
     /// Dependency strings may be `"name"` or `"name version"` (Cargo multi-version format).
     /// The version suffix is stripped when resolving graph edges so that both forms work.
+    ///
+    /// When a lockfile contains multiple versions of the same package, ALL of them
+    /// are visited (package identity is `(name, version)`, not just `name`).
     pub fn transitive_deps_of(&self, root_name: &str) -> Vec<&LockfilePackage> {
-        let mut visited: HashSet<&str> = HashSet::new();
+        let mut visited: HashSet<(&str, &str)> = HashSet::new();
         let mut stack: Vec<&str> = Vec::new();
         let mut out: Vec<&LockfilePackage> = Vec::new();
 
-        if let Some(root) = self.find(root_name) {
-            visited.insert(&root.name);
+        // Seed with every package matching root_name (multiple versions possible).
+        for root in self.find_all(root_name) {
+            visited.insert((&root.name, &root.version));
             for dep in &root.dependencies {
                 // dep can be "name" or "name version" — use the name only for graph walk.
                 let name = dep.split_whitespace().next().unwrap_or(dep.as_str());
                 stack.push(name);
             }
-        } else {
+        }
+
+        if visited.is_empty() {
             return out;
         }
 
         while let Some(name) = stack.pop() {
-            if !visited.insert(name) {
-                continue;
-            }
-            if let Some(pkg) = self.find(name) {
+            for pkg in self.find_all(name) {
+                let key = (pkg.name.as_str(), pkg.version.as_str());
+                if !visited.insert(key) {
+                    continue;
+                }
                 out.push(pkg);
                 for dep in &pkg.dependencies {
                     let n = dep.split_whitespace().next().unwrap_or(dep.as_str());
@@ -92,7 +106,8 @@ impl LockfileGraph {
     /// dependency names (from `manifest_deps`) that reach it via `transitive_deps_of`.
     ///
     /// Returns a `HashMap<String, Vec<String>>`. When a transitive is not reachable from
-    /// any direct dep, it has no entry.
+    /// any direct dep, it has no entry. Duplicate parent entries (same direct reaching
+    /// the same transitive via multiple paths) are deduplicated.
     pub fn reverse_index(
         &self,
         manifest_deps: &[String],
@@ -110,11 +125,12 @@ impl LockfileGraph {
                     .push(direct.clone());
             }
         }
+        // Dedup parents (same direct can reach a transitive via multiple paths)
+        for v in inverse.values_mut() {
+            v.sort();
+            v.dedup();
+        }
         inverse
-    }
-
-    fn find(&self, name: &str) -> Option<&LockfilePackage> {
-        self.packages.iter().find(|p| p.name == name)
     }
 }
 
@@ -239,5 +255,89 @@ mod tests {
         std::fs::write(tmp.path(), "hello").unwrap();
         let out = read_lockfile_capped(tmp.path()).await.unwrap();
         assert_eq!(out, "hello");
+    }
+
+    #[test]
+    fn test_transitive_deps_of_multi_version_visits_all() {
+        // Cargo commonly pins multiple versions of the same crate. Ensure DFS
+        // visits ALL same-named packages (keyed by (name, version)) rather than
+        // stopping at the first match.
+        let graph = LockfileGraph {
+            packages: vec![
+                LockfilePackage {
+                    name: "root".into(),
+                    version: "0.1.0".into(),
+                    dependencies: vec!["hashbrown".into()],
+                    is_root: true,
+                },
+                LockfilePackage {
+                    name: "hashbrown".into(),
+                    version: "0.15.5".into(),
+                    dependencies: vec!["foundationdb".into()],
+                    is_root: false,
+                },
+                LockfilePackage {
+                    name: "hashbrown".into(),
+                    version: "0.16.1".into(),
+                    dependencies: vec!["allocator-api2".into()],
+                    is_root: false,
+                },
+                LockfilePackage {
+                    name: "foundationdb".into(),
+                    version: "1.0.0".into(),
+                    dependencies: vec![],
+                    is_root: false,
+                },
+                LockfilePackage {
+                    name: "allocator-api2".into(),
+                    version: "0.2.0".into(),
+                    dependencies: vec![],
+                    is_root: false,
+                },
+            ],
+        };
+
+        let transitives = graph.transitive_deps_of("root");
+        let names: Vec<String> = transitives
+            .iter()
+            .map(|p| format!("{}@{}", p.name, p.version))
+            .collect();
+
+        // BOTH hashbrown versions must be visited
+        assert!(names.iter().any(|s| s == "hashbrown@0.15.5"));
+        assert!(names.iter().any(|s| s == "hashbrown@0.16.1"));
+
+        // AND their respective children (attribution across both)
+        assert!(names.iter().any(|s| s == "foundationdb@1.0.0"));
+        assert!(names.iter().any(|s| s == "allocator-api2@0.2.0"));
+    }
+
+    #[test]
+    fn test_find_all_returns_all_matches() {
+        let graph = LockfileGraph {
+            packages: vec![
+                LockfilePackage {
+                    name: "a".into(),
+                    version: "1.0".into(),
+                    dependencies: vec![],
+                    is_root: false,
+                },
+                LockfilePackage {
+                    name: "a".into(),
+                    version: "2.0".into(),
+                    dependencies: vec![],
+                    is_root: false,
+                },
+                LockfilePackage {
+                    name: "b".into(),
+                    version: "1.0".into(),
+                    dependencies: vec![],
+                    is_root: false,
+                },
+            ],
+        };
+        assert_eq!(graph.find_all("a").len(), 2);
+        assert_eq!(graph.find_all("b").len(), 1);
+        assert_eq!(graph.find_all("c").len(), 0);
     }
 }
