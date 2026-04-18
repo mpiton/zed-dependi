@@ -50,6 +50,10 @@ enum Commands {
         /// Exit with code 1 if vulnerabilities are found
         #[arg(long, default_value = "true")]
         fail_on_vulns: bool,
+
+        /// Enable lockfile-based scanning. Default on. Use `--no-use-lockfile` to disable.
+        #[arg(long = "use-lockfile", default_value_t = true, action = clap::ArgAction::Set)]
+        use_lockfile: bool,
     },
     /// Profile dependency file parsing (for use with cargo-flamegraph)
     ProfileParse {
@@ -115,7 +119,8 @@ async fn main() -> ExitCode {
             output,
             min_severity,
             fail_on_vulns,
-        }) => run_scan(file, output, min_severity, fail_on_vulns).await,
+            use_lockfile,
+        }) => run_scan(file, output, min_severity, fail_on_vulns, use_lockfile).await,
         Some(Commands::ProfileParse { file, iterations }) => {
             run_profile_parse(file, iterations).await
         }
@@ -152,13 +157,35 @@ async fn run_scan(
     output: String,
     min_severity: String,
     fail_on_vulns: bool,
+    use_lockfile: bool,
 ) -> ExitCode {
     use dependi_lsp::parsers::{
-        Parser, cargo::CargoParser, csharp::CsharpParser, dart::DartParser, go::GoParser,
-        maven::MavenParser, npm::NpmParser, php::PhpParser, python::PythonParser,
+        Parser, cargo::CargoParser, cargo_lock, composer_lock, csharp::CsharpParser,
+        dart::DartParser, gemfile_lock, go::GoParser, lockfile_graph::LockfileGraph,
+        lockfile_graph::LockfilePackage, maven::MavenParser, npm::NpmParser, npm_lock,
+        php::PhpParser, python::PythonParser, python_lock,
     };
     use dependi_lsp::registries::VulnerabilitySeverity;
-    use dependi_lsp::vulnerabilities::{Ecosystem, VulnerabilityQuery, osv::OsvClient};
+    use dependi_lsp::vulnerabilities::{Ecosystem, VulnerabilityQuery, normalize_version_for_osv, osv::OsvClient};
+    use hashbrown::{HashMap, HashSet};
+
+    fn inc_sev(
+        sev: dependi_lsp::registries::VulnerabilitySeverity,
+        total: &mut u32,
+        crit: &mut u32,
+        high: &mut u32,
+        med: &mut u32,
+        low: &mut u32,
+    ) {
+        use dependi_lsp::registries::VulnerabilitySeverity;
+        *total += 1;
+        match sev {
+            VulnerabilitySeverity::Critical => *crit += 1,
+            VulnerabilitySeverity::High => *high += 1,
+            VulnerabilitySeverity::Medium => *med += 1,
+            VulnerabilitySeverity::Low => *low += 1,
+        }
+    }
 
     // Read file (using async I/O)
     let content = match tokio::fs::read_to_string(&file).await {
@@ -198,24 +225,130 @@ async fn run_scan(
         return ExitCode::SUCCESS;
     }
 
-    eprintln!(
-        "Scanning {} dependencies in {}...",
-        dependencies.len(),
-        file.display()
-    );
+    // Detect lockfile and build graph
+    let mut lockfile_graph = LockfileGraph::default();
+    if use_lockfile {
+        match ecosystem {
+            Ecosystem::CratesIo => {
+                if let Some(path) = cargo_lock::find_cargo_lock(&file).await
+                    && let Ok(lock_content) = tokio::fs::read_to_string(&path).await
+                {
+                    lockfile_graph = cargo_lock::parse_cargo_lock_graph(&lock_content);
+                }
+            }
+            Ecosystem::Npm => {
+                if let Some((path, kind)) = npm_lock::find_npm_lockfile(&file).await
+                    && let Ok(lock_content) = tokio::fs::read_to_string(&path).await
+                {
+                    lockfile_graph = match kind {
+                        npm_lock::NpmLockfileType::PackageLock => {
+                            npm_lock::parse_package_lock_graph(&lock_content)
+                        }
+                        npm_lock::NpmLockfileType::YarnLock => {
+                            npm_lock::parse_yarn_lock_graph(&lock_content)
+                        }
+                        npm_lock::NpmLockfileType::PnpmLock => {
+                            npm_lock::parse_pnpm_lock_graph(&lock_content)
+                        }
+                        npm_lock::NpmLockfileType::BunLock => LockfileGraph::default(),
+                    };
+                }
+            }
+            Ecosystem::PyPI => {
+                if let Some((path, kind)) = python_lock::find_python_lockfile(&file, None).await
+                    && let Ok(lock_content) = tokio::fs::read_to_string(&path).await
+                {
+                    lockfile_graph = match kind {
+                        python_lock::PythonLockfileType::PoetryLock => {
+                            python_lock::parse_poetry_lock_graph(&lock_content)
+                        }
+                        python_lock::PythonLockfileType::UvLock => {
+                            python_lock::parse_uv_lock_graph(&lock_content)
+                        }
+                        python_lock::PythonLockfileType::PipfileLock => {
+                            python_lock::parse_pipfile_lock_graph(&lock_content)
+                        }
+                        python_lock::PythonLockfileType::PdmLock => LockfileGraph::default(),
+                    };
+                }
+            }
+            Ecosystem::Packagist => {
+                if let Some(path) = composer_lock::find_composer_lock(&file).await
+                    && let Ok(lock_content) = tokio::fs::read_to_string(&path).await
+                {
+                    lockfile_graph = composer_lock::parse_composer_lock_graph(&lock_content);
+                }
+            }
+            Ecosystem::RubyGems => {
+                if let Some(path) = gemfile_lock::find_gemfile_lock(&file).await
+                    && let Ok(lock_content) = tokio::fs::read_to_string(&path).await
+                {
+                    lockfile_graph = gemfile_lock::parse_gemfile_lock_graph(&lock_content);
+                }
+            }
+            _ => {} // Go/Pub/NuGet/Maven — no graph parser in this PR
+        }
+    }
 
-    // Build vulnerability queries
-    let queries: Vec<VulnerabilityQuery> = dependencies
+    // Populate resolved_version on direct deps from the graph
+    let version_map: HashMap<String, String> = lockfile_graph
+        .packages
+        .iter()
+        .map(|p| (p.name.clone(), p.version.clone()))
+        .collect();
+
+    let mut dependencies = dependencies;
+    for dep in dependencies.iter_mut() {
+        if let Some(v) = version_map.get(&dep.name) {
+            dep.resolved_version = Some(v.clone());
+        }
+    }
+
+    // Flag graph's root packages (matching manifest deps)
+    let direct_names: HashSet<String> = dependencies.iter().map(|d| d.name.clone()).collect();
+    for pkg in lockfile_graph.packages.iter_mut() {
+        if direct_names.contains(&pkg.name) {
+            pkg.is_root = true;
+        }
+    }
+
+    // Extract transitives (packages in the lockfile but not in the manifest)
+    let direct_names_vec: Vec<String> = dependencies.iter().map(|d| d.name.clone()).collect();
+    let transitives: Vec<LockfilePackage> = lockfile_graph
+        .transitives_only(&direct_names_vec)
+        .into_iter()
+        .cloned()
+        .collect();
+
+    // Build queries: direct first, then transitive. Remember the split index.
+    let mut queries: Vec<VulnerabilityQuery> = dependencies
         .iter()
         .map(|dep| VulnerabilityQuery {
             ecosystem,
             package_name: dep.name.clone(),
-            version: dep.version.clone(),
+            version: normalize_version_for_osv(dep.effective_version()),
         })
         .collect();
+    let direct_count = queries.len();
+    for t in &transitives {
+        queries.push(VulnerabilityQuery {
+            ecosystem,
+            package_name: t.name.clone(),
+            version: normalize_version_for_osv(&t.version),
+        });
+    }
 
-    // Query OSV.dev
-    let osv_client = OsvClient::default();
+    eprintln!(
+        "Scanning {direct_count} direct + {} transitive dependencies in {}...",
+        transitives.len(),
+        file.display()
+    );
+
+    // Allow tests to inject a custom OSV endpoint
+    let osv_client = match std::env::var("OSV_ENDPOINT") {
+        Ok(url) => OsvClient::with_endpoint(url),
+        Err(_) => OsvClient::default(),
+    };
     let results = match osv_client.query_batch(&queries).await {
         Ok(r) => r,
         Err(e) => {
@@ -224,42 +357,85 @@ async fn run_scan(
         }
     };
 
+    let (direct_results, transitive_results) = results.split_at(direct_count);
+
     // Parse minimum severity using shared method
     let min_sev = VulnerabilitySeverity::from_str_loose(&min_severity);
 
-    // Filter and collect vulnerabilities
-    let mut total_vulns = 0;
-    let mut critical_count = 0;
-    let mut high_count = 0;
-    let mut medium_count = 0;
-    let mut low_count = 0;
-    let mut vuln_details: Vec<serde_json::Value> = Vec::new();
+    let mut total_vulns = 0u32;
+    let mut critical_count = 0u32;
+    let mut high_count = 0u32;
+    let mut medium_count = 0u32;
+    let mut low_count = 0u32;
+    let mut direct_details: Vec<serde_json::Value> = Vec::new();
+    let mut transitive_details: Vec<serde_json::Value> = Vec::new();
 
-    for (dep, result) in dependencies.iter().zip(results.iter()) {
+    for (dep, result) in dependencies.iter().zip(direct_results.iter()) {
         for vuln in &result.vulnerabilities {
-            // Filter by severity using shared method
             if !vuln.severity.meets_threshold(&min_sev) {
                 continue;
             }
-
-            total_vulns += 1;
-            match vuln.severity {
-                VulnerabilitySeverity::Critical => critical_count += 1,
-                VulnerabilitySeverity::High => high_count += 1,
-                VulnerabilitySeverity::Medium => medium_count += 1,
-                VulnerabilitySeverity::Low => low_count += 1,
-            }
-
-            vuln_details.push(serde_json::json!({
+            inc_sev(
+                vuln.severity,
+                &mut total_vulns,
+                &mut critical_count,
+                &mut high_count,
+                &mut medium_count,
+                &mut low_count,
+            );
+            direct_details.push(serde_json::json!({
                 "package": dep.name,
-                "version": dep.version,
+                "version": dep.effective_version(),
                 "id": vuln.id,
                 "severity": vuln.severity.as_str(),
                 "description": vuln.description,
-                "url": vuln.url
+                "url": vuln.url,
             }));
         }
     }
+
+    for (pkg, result) in transitives.iter().zip(transitive_results.iter()) {
+        for vuln in &result.vulnerabilities {
+            if !vuln.severity.meets_threshold(&min_sev) {
+                continue;
+            }
+            inc_sev(
+                vuln.severity,
+                &mut total_vulns,
+                &mut critical_count,
+                &mut high_count,
+                &mut medium_count,
+                &mut low_count,
+            );
+
+            let via_direct = dependencies
+                .iter()
+                .find(|dep| {
+                    lockfile_graph
+                        .transitive_deps_of(&dep.name)
+                        .iter()
+                        .any(|tp| tp.name == pkg.name)
+                })
+                .map(|d| d.name.clone())
+                .unwrap_or_else(|| "(unknown)".to_string());
+
+            transitive_details.push(serde_json::json!({
+                "package": pkg.name,
+                "version": pkg.version,
+                "via_direct": via_direct,
+                "id": vuln.id,
+                "severity": vuln.severity.as_str(),
+                "description": vuln.description,
+                "url": vuln.url,
+            }));
+        }
+    }
+
+    let vuln_details: Vec<serde_json::Value> = direct_details
+        .iter()
+        .chain(transitive_details.iter())
+        .cloned()
+        .collect();
 
     // Output results
     match output.as_str() {
