@@ -2,6 +2,22 @@
 
 use hashbrown::HashSet;
 
+/// Read a lockfile with a size cap (50 MiB) to prevent OOM on hostile inputs.
+pub async fn read_lockfile_capped(path: &std::path::Path) -> std::io::Result<String> {
+    const MAX_LOCKFILE_BYTES: u64 = 50 * 1024 * 1024;
+    let metadata = tokio::fs::metadata(path).await?;
+    if metadata.len() > MAX_LOCKFILE_BYTES {
+        return Err(std::io::Error::new(
+            std::io::ErrorKind::InvalidData,
+            format!(
+                "lockfile exceeds {} MiB cap",
+                MAX_LOCKFILE_BYTES / (1024 * 1024)
+            ),
+        ));
+    }
+    tokio::fs::read_to_string(path).await
+}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct LockfilePackage {
     pub name: String,
@@ -56,6 +72,31 @@ impl LockfileGraph {
             .iter()
             .filter(|p| !set.contains(p.name.as_str()))
             .collect()
+    }
+
+    /// Build an inverse index: for each transitive package name, the set of direct
+    /// dependency names (from `manifest_deps`) that reach it via `transitive_deps_of`.
+    ///
+    /// Returns a `HashMap<String, Vec<String>>`. When a transitive is not reachable from
+    /// any direct dep, it has no entry.
+    pub fn reverse_index(
+        &self,
+        manifest_deps: &[String],
+    ) -> hashbrown::HashMap<String, Vec<String>> {
+        let mut inverse: hashbrown::HashMap<String, Vec<String>> = hashbrown::HashMap::new();
+        for direct in manifest_deps {
+            for pkg in self.transitive_deps_of(direct) {
+                #[expect(
+                    clippy::disallowed_methods,
+                    reason = "`pkg.name` is &str; `entry_ref` would still allocate on insert for Vec<String>"
+                )]
+                inverse
+                    .entry(pkg.name.clone())
+                    .or_default()
+                    .push(direct.clone());
+            }
+        }
+        inverse
     }
 
     fn find(&self, name: &str) -> Option<&LockfilePackage> {
@@ -128,6 +169,21 @@ mod tests {
     fn test_transitive_deps_of_unknown_root() {
         let graph = LockfileGraph { packages: vec![] };
         assert!(graph.transitive_deps_of("nope").is_empty());
+    }
+
+    #[test]
+    fn test_reverse_index_attributes_transitive_to_direct() {
+        let graph = LockfileGraph {
+            packages: vec![
+                pkg("react", &["scheduler"], true),
+                pkg("vue", &["scheduler"], true),
+                pkg("scheduler", &[], false),
+            ],
+        };
+        let idx = graph.reverse_index(&["react".to_string(), "vue".to_string()]);
+        let parents = idx.get("scheduler").unwrap();
+        assert!(parents.contains(&"react".to_string()));
+        assert!(parents.contains(&"vue".to_string()));
     }
 
     #[test]

@@ -76,14 +76,7 @@ fn test_scan_no_use_lockfile_flag_skips_detection() {
 
     let output = Command::new(dependi_lsp_bin())
         .env("OSV_ENDPOINT", "http://127.0.0.1:1") // unreachable
-        .args([
-            "scan",
-            "--output",
-            "json",
-            "--use-lockfile",
-            "false",
-            "--file",
-        ])
+        .args(["scan", "--output", "json", "--no-use-lockfile", "--file"])
         .arg(&fixture)
         .output()
         .expect("failed to run dependi-lsp");

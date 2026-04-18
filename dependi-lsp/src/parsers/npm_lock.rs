@@ -448,8 +448,20 @@ pub fn parse_pnpm_lock_graph(content: &str) -> LockfileGraph {
         if !in_packages {
             continue;
         }
-        // Package entry: "  /name@ver:" or "  /@scope/name@ver:"
-        if let Some(rest) = line.strip_prefix("  /") {
+        // Package entry: "  /name@ver:" (v6) or "  name@ver:" (v9)
+        let entry_key = if let Some(rest) = line.strip_prefix("  /") {
+            Some(rest)
+        } else if line.starts_with("  ")
+            && !line.starts_with("   ")
+            && line.trim().contains('@')
+            && line.trim_end().ends_with(':')
+        {
+            Some(&line[2..])
+        } else {
+            None
+        };
+
+        if let Some(rest) = entry_key {
             if let Some(finish) = current.take() {
                 graph.packages.push(finish);
             }
@@ -1062,6 +1074,33 @@ packages:
         assert_eq!(react.dependencies, vec!["scheduler".to_string()]);
     }
 
+    #[test]
+    fn test_parse_pnpm_lock_graph_v9() {
+        let content = r#"
+lockfileVersion: '9.0'
+
+importers:
+  .:
+    dependencies:
+      react: 18.2.0
+
+packages:
+  react@18.2.0:
+    resolution: {integrity: sha512-xxx}
+    dependencies:
+      scheduler: 0.23.0
+  scheduler@0.23.0:
+    resolution: {integrity: sha512-yyy}
+"#;
+        let graph = parse_pnpm_lock_graph(content);
+        let names: Vec<&str> = graph.packages.iter().map(|p| p.name.as_str()).collect();
+        assert!(names.contains(&"react"));
+        assert!(names.contains(&"scheduler"));
+        let react = graph.packages.iter().find(|p| p.name == "react").unwrap();
+        assert_eq!(react.version, "18.2.0");
+        assert_eq!(react.dependencies, vec!["scheduler".to_string()]);
+    }
+
     // -----------------------------------------------------------------------
     // parse_yarn_lock_graph
     // -----------------------------------------------------------------------
@@ -1080,7 +1119,12 @@ packages:
   version "0.23.0"
 "#;
         let graph = parse_yarn_lock_graph(content);
-        assert!(graph.packages.iter().any(|p| p.name == "react" && p.version == "18.2.0"));
+        assert!(
+            graph
+                .packages
+                .iter()
+                .any(|p| p.name == "react" && p.version == "18.2.0")
+        );
         let react = graph.packages.iter().find(|p| p.name == "react").unwrap();
         assert!(react.dependencies.contains(&"scheduler".to_string()));
     }

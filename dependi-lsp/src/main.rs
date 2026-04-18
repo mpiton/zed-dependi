@@ -51,9 +51,9 @@ enum Commands {
         #[arg(long, default_value = "true")]
         fail_on_vulns: bool,
 
-        /// Enable lockfile-based scanning. Default on. Use `--no-use-lockfile` to disable.
-        #[arg(long = "use-lockfile", default_value_t = true, action = clap::ArgAction::Set)]
-        use_lockfile: bool,
+        /// Disable lockfile-based scanning (enabled by default).
+        #[arg(long = "no-use-lockfile", action = clap::ArgAction::SetTrue)]
+        no_use_lockfile: bool,
     },
     /// Profile dependency file parsing (for use with cargo-flamegraph)
     ProfileParse {
@@ -119,8 +119,8 @@ async fn main() -> ExitCode {
             output,
             min_severity,
             fail_on_vulns,
-            use_lockfile,
-        }) => run_scan(file, output, min_severity, fail_on_vulns, use_lockfile).await,
+            no_use_lockfile,
+        }) => run_scan(file, output, min_severity, fail_on_vulns, !no_use_lockfile).await,
         Some(Commands::ProfileParse { file, iterations }) => {
             run_profile_parse(file, iterations).await
         }
@@ -186,11 +186,13 @@ async fn run_scan(
     use dependi_lsp::parsers::{
         Parser, cargo::CargoParser, cargo_lock, composer_lock, csharp::CsharpParser,
         dart::DartParser, gemfile_lock, go::GoParser, lockfile_graph::LockfileGraph,
-        lockfile_graph::LockfilePackage, maven::MavenParser, npm::NpmParser, npm_lock,
-        php::PhpParser, python::PythonParser, python_lock,
+        lockfile_graph::LockfilePackage, lockfile_graph::read_lockfile_capped, maven::MavenParser,
+        npm::NpmParser, npm_lock, php::PhpParser, python::PythonParser, python_lock,
     };
     use dependi_lsp::registries::VulnerabilitySeverity;
-    use dependi_lsp::vulnerabilities::{Ecosystem, VulnerabilityQuery, normalize_version_for_osv, osv::OsvClient};
+    use dependi_lsp::vulnerabilities::{
+        Ecosystem, VulnerabilityQuery, normalize_version_for_osv, osv::OsvClient,
+    };
     use hashbrown::{HashMap, HashSet};
 
     fn inc_sev(
@@ -255,14 +257,14 @@ async fn run_scan(
         match ecosystem {
             Ecosystem::CratesIo => {
                 if let Some(path) = cargo_lock::find_cargo_lock(&file).await
-                    && let Ok(lock_content) = tokio::fs::read_to_string(&path).await
+                    && let Ok(lock_content) = read_lockfile_capped(&path).await
                 {
                     lockfile_graph = cargo_lock::parse_cargo_lock_graph(&lock_content);
                 }
             }
             Ecosystem::Npm => {
                 if let Some((path, kind)) = npm_lock::find_npm_lockfile(&file).await
-                    && let Ok(lock_content) = tokio::fs::read_to_string(&path).await
+                    && let Ok(lock_content) = read_lockfile_capped(&path).await
                 {
                     lockfile_graph = match kind {
                         npm_lock::NpmLockfileType::PackageLock => {
@@ -280,7 +282,7 @@ async fn run_scan(
             }
             Ecosystem::PyPI => {
                 if let Some((path, kind)) = python_lock::find_python_lockfile(&file, None).await
-                    && let Ok(lock_content) = tokio::fs::read_to_string(&path).await
+                    && let Ok(lock_content) = read_lockfile_capped(&path).await
                 {
                     lockfile_graph = match kind {
                         python_lock::PythonLockfileType::PoetryLock => {
@@ -298,14 +300,14 @@ async fn run_scan(
             }
             Ecosystem::Packagist => {
                 if let Some(path) = composer_lock::find_composer_lock(&file).await
-                    && let Ok(lock_content) = tokio::fs::read_to_string(&path).await
+                    && let Ok(lock_content) = read_lockfile_capped(&path).await
                 {
                     lockfile_graph = composer_lock::parse_composer_lock_graph(&lock_content);
                 }
             }
             Ecosystem::RubyGems => {
                 if let Some(path) = gemfile_lock::find_gemfile_lock(&file).await
-                    && let Ok(lock_content) = tokio::fs::read_to_string(&path).await
+                    && let Ok(lock_content) = read_lockfile_capped(&path).await
                 {
                     lockfile_graph = gemfile_lock::parse_gemfile_lock_graph(&lock_content);
                 }
@@ -418,6 +420,8 @@ async fn run_scan(
         }
     }
 
+    let inverse = lockfile_graph.reverse_index(&direct_names_vec);
+
     for (pkg, result) in transitives.iter().zip(transitive_results.iter()) {
         for vuln in &result.vulnerabilities {
             if !vuln.severity.meets_threshold(&min_sev) {
@@ -432,15 +436,10 @@ async fn run_scan(
                 &mut low_count,
             );
 
-            let via_direct = dependencies
-                .iter()
-                .find(|dep| {
-                    lockfile_graph
-                        .transitive_deps_of(&dep.name)
-                        .iter()
-                        .any(|tp| tp.name == pkg.name)
-                })
-                .map(|d| d.name.clone())
+            let via_direct = inverse
+                .get(&pkg.name)
+                .and_then(|parents| parents.first())
+                .cloned()
                 .unwrap_or_else(|| "(unknown)".to_string());
 
             transitive_details.push(serde_json::json!({
@@ -500,7 +499,10 @@ async fn run_scan(
                 }
             }
             if !transitive_details.is_empty() {
-                println!("## Transitive dependencies ({})\n", transitive_details.len());
+                println!(
+                    "## Transitive dependencies ({})\n",
+                    transitive_details.len()
+                );
                 for v in &transitive_details {
                     let via = v["via_direct"].as_str();
                     print_markdown_entry(v, via);

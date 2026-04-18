@@ -119,7 +119,9 @@ impl ProcessingContext {
         let mut dependencies = self.parse_document(uri, content);
 
         // lockfile_graph is populated by the ecosystem-specific blocks below.
-        let mut lockfile_graph: Option<std::sync::Arc<crate::parsers::lockfile_graph::LockfileGraph>> = None;
+        let mut lockfile_graph: Option<
+            std::sync::Arc<crate::parsers::lockfile_graph::LockfileGraph>,
+        > = None;
 
         // Resolve versions from Cargo.lock for Cargo dependencies
         if file_type == FileType::Cargo
@@ -127,7 +129,7 @@ impl ProcessingContext {
             && let Some(lock_path) =
                 crate::parsers::cargo_lock::find_cargo_lock(&cargo_toml_path).await
         {
-            match tokio::fs::read_to_string(&lock_path).await {
+            match crate::parsers::lockfile_graph::read_lockfile_capped(&lock_path).await {
                 Ok(lock_content) => {
                     let graph = crate::parsers::cargo_lock::parse_cargo_lock_graph(&lock_content);
                     for dep in &mut dependencies {
@@ -161,7 +163,7 @@ impl ProcessingContext {
             && let Some((lock_path, npm_lockfile_type)) =
                 crate::parsers::npm_lock::find_npm_lockfile(&package_json_path).await
         {
-            match tokio::fs::read_to_string(&lock_path).await {
+            match crate::parsers::lockfile_graph::read_lockfile_capped(&lock_path).await {
                 Ok(lock_content) => {
                     use crate::parsers::npm_lock::NpmLockfileType;
                     let graph = match npm_lockfile_type {
@@ -225,7 +227,7 @@ impl ProcessingContext {
             if let Some((lock_path, py_lockfile_type)) =
                 crate::parsers::python_lock::find_python_lockfile(&manifest_path, preferred).await
             {
-                match tokio::fs::read_to_string(&lock_path).await {
+                match crate::parsers::lockfile_graph::read_lockfile_capped(&lock_path).await {
                     Ok(lock_content) => {
                         use crate::parsers::python_lock::PythonLockfileType;
                         let graph = match py_lockfile_type {
@@ -240,10 +242,11 @@ impl ProcessingContext {
                             }
                             PythonLockfileType::PdmLock => {
                                 // No graph parser for PDM — build minimal graph from HashMap
-                                let lock_versions = crate::parsers::python_lock::parse_python_lockfile(
-                                    &lock_content,
-                                    py_lockfile_type,
-                                );
+                                let lock_versions =
+                                    crate::parsers::python_lock::parse_python_lockfile(
+                                        &lock_content,
+                                        py_lockfile_type,
+                                    );
                                 crate::parsers::lockfile_graph::LockfileGraph {
                                     packages: lock_versions
                                         .iter()
@@ -262,9 +265,7 @@ impl ProcessingContext {
                         for dep in &mut dependencies {
                             let normalized =
                                 crate::parsers::python_lock::normalize_python_name(&dep.name);
-                            if let Some(p) =
-                                graph.packages.iter().find(|p| p.name == normalized)
-                            {
+                            if let Some(p) = graph.packages.iter().find(|p| p.name == normalized) {
                                 dep.resolved_version = Some(p.version.clone());
                             }
                         }
@@ -295,7 +296,7 @@ impl ProcessingContext {
             && let Ok(go_mod_path) = uri.to_file_path()
             && let Some(lock_path) = crate::parsers::go_sum::find_go_sum(&go_mod_path).await
         {
-            match tokio::fs::read_to_string(&lock_path).await {
+            match crate::parsers::lockfile_graph::read_lockfile_capped(&lock_path).await {
                 Ok(lock_content) => {
                     let lock_versions = crate::parsers::go_sum::parse_go_sum(&lock_content);
                     let mut minimal_packages = Vec::new();
@@ -316,12 +317,14 @@ impl ProcessingContext {
                     // Build minimal graph (no edge data available from go.sum)
                     for (name, versions) in &lock_versions {
                         for version in versions {
-                            minimal_packages.push(crate::parsers::lockfile_graph::LockfilePackage {
-                                name: name.clone(),
-                                version: version.clone(),
-                                dependencies: Vec::new(),
-                                is_root: false,
-                            });
+                            minimal_packages.push(
+                                crate::parsers::lockfile_graph::LockfilePackage {
+                                    name: name.clone(),
+                                    version: version.clone(),
+                                    dependencies: Vec::new(),
+                                    is_root: false,
+                                },
+                            );
                         }
                     }
                     tracing::debug!(
@@ -350,7 +353,7 @@ impl ProcessingContext {
             && let Some(lock_path) =
                 crate::parsers::composer_lock::find_composer_lock(&composer_json_path).await
         {
-            match tokio::fs::read_to_string(&lock_path).await {
+            match crate::parsers::lockfile_graph::read_lockfile_capped(&lock_path).await {
                 Ok(lock_content) => {
                     let graph =
                         crate::parsers::composer_lock::parse_composer_lock_graph(&lock_content);
@@ -387,7 +390,7 @@ impl ProcessingContext {
             && let Some(lock_path) =
                 crate::parsers::pubspec_lock::find_pubspec_lock(&pubspec_yaml_path).await
         {
-            match tokio::fs::read_to_string(&lock_path).await {
+            match crate::parsers::lockfile_graph::read_lockfile_capped(&lock_path).await {
                 Ok(lock_content) => {
                     let lock_versions =
                         crate::parsers::pubspec_lock::parse_pubspec_lock(&lock_content);
@@ -436,7 +439,7 @@ impl ProcessingContext {
             && let Some(lock_path) =
                 crate::parsers::packages_lock_json::find_packages_lock(&csproj_path).await
         {
-            match tokio::fs::read_to_string(&lock_path).await {
+            match crate::parsers::lockfile_graph::read_lockfile_capped(&lock_path).await {
                 Ok(lock_content) => {
                     let lock_versions =
                         crate::parsers::packages_lock_json::parse_packages_lock(&lock_content);
@@ -487,7 +490,7 @@ impl ProcessingContext {
             && let Some(lock_path) =
                 crate::parsers::gemfile_lock::find_gemfile_lock(&gemfile_path).await
         {
-            match tokio::fs::read_to_string(&lock_path).await {
+            match crate::parsers::lockfile_graph::read_lockfile_capped(&lock_path).await {
                 Ok(lock_content) => {
                     let graph =
                         crate::parsers::gemfile_lock::parse_gemfile_lock_graph(&lock_content);
@@ -943,7 +946,12 @@ impl DependiBackend {
         let direct_names: Vec<String> = dependencies.iter().map(|d| d.name.clone()).collect();
         let transitives: Vec<crate::parsers::lockfile_graph::LockfilePackage> = lockfile_graph
             .as_deref()
-            .map(|g| g.transitives_only(&direct_names).into_iter().cloned().collect())
+            .map(|g| {
+                g.transitives_only(&direct_names)
+                    .into_iter()
+                    .cloned()
+                    .collect()
+            })
             .unwrap_or_default();
 
         // Build queries for direct packages not in vulnerability cache
@@ -995,7 +1003,10 @@ impl DependiBackend {
                 let (direct_results, transitive_results) = results.split_at(direct_count);
 
                 // Update vulnerability cache and version_cache with direct results
-                for (query, result) in all_queries[..direct_count].iter().zip(direct_results.iter()) {
+                for (query, result) in all_queries[..direct_count]
+                    .iter()
+                    .zip(direct_results.iter())
+                {
                     // Mark this package as queried in vuln_cache
                     let vuln_key =
                         VulnCacheKey::new(ecosystem, &query.package_name, &query.version);
@@ -1037,24 +1048,21 @@ impl DependiBackend {
                 if let Some(graph) = lockfile_graph.as_deref() {
                     use crate::registries::TransitiveVuln;
 
+                    let inverse = graph.reverse_index(&direct_names);
+
                     for (tpkg, result) in transitives.iter().zip(transitive_results.iter()) {
                         if result.vulnerabilities.is_empty() {
                             continue;
                         }
                         // Find the first direct dep that transitively reaches this package
-                        for dep in &dependencies {
-                            let reaches = graph
-                                .transitive_deps_of(&dep.name)
-                                .iter()
-                                .any(|p| p.name == tpkg.name);
-                            if !reaches {
-                                continue;
-                            }
+                        let first_parent =
+                            inverse.get(&tpkg.name).and_then(|parents| parents.first());
 
+                        if let Some(dep_name) = first_parent {
                             let cache_key = cache_key_map
-                                .get(&dep.name)
+                                .get(dep_name)
                                 .cloned()
-                                .unwrap_or_else(|| file_type.cache_key(&dep.name));
+                                .unwrap_or_else(|| file_type.cache_key(dep_name));
                             if let Some(mut info) = cache.get(&cache_key) {
                                 for v in &result.vulnerabilities {
                                     let new_tv = TransitiveVuln {
@@ -1075,12 +1083,10 @@ impl DependiBackend {
                                     result.vulnerabilities.len(),
                                     tpkg.name,
                                     tpkg.version,
-                                    dep.name
+                                    dep_name
                                 );
                                 cache.insert(cache_key, info);
                             }
-                            // Attach to first matching direct parent only (npm audit style)
-                            break;
                         }
                     }
                 }

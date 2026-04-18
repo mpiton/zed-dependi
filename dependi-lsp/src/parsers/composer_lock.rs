@@ -251,10 +251,22 @@ mod tests {
 }"#;
         let graph = parse_composer_lock_graph(content);
         assert_eq!(graph.packages.len(), 2);
-        let console = graph.packages.iter().find(|p| p.name == "symfony/console").unwrap();
-        assert!(console.dependencies.contains(&"symfony/polyfill-php80".to_string()));
+        let console = graph
+            .packages
+            .iter()
+            .find(|p| p.name == "symfony/console")
+            .unwrap();
+        assert!(
+            console
+                .dependencies
+                .contains(&"symfony/polyfill-php80".to_string())
+        );
         assert!(!console.dependencies.iter().any(|d| d == "php"));
-        let polyfill = graph.packages.iter().find(|p| p.name == "symfony/polyfill-php80").unwrap();
+        let polyfill = graph
+            .packages
+            .iter()
+            .find(|p| p.name == "symfony/polyfill-php80")
+            .unwrap();
         assert!(!polyfill.dependencies.iter().any(|d| d.starts_with("ext-")));
     }
 }

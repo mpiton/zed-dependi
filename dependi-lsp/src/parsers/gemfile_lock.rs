@@ -134,33 +134,58 @@ pub fn parse_gemfile_lock(content: &str) -> HashMap<String, String> {
 
 use crate::parsers::lockfile_graph::{LockfileGraph, LockfilePackage};
 
+#[derive(PartialEq)]
+enum GemSection {
+    None,
+    Gem,
+    Other,
+}
+
 /// Parse Gemfile.lock into a dependency graph.
+/// Only the GEM section (RubyGems.org) is included. PATH and GIT sections are excluded.
 /// The GEM/specs section uses 4-space indent for top-level gems (name + version)
 /// and 6-space indent for their dependency list (name + constraint).
 pub fn parse_gemfile_lock_graph(content: &str) -> LockfileGraph {
     let mut graph = LockfileGraph::default();
-    let mut in_gem_specs = false;
+    let mut section = GemSection::None;
+    let mut in_specs = false;
     let mut current: Option<LockfilePackage> = None;
 
     for line in content.lines() {
         let trimmed = line.trim_end();
-        if trimmed == "GEM" {
-            in_gem_specs = false;
+
+        // Section headers are at column 0 (no leading spaces, non-empty)
+        if !trimmed.is_empty() && !trimmed.starts_with(' ') {
+            if let Some(done) = current.take() {
+                graph.packages.push(done);
+            }
+            section = match trimmed.trim() {
+                "GEM" => GemSection::Gem,
+                _ => GemSection::Other,
+            };
+            in_specs = false;
             continue;
         }
+
+        if section != GemSection::Gem {
+            continue;
+        }
+
         if trimmed.trim() == "specs:" {
-            in_gem_specs = true;
+            in_specs = true;
             continue;
         }
-        if !in_gem_specs {
+
+        if !in_specs {
             continue;
         }
+
         if trimmed.is_empty() || !trimmed.starts_with("    ") {
             if let Some(done) = current.take() {
                 graph.packages.push(done);
             }
             if !trimmed.starts_with("    ") {
-                in_gem_specs = false;
+                in_specs = false;
             }
             continue;
         }
@@ -177,7 +202,7 @@ pub fn parse_gemfile_lock_graph(content: &str) -> LockfileGraph {
                     .trim_matches(|c| c == '(' || c == ')')
                     .to_string();
                 current = Some(LockfilePackage {
-                    name: name.to_string(),
+                    name: normalize_gem_name(name),
                     version,
                     dependencies: Vec::new(),
                     is_root: false,
@@ -188,7 +213,7 @@ pub fn parse_gemfile_lock_graph(content: &str) -> LockfileGraph {
             let s = trimmed.trim();
             let dep_name = s.split_whitespace().next().unwrap_or("");
             if !dep_name.is_empty() {
-                cur.dependencies.push(dep_name.to_string());
+                cur.dependencies.push(normalize_gem_name(dep_name));
             }
         }
     }
@@ -412,6 +437,50 @@ GEM
         assert!(rails.dependencies.contains(&"actioncable".to_string()));
         let rack = graph.packages.iter().find(|p| p.name == "rack").unwrap();
         assert!(rack.dependencies.is_empty());
+    }
+
+    #[test]
+    fn test_parse_gemfile_lock_graph_ignores_path_and_git_sections() {
+        let content = r#"
+PATH
+  remote: .
+  specs:
+    local_gem (0.1.0)
+      rack (~> 3.0)
+
+GIT
+  remote: https://github.com/rails/rails.git
+  specs:
+    rails_fork (7.0.4)
+
+GEM
+  remote: https://rubygems.org/
+  specs:
+    rack (3.0.0)
+    rails (7.0.4)
+      rack (~> 3.0)
+"#;
+        let graph = parse_gemfile_lock_graph(content);
+        let names: Vec<&str> = graph.packages.iter().map(|p| p.name.as_str()).collect();
+        assert!(names.contains(&"rack"));
+        assert!(names.contains(&"rails"));
+        assert!(!names.contains(&"local_gem"), "PATH gems must be excluded");
+        assert!(!names.contains(&"rails_fork"), "GIT gems must be excluded");
+    }
+
+    #[test]
+    fn test_parse_gemfile_lock_graph_normalizes_names() {
+        let content = r#"
+GEM
+  specs:
+    ActiveRecord (7.0.0)
+      active_support (= 7.0.0)
+    active_support (7.0.0)
+"#;
+        let graph = parse_gemfile_lock_graph(content);
+        // normalize_gem_name lowercases names
+        assert!(graph.packages.iter().any(|p| p.name == "activerecord"));
+        assert!(graph.packages.iter().any(|p| p.name == "active_support"));
     }
 
     #[test]

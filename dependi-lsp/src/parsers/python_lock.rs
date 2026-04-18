@@ -906,7 +906,11 @@ name = "certifi"
 version = "2023.11.17"
 "#;
         let graph = parse_poetry_lock_graph(content);
-        let requests = graph.packages.iter().find(|p| p.name == "requests").unwrap();
+        let requests = graph
+            .packages
+            .iter()
+            .find(|p| p.name == "requests")
+            .unwrap();
         assert_eq!(requests.version, "2.31.0");
         assert!(requests.dependencies.contains(&"urllib3".to_string()));
         assert!(requests.dependencies.contains(&"certifi".to_string()));
@@ -922,7 +926,11 @@ version = "2023.11.17"
   "develop": {}
 }"#;
         let graph = parse_pipfile_lock_graph(content);
-        let requests = graph.packages.iter().find(|p| p.name == "requests").unwrap();
+        let requests = graph
+            .packages
+            .iter()
+            .find(|p| p.name == "requests")
+            .unwrap();
         assert_eq!(requests.version, "2.31.0");
         assert!(requests.dependencies.contains(&"urllib3".to_string()));
     }
@@ -945,7 +953,11 @@ name = "urllib3"
 version = "2.0.7"
 "#;
         let graph = parse_uv_lock_graph(content);
-        let requests = graph.packages.iter().find(|p| p.name == "requests").unwrap();
+        let requests = graph
+            .packages
+            .iter()
+            .find(|p| p.name == "requests")
+            .unwrap();
         assert!(requests.dependencies.contains(&"urllib3".to_string()));
         assert!(requests.dependencies.contains(&"certifi".to_string()));
     }
