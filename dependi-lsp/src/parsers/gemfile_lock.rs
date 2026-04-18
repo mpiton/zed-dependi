@@ -197,10 +197,8 @@ pub fn parse_gemfile_lock_graph(content: &str) -> LockfileGraph {
             }
             let s = trimmed.trim();
             if let Some((name, rest)) = s.split_once(' ') {
-                let version = rest
-                    .trim()
-                    .trim_matches(|c| c == '(' || c == ')')
-                    .to_string();
+                let raw_version = rest.trim().trim_matches(|c| c == '(' || c == ')');
+                let version = strip_platform_suffix(raw_version).to_string();
                 current = Some(LockfilePackage {
                     name: normalize_gem_name(name),
                     version,
@@ -481,6 +479,22 @@ GEM
         // normalize_gem_name lowercases names
         assert!(graph.packages.iter().any(|p| p.name == "activerecord"));
         assert!(graph.packages.iter().any(|p| p.name == "active_support"));
+    }
+
+    #[test]
+    fn test_parse_gemfile_lock_graph_strips_platform_suffix() {
+        let content = r#"
+GEM
+  remote: https://rubygems.org/
+  specs:
+    nokogiri (1.15.4-x86_64-linux)
+    rack (3.0.0)
+"#;
+        let graph = parse_gemfile_lock_graph(content);
+        let nokogiri = graph.packages.iter().find(|p| p.name == "nokogiri").unwrap();
+        assert_eq!(nokogiri.version, "1.15.4", "platform suffix must be stripped, got {:?}", nokogiri.version);
+        let rack = graph.packages.iter().find(|p| p.name == "rack").unwrap();
+        assert_eq!(rack.version, "3.0.0");
     }
 
     #[test]
