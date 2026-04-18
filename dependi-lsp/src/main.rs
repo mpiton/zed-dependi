@@ -152,6 +152,30 @@ async fn run_lsp() {
     Server::new(stdin, stdout, socket).serve(service).await;
 }
 
+fn print_markdown_entry(v: &serde_json::Value, via: Option<&str>) {
+    let severity = v["severity"].as_str().unwrap_or("low");
+    let icon = match severity {
+        "critical" => "⚠",
+        "high" => "▲",
+        "medium" => "●",
+        _ => "○",
+    };
+    let pkg = v["package"].as_str().unwrap_or("");
+    let ver = v["version"].as_str().unwrap_or("");
+    match via {
+        Some(parent) => println!("### {pkg}@{ver} — via `{parent}`\n"),
+        None => println!("### {pkg}@{ver}\n"),
+    }
+    let id = v["id"].as_str().unwrap_or("");
+    let sev_upper = severity.to_uppercase();
+    let desc = v["description"].as_str().unwrap_or("");
+    if let Some(url) = v["url"].as_str() {
+        println!("- **[{id}]({url})** ({icon} {sev_upper}): {desc}\n");
+    } else {
+        println!("- **{id}** ({icon} {sev_upper}): {desc}\n");
+    }
+}
+
 async fn run_scan(
     file: PathBuf,
     output: String,
@@ -431,15 +455,13 @@ async fn run_scan(
         }
     }
 
-    let vuln_details: Vec<serde_json::Value> = direct_details
-        .iter()
-        .chain(transitive_details.iter())
-        .cloned()
-        .collect();
-
     // Output results
     match output.as_str() {
         "json" => {
+            let combined: Vec<&serde_json::Value> = direct_details
+                .iter()
+                .chain(transitive_details.iter())
+                .collect();
             let report = serde_json::json!({
                 "file": file.display().to_string(),
                 "summary": {
@@ -449,7 +471,9 @@ async fn run_scan(
                     "medium": medium_count,
                     "low": low_count
                 },
-                "vulnerabilities": vuln_details
+                "direct": direct_details,
+                "transitive": transitive_details,
+                "vulnerabilities": combined,
             });
             match serde_json::to_string_pretty(&report) {
                 Ok(json) => println!("{json}"),
@@ -469,54 +493,57 @@ async fn run_scan(
             println!("| ○ Low | {low_count} |");
             println!("| **Total** | **{total_vulns}** |\n");
 
-            if !vuln_details.is_empty() {
-                println!("## Vulnerabilities\n");
-                for vuln in &vuln_details {
-                    let severity = vuln["severity"].as_str();
-                    let severity_icon = match severity.unwrap_or("low") {
-                        "critical" => "⚠",
-                        "high" => "▲",
-                        "medium" => "●",
-                        _ => "○",
-                    };
-                    println!(
-                        "### {}@{}\n",
-                        vuln["package"].as_str().unwrap_or(""),
-                        vuln["version"].as_str().unwrap_or("")
-                    );
-                    if let Some(url) = vuln["url"].as_str() {
-                        println!(
-                            "- **[{}]({url})** ({severity_icon} {}): {}",
-                            vuln["id"].as_str().unwrap_or(""),
-                            severity.unwrap_or("").to_uppercase(),
-                            vuln["description"].as_str().unwrap_or("")
-                        );
-                    } else {
-                        println!(
-                            "- **{}** ({severity_icon} {}): {}",
-                            vuln["id"].as_str().unwrap_or(""),
-                            severity.unwrap_or("").to_uppercase(),
-                            vuln["description"].as_str().unwrap_or("")
-                        );
-                    }
-                    println!();
+            if !direct_details.is_empty() {
+                println!("## Direct dependencies ({})\n", direct_details.len());
+                for v in &direct_details {
+                    print_markdown_entry(v, None);
+                }
+            }
+            if !transitive_details.is_empty() {
+                println!("## Transitive dependencies ({})\n", transitive_details.len());
+                for v in &transitive_details {
+                    let via = v["via_direct"].as_str();
+                    print_markdown_entry(v, via);
                 }
             }
         }
         _ => {
-            // Summary format
-            println!("Vulnerability Scan Results for {}\n", file.display());
+            println!("Vulnerability Scan Results for {}", file.display());
+            println!(
+                "  Total: {total_vulns} ({} direct, {} transitive)",
+                direct_details.len(),
+                transitive_details.len()
+            );
             println!("  ⚠ Critical: {critical_count}");
             println!("  ▲ High:     {high_count}");
             println!("  ● Medium:   {medium_count}");
-            println!("  ○ Low:      {low_count}");
-            println!("  ─────────────");
-            println!("  Total:      {total_vulns}\n");
+            println!("  ○ Low:      {low_count}\n");
 
+            if !direct_details.is_empty() {
+                println!("Direct:");
+                for v in &direct_details {
+                    println!(
+                        "  - {}@{} [{}]",
+                        v["package"].as_str().unwrap_or(""),
+                        v["version"].as_str().unwrap_or(""),
+                        v["id"].as_str().unwrap_or("")
+                    );
+                }
+            }
+            if !transitive_details.is_empty() {
+                println!("Transitive:");
+                for v in &transitive_details {
+                    println!(
+                        "  - {}@{} (via {}) [{}]",
+                        v["package"].as_str().unwrap_or(""),
+                        v["version"].as_str().unwrap_or(""),
+                        v["via_direct"].as_str().unwrap_or("?"),
+                        v["id"].as_str().unwrap_or("")
+                    );
+                }
+            }
             if total_vulns == 0 {
-                println!("[OK] No vulnerabilities found!");
-            } else {
-                println!("⚠ {total_vulns} vulnerabilities found!");
+                println!("\n[OK] No vulnerabilities found!");
             }
         }
     }
