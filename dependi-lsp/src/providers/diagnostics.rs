@@ -70,28 +70,27 @@ pub fn create_diagnostics(
                     })
                     .collect();
 
-                let filtered_transitive_vulns: Vec<TransitiveVuln>;
-                let transitive_vulns: &[TransitiveVuln] =
-                    match (doc_transitive_vulns.get(&dep.name), min_severity.as_ref()) {
-                        (Some(tvs), Some(min)) => {
-                            filtered_transitive_vulns = tvs
-                                .iter()
-                                .filter(|tv| {
-                                    meets_severity_threshold(&tv.vulnerability.severity, min)
-                                })
-                                .cloned()
-                                .collect();
-                            &filtered_transitive_vulns
-                        }
-                        (Some(tvs), None) => tvs.as_slice(),
-                        (None, _) => &[],
-                    };
+                let filtered_transitive: Vec<&TransitiveVuln> = doc_transitive_vulns
+                    .get(&dep.name)
+                    .map(|v| {
+                        v.iter()
+                            .filter(|t| {
+                                min_severity
+                                    .as_ref()
+                                    .map(|min| {
+                                        meets_severity_threshold(&t.vulnerability.severity, min)
+                                    })
+                                    .unwrap_or(true)
+                            })
+                            .collect()
+                    })
+                    .unwrap_or_default();
 
-                if !filtered_vulns.is_empty() || !transitive_vulns.is_empty() {
+                if !filtered_vulns.is_empty() || !filtered_transitive.is_empty() {
                     diagnostics.push(create_vulnerability_summary_diagnostic(
                         dep,
                         &filtered_vulns,
-                        transitive_vulns,
+                        &filtered_transitive,
                     ));
                 }
             }
@@ -338,7 +337,7 @@ fn create_yanked_diagnostic(
 
 /// Build a short message listing transitive vulnerabilities for a direct dep.
 /// Shows up to 3 entries, then "+N more".
-pub fn build_transitive_summary_message(tv: &[TransitiveVuln]) -> String {
+pub fn build_transitive_summary_message(tv: &[&TransitiveVuln]) -> String {
     if tv.is_empty() {
         return String::new();
     }
@@ -356,14 +355,14 @@ pub fn build_transitive_summary_message(tv: &[TransitiveVuln]) -> String {
         parts.push(format!("+{} more", tv.len() - 3));
     }
     let n = tv.len();
-    format!("{n} transitive CVE(s): {}", parts.join(", "))
+    format!("{n} transitive vuln(s): {}", parts.join(", "))
 }
 
 /// Create a summary diagnostic for multiple vulnerabilities
 fn create_vulnerability_summary_diagnostic(
     dep: &Dependency,
     vulns: &[&Vulnerability],
-    transitive_vulns: &[TransitiveVuln],
+    transitive_vulns: &[&TransitiveVuln],
 ) -> Diagnostic {
     let count = vulns.len();
 
@@ -414,7 +413,7 @@ fn create_vulnerability_summary_diagnostic(
         msg
     };
 
-    // The diagnostic code uses the total count (direct + transitive CVE entries)
+    // The diagnostic code uses the total count (direct + transitive vuln entries)
     let total_count = count + transitive_vulns.len();
 
     // Collect related information for direct vulnerabilities
@@ -1114,7 +1113,7 @@ mod tests {
 
     #[test]
     fn test_build_transitive_summary_message_formats_correctly() {
-        let tvs = vec![crate::registries::TransitiveVuln {
+        let tvs = [crate::registries::TransitiveVuln {
             package_name: "scheduler".to_string(),
             package_version: "1.2.3".to_string(),
             vulnerability: crate::registries::Vulnerability {
@@ -1124,7 +1123,8 @@ mod tests {
                 url: None,
             },
         }];
-        let msg = build_transitive_summary_message(&tvs);
+        let refs: Vec<&_> = tvs.iter().collect();
+        let msg = build_transitive_summary_message(&refs);
         assert!(msg.contains("scheduler@1.2.3"));
         assert!(msg.contains("CVE-1"));
         assert!(msg.contains("1 transitive"));
@@ -1142,14 +1142,15 @@ mod tests {
                 url: None,
             },
         };
-        let tvs = vec![
+        let tvs = [
             mk("a", "X1"),
             mk("b", "X2"),
             mk("c", "X3"),
             mk("d", "X4"),
             mk("e", "X5"),
         ];
-        let msg = build_transitive_summary_message(&tvs);
+        let refs: Vec<&_> = tvs.iter().collect();
+        let msg = build_transitive_summary_message(&refs);
         assert!(msg.contains("+2 more"));
     }
 
