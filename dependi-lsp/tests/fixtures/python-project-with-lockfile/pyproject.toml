@@ -1,0 +1,6 @@
+[tool.poetry]
+name = "demo"
+version = "0.1.0"
+
+[tool.poetry.dependencies]
+requests = "^2.31.0"
