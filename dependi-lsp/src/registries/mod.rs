@@ -82,6 +82,16 @@ use hashbrown::HashMap;
 use reqwest::Client;
 use serde::{Deserialize, Serialize};
 
+/// A vulnerability discovered in a transitive dependency reached through a direct package.
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+pub struct TransitiveVuln {
+    #[serde(rename = "package")]
+    pub package_name: String,
+    #[serde(rename = "version")]
+    pub package_version: String,
+    pub vulnerability: Vulnerability,
+}
+
 /// Information about a package version from a registry
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
 pub struct VersionInfo {
@@ -110,6 +120,9 @@ pub struct VersionInfo {
     /// Release dates for each version (version string -> DateTime)
     #[serde(default)]
     pub release_dates: HashMap<String, DateTime<Utc>>,
+    /// Vulnerabilities discovered in transitive dependencies reached through this package.
+    #[serde(default)]
+    pub transitive_vulnerabilities: Vec<TransitiveVuln>,
 }
 
 impl VersionInfo {
@@ -339,5 +352,33 @@ mod tests {
         let info = VersionInfo::default();
 
         assert!(!info.is_version_yanked("1.0.0"));
+    }
+}
+
+#[cfg(test)]
+mod transitive_vuln_tests {
+    use super::*;
+
+    #[test]
+    fn test_version_info_default_has_empty_transitive_vulns() {
+        let info = VersionInfo::default();
+        assert!(info.transitive_vulnerabilities.is_empty());
+    }
+
+    #[test]
+    fn test_transitive_vuln_serializes_with_package_and_version() {
+        let v = TransitiveVuln {
+            package_name: "scheduler".to_string(),
+            package_version: "1.2.3".to_string(),
+            vulnerability: Vulnerability {
+                id: "CVE-XXX".to_string(),
+                severity: VulnerabilitySeverity::High,
+                description: "desc".to_string(),
+                url: None,
+            },
+        };
+        let json = serde_json::to_string(&v).unwrap();
+        assert!(json.contains("\"package\":\"scheduler\""));
+        assert!(json.contains("\"version\":\"1.2.3\""));
     }
 }

@@ -378,6 +378,7 @@ impl Registry for NpmRegistry {
             yanked: false,
             yanked_versions: vec![], // Not applicable to npm
             release_dates,
+            transitive_vulnerabilities: vec![],
         })
     }
 }

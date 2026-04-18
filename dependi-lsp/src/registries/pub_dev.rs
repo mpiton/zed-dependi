@@ -226,6 +226,7 @@ impl Registry for PubDevRegistry {
             yanked: pkg.latest.retracted,
             yanked_versions: vec![], // Not applicable to pub.dev
             release_dates,
+            transitive_vulnerabilities: vec![],
         })
     }
 }

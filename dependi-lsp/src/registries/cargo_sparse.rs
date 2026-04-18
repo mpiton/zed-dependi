@@ -197,6 +197,7 @@ impl Registry for CargoSparseRegistry {
             yanked,
             yanked_versions,
             release_dates: HashMap::new(),
+            transitive_vulnerabilities: vec![],
         })
     }
 }

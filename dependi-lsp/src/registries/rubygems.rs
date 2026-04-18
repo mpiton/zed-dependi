@@ -213,6 +213,7 @@ impl Registry for RubyGemsRegistry {
             yanked: false,
             yanked_versions: vec![], // Not applicable to RubyGems
             release_dates,
+            transitive_vulnerabilities: vec![],
         })
     }
 }

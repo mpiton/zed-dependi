@@ -198,6 +198,7 @@ impl Registry for GoProxyRegistry {
             yanked: false,
             yanked_versions: vec![], // Not applicable to Go
             release_dates,
+            transitive_vulnerabilities: vec![],
         })
     }
 }

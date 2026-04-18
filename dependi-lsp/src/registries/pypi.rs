@@ -255,6 +255,7 @@ impl Registry for PyPiRegistry {
             yanked: false,
             yanked_versions: vec![], // Not applicable to PyPI
             release_dates,
+            transitive_vulnerabilities: vec![],
         })
     }
 }

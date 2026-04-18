@@ -231,6 +231,7 @@ impl Registry for PackagistRegistry {
             yanked: false,
             yanked_versions: vec![], // Not applicable to Packagist
             release_dates,
+            transitive_vulnerabilities: vec![],
         })
     }
 }
