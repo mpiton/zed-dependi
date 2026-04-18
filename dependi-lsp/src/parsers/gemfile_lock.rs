@@ -132,6 +132,73 @@ pub fn parse_gemfile_lock(content: &str) -> HashMap<String, String> {
     map
 }
 
+use crate::parsers::lockfile_graph::{LockfileGraph, LockfilePackage};
+
+/// Parse Gemfile.lock into a dependency graph.
+/// The GEM/specs section uses 4-space indent for top-level gems (name + version)
+/// and 6-space indent for their dependency list (name + constraint).
+pub fn parse_gemfile_lock_graph(content: &str) -> LockfileGraph {
+    let mut graph = LockfileGraph::default();
+    let mut in_gem_specs = false;
+    let mut current: Option<LockfilePackage> = None;
+
+    for line in content.lines() {
+        let trimmed = line.trim_end();
+        if trimmed == "GEM" {
+            in_gem_specs = false;
+            continue;
+        }
+        if trimmed.trim() == "specs:" {
+            in_gem_specs = true;
+            continue;
+        }
+        if !in_gem_specs {
+            continue;
+        }
+        if trimmed.is_empty() || !trimmed.starts_with("    ") {
+            if let Some(done) = current.take() {
+                graph.packages.push(done);
+            }
+            if !trimmed.starts_with("    ") {
+                in_gem_specs = false;
+            }
+            continue;
+        }
+
+        // Level-1 gem: "    name (version)"
+        if trimmed.starts_with("    ") && !trimmed.starts_with("      ") {
+            if let Some(done) = current.take() {
+                graph.packages.push(done);
+            }
+            let s = trimmed.trim();
+            if let Some((name, rest)) = s.split_once(' ') {
+                let version = rest
+                    .trim()
+                    .trim_matches(|c| c == '(' || c == ')')
+                    .to_string();
+                current = Some(LockfilePackage {
+                    name: name.to_string(),
+                    version,
+                    dependencies: Vec::new(),
+                    is_root: false,
+                });
+            }
+        } else if let Some(cur) = current.as_mut() {
+            // Level-2 sub-dep: "      name (constraint)"
+            let s = trimmed.trim();
+            let dep_name = s.split_whitespace().next().unwrap_or("");
+            if !dep_name.is_empty() {
+                cur.dependencies.push(dep_name.to_string());
+            }
+        }
+    }
+
+    if let Some(done) = current {
+        graph.packages.push(done);
+    }
+    graph
+}
+
 /// Find the Gemfile.lock file co-located with a Gemfile.
 ///
 /// Bundler always places Gemfile.lock in the same directory as Gemfile,
@@ -322,6 +389,29 @@ GEM
 ";
         let map = parse_gemfile_lock(content);
         assert_eq!(map.get("nokogiri").map(|s| s.as_str()), Some("1.15.4"));
+    }
+
+    #[test]
+    fn test_parse_gemfile_lock_graph() {
+        let content = r#"
+GEM
+  remote: https://rubygems.org/
+  specs:
+    rack (3.0.0)
+    rails (7.0.4)
+      rack (~> 3.0)
+      actioncable (= 7.0.4)
+    actioncable (7.0.4)
+      actionpack (= 7.0.4)
+    actionpack (7.0.4)
+"#;
+        let graph = parse_gemfile_lock_graph(content);
+        let rails = graph.packages.iter().find(|p| p.name == "rails").unwrap();
+        assert_eq!(rails.version, "7.0.4");
+        assert!(rails.dependencies.contains(&"rack".to_string()));
+        assert!(rails.dependencies.contains(&"actioncable".to_string()));
+        let rack = graph.packages.iter().find(|p| p.name == "rack").unwrap();
+        assert!(rack.dependencies.is_empty());
     }
 
     #[test]
