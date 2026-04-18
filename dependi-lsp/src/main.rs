@@ -178,8 +178,7 @@ fn print_markdown_entry(v: &serde_json::Value, via: Option<&str>) {
 
 fn canonical_name(eco: dependi_lsp::vulnerabilities::Ecosystem, name: &str) -> String {
     use dependi_lsp::parsers::{
-        composer_lock::normalize_composer_name,
-        gemfile_lock::normalize_gem_name,
+        composer_lock::normalize_composer_name, gemfile_lock::normalize_gem_name,
         python_lock::normalize_python_name,
     };
     use dependi_lsp::vulnerabilities::Ecosystem;
