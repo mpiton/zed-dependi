@@ -8,7 +8,7 @@ use crate::cache::ReadCache;
 use crate::file_types::FileType;
 use crate::parsers::Dependency;
 use crate::providers::inlay_hints::{VersionStatus, compare_versions, is_local_dependency};
-use crate::registries::{VersionInfo, Vulnerability, VulnerabilitySeverity};
+use crate::registries::{TransitiveVuln, VersionInfo, Vulnerability, VulnerabilitySeverity};
 use crate::utils::fmt_truncate_string;
 
 /// Create diagnostics for a list of dependencies
@@ -71,6 +71,7 @@ pub fn create_diagnostics(
                     diagnostics.push(create_vulnerability_summary_diagnostic(
                         dep,
                         &filtered_vulns,
+                        &version_info.transitive_vulnerabilities,
                     ));
                 }
             }
@@ -315,25 +316,57 @@ fn create_yanked_diagnostic(
     }
 }
 
+/// Build a short message listing transitive vulnerabilities for a direct dep.
+/// Shows up to 3 entries, then "+N more".
+pub fn build_transitive_summary_message(tv: &[TransitiveVuln]) -> String {
+    if tv.is_empty() {
+        return String::new();
+    }
+    let mut parts: Vec<String> = tv
+        .iter()
+        .take(3)
+        .map(|t| {
+            let name = &t.package_name;
+            let ver = &t.package_version;
+            let id = &t.vulnerability.id;
+            format!("{name}@{ver} ({id})")
+        })
+        .collect();
+    if tv.len() > 3 {
+        parts.push(format!("+{} more", tv.len() - 3));
+    }
+    let n = tv.len();
+    format!("{n} transitive CVE(s): {}", parts.join(", "))
+}
+
 /// Create a summary diagnostic for multiple vulnerabilities
 fn create_vulnerability_summary_diagnostic(
     dep: &Dependency,
     vulns: &[&Vulnerability],
+    transitive_vulns: &[TransitiveVuln],
 ) -> Diagnostic {
     let count = vulns.len();
 
-    // Use the highest severity among all vulnerabilities
+    // Use the highest severity among all vulnerabilities (direct + transitive)
     let severity_to_num = |s: &VulnerabilitySeverity| match s {
         VulnerabilitySeverity::Critical => 4,
         VulnerabilitySeverity::High => 3,
         VulnerabilitySeverity::Medium => 2,
         VulnerabilitySeverity::Low => 1,
     };
-    let max_severity = vulns
+    let max_direct_sev = vulns
         .iter()
         .map(|v| &v.severity)
         .max_by_key(|s| severity_to_num(s))
         .unwrap_or(&VulnerabilitySeverity::Low);
+    let max_transitive_sev = transitive_vulns
+        .iter()
+        .map(|t| &t.vulnerability.severity)
+        .max_by_key(|s| severity_to_num(s));
+    let max_severity = match max_transitive_sev {
+        Some(ts) if severity_to_num(ts) > severity_to_num(max_direct_sev) => ts,
+        _ => max_direct_sev,
+    };
 
     let diagnostic_severity = match max_severity {
         VulnerabilitySeverity::Critical | VulnerabilitySeverity::High => DiagnosticSeverity::ERROR,
@@ -344,7 +377,14 @@ fn create_vulnerability_summary_diagnostic(
     // Build summary message
     let vuln_word = if count == 1 { "vuln" } else { "vulns" };
     let vuln_ids: Vec<_> = vulns.iter().map(|v| v.id.as_str()).collect();
-    let message = format!("⚠ {count} {vuln_word}: {}", vuln_ids.join(", "));
+    let mut message = format!("⚠ {count} {vuln_word}: {}", vuln_ids.join(", "));
+
+    // Append transitive vulnerability summary if present
+    if !transitive_vulns.is_empty() {
+        let tv_msg = build_transitive_summary_message(transitive_vulns);
+        message.push_str(" — ");
+        message.push_str(&tv_msg);
+    }
 
     // Collect related information for all vulnerabilities
     let related_info: Vec<_> = vulns
@@ -1024,6 +1064,53 @@ mod tests {
         assert!(yanked_diags[0].related_information.is_some());
         let related = yanked_diags[0].related_information.as_ref().unwrap();
         assert_eq!(related.len(), 2);
+    }
+
+    #[test]
+    fn test_build_transitive_summary_message_formats_correctly() {
+        let tvs = vec![crate::registries::TransitiveVuln {
+            package_name: "scheduler".to_string(),
+            package_version: "1.2.3".to_string(),
+            vulnerability: crate::registries::Vulnerability {
+                id: "CVE-1".to_string(),
+                severity: crate::registries::VulnerabilitySeverity::High,
+                description: "x".to_string(),
+                url: None,
+            },
+        }];
+        let msg = build_transitive_summary_message(&tvs);
+        assert!(msg.contains("scheduler@1.2.3"));
+        assert!(msg.contains("CVE-1"));
+        assert!(msg.contains("1 transitive"));
+    }
+
+    #[test]
+    fn test_build_transitive_summary_message_truncates_after_three() {
+        let mk = |name: &str, id: &str| crate::registries::TransitiveVuln {
+            package_name: name.to_string(),
+            package_version: "1.0.0".to_string(),
+            vulnerability: crate::registries::Vulnerability {
+                id: id.to_string(),
+                severity: crate::registries::VulnerabilitySeverity::Low,
+                description: "x".to_string(),
+                url: None,
+            },
+        };
+        let tvs = vec![
+            mk("a", "X1"),
+            mk("b", "X2"),
+            mk("c", "X3"),
+            mk("d", "X4"),
+            mk("e", "X5"),
+        ];
+        let msg = build_transitive_summary_message(&tvs);
+        assert!(msg.contains("+2 more"));
+    }
+
+    #[test]
+    fn test_build_transitive_summary_message_empty() {
+        let msg = build_transitive_summary_message(&[]);
+        assert_eq!(msg, "");
     }
 
     #[test]
