@@ -499,10 +499,12 @@ pub fn parse_pnpm_lock_graph(content: &str) -> LockfileGraph {
         }
         if in_deps && line.starts_with("      ") {
             let trimmed = line.trim_start();
-            let dep_name = trimmed
+            let dep_name_raw = trimmed
                 .split_once(':')
                 .map(|(n, _)| n.trim())
                 .unwrap_or(trimmed.trim());
+            // pnpm v9 quotes scoped names like '@emotion/cache'
+            let dep_name = dep_name_raw.trim_matches('\'').trim_matches('"');
             if !dep_name.is_empty()
                 && let Some(cur) = current.as_mut()
             {
@@ -1195,6 +1197,31 @@ packages:
             .find(|p| p.name == "@types/node")
             .unwrap();
         assert_eq!(ty.version, "20.11.5");
+    }
+
+    #[test]
+    fn test_parse_pnpm_lock_graph_unquotes_scoped_dep_names() {
+        let content = r#"
+lockfileVersion: '9.0'
+
+packages:
+
+  react@18.2.0:
+    resolution: {integrity: sha512-xxx}
+    dependencies:
+      '@emotion/cache': 11.11.0
+      react-dom: 18.2.0
+
+  '@emotion/cache@11.11.0':
+    resolution: {integrity: sha512-yyy}
+"#;
+        let graph = parse_pnpm_lock_graph(content);
+        let react = graph.packages.iter().find(|p| p.name == "react").unwrap();
+        assert!(
+            react.dependencies.contains(&"@emotion/cache".to_string()),
+            "scoped dep name should be unquoted, got {:?}", react.dependencies
+        );
+        assert!(react.dependencies.contains(&"react-dom".to_string()));
     }
 
     #[test]
