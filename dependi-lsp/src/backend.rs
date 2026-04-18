@@ -52,6 +52,17 @@ use crate::{
     reports::fmt_markdown_report,
 };
 
+/// Extract the `[package].name` field from a Cargo.toml manifest.
+/// Used to pass the root package name to `parse_cargo_lock` for multi-version disambiguation.
+fn cargo_root_package_name(manifest_content: &str) -> Option<String> {
+    let value: toml::Value = toml::from_str(manifest_content).ok()?;
+    value
+        .get("package")?
+        .get("name")?
+        .as_str()
+        .map(|s| s.to_string())
+}
+
 /// Compute cache key for a dependency, including registry for Cargo alternative registries.
 ///
 /// For Cargo deps with `registry = "name"`, the key is `crates:{registry}:{name}` to avoid
@@ -93,6 +104,10 @@ struct ProcessingContext {
     maven_central: Arc<tokio::sync::RwLock<MavenCentralRegistry>>,
     osv_client: Arc<OsvClient>,
     vuln_cache: Arc<VulnerabilityCache>,
+    /// Per-(ecosystem, name, version) transitive vuln data shared across document processing runs.
+    transitive_vuln_data: Arc<
+        DashMap<crate::vulnerabilities::cache::VulnCacheKey, Vec<crate::registries::Vulnerability>>,
+    >,
 }
 
 impl ProcessingContext {
@@ -134,8 +149,11 @@ impl ProcessingContext {
                     // Use parse_cargo_lock (HashMap) for resolution: it correctly
                     // disambiguates multi-version crates via the root package's dep list.
                     // parse_cargo_lock_graph is kept for the transitive walk below.
-                    let version_map =
-                        crate::parsers::cargo_lock::parse_cargo_lock(&lock_content, None);
+                    let root_name = cargo_root_package_name(content);
+                    let version_map = crate::parsers::cargo_lock::parse_cargo_lock(
+                        &lock_content,
+                        root_name.as_deref(),
+                    );
                     for dep in &mut dependencies {
                         if let Some(v) = version_map.get(&dep.name) {
                             dep.resolved_version = Some(v.clone());
@@ -745,6 +763,7 @@ impl ProcessingContext {
             let cache_clone = Arc::clone(&self.version_cache);
             let osv_client_clone = Arc::clone(&self.osv_client);
             let vuln_cache_clone = Arc::clone(&self.vuln_cache);
+            let transitive_vuln_data_clone = Arc::clone(&self.transitive_vuln_data);
             let client_clone = self.client.clone();
             let documents_clone = Arc::clone(&self.documents);
             let uri_clone = uri.clone();
@@ -761,6 +780,7 @@ impl ProcessingContext {
                         documents: documents_clone,
                         uri: uri_clone,
                         lockfile_graph,
+                        transitive_vuln_data: transitive_vuln_data_clone,
                     },
                 )
                 .await;
@@ -775,6 +795,11 @@ struct VulnBgContext {
     documents: Arc<DashMap<Url, DocumentState>>,
     uri: Url,
     lockfile_graph: Option<std::sync::Arc<crate::parsers::lockfile_graph::LockfileGraph>>,
+    /// Per-(ecosystem, name, version) transitive vuln data. Populated by the fresh-query loop
+    /// and read by the cached-query loop so re-attribution works on subsequent document opens.
+    transitive_vuln_data: Arc<
+        DashMap<crate::vulnerabilities::cache::VulnCacheKey, Vec<crate::registries::Vulnerability>>,
+    >,
 }
 
 pub struct DependiBackend {
@@ -815,6 +840,12 @@ pub struct DependiBackend {
     /// Vulnerability scanning
     osv_client: Arc<OsvClient>,
     vuln_cache: Arc<VulnerabilityCache>,
+    /// Per-(ecosystem, name, version) transitive vuln data.
+    /// Populated during fresh OSV queries for transitive packages; read on cached re-attribution
+    /// so subsequent document opens can still attribute transitives to their direct parents.
+    transitive_vuln_data: Arc<
+        DashMap<crate::vulnerabilities::cache::VulnCacheKey, Vec<crate::registries::Vulnerability>>,
+    >,
     /// Debounce tasks for did_change notifications (per-URI)
     /// Maps URI -> (generation, JoinHandle) for safe cleanup with racing tasks
     debounce_tasks: Arc<DashMap<Url, (u64, tokio::task::JoinHandle<()>)>>,
@@ -889,6 +920,7 @@ impl DependiBackend {
             token_manager,
             osv_client: Arc::new(OsvClient::default()),
             vuln_cache: Arc::new(VulnerabilityCache::new()),
+            transitive_vuln_data: Arc::new(DashMap::new()),
             debounce_tasks: Arc::new(DashMap::new()),
             debounce_generation: Arc::new(std::sync::atomic::AtomicU64::new(0)),
             pending_changes: Arc::new(DashMap::new()),
@@ -922,6 +954,7 @@ impl DependiBackend {
             maven_central: Arc::clone(&self.maven_central),
             osv_client: Arc::clone(&self.osv_client),
             vuln_cache: Arc::clone(&self.vuln_cache),
+            transitive_vuln_data: Arc::clone(&self.transitive_vuln_data),
         }
     }
 
@@ -1011,15 +1044,25 @@ impl DependiBackend {
 
         // Collect transitive packages from the lockfile graph.
         // Names are canonicalized to match the lockfile graph keys (Python/PHP/Ruby normalize).
-        let direct_names: Vec<String> = dependencies
-            .iter()
-            .map(|d| match file_type {
-                FileType::Python => crate::parsers::python_lock::normalize_python_name(&d.name),
-                FileType::Php => crate::parsers::composer_lock::normalize_composer_name(&d.name),
-                FileType::Ruby => crate::parsers::gemfile_lock::normalize_gem_name(&d.name),
-                _ => d.name.clone(),
-            })
-            .collect();
+        // Also build a reverse map so that normalized parent names from reverse_index can be
+        // translated back to the raw manifest name used as keys in diagnostics/hover lookups.
+        let (direct_names, normalized_to_raw): (Vec<String>, HashMap<String, String>) = {
+            let mut names = Vec::with_capacity(dependencies.len());
+            let mut map: HashMap<String, String> = HashMap::new();
+            for d in dependencies.iter() {
+                let canonical = match file_type {
+                    FileType::Python => crate::parsers::python_lock::normalize_python_name(&d.name),
+                    FileType::Php => {
+                        crate::parsers::composer_lock::normalize_composer_name(&d.name)
+                    }
+                    FileType::Ruby => crate::parsers::gemfile_lock::normalize_gem_name(&d.name),
+                    _ => d.name.clone(),
+                };
+                names.push(canonical.clone());
+                map.insert(canonical, d.name.clone());
+            }
+            (names, map)
+        };
         let transitives: Vec<crate::parsers::lockfile_graph::LockfilePackage> = bg_ctx
             .lockfile_graph
             .as_deref()
@@ -1174,9 +1217,15 @@ impl DependiBackend {
                             }
                         } else {
                             for parent in &parents {
+                                // Translate normalized parent name back to the raw manifest name
+                                // so that diagnostics/hover lookups using dep.name succeed.
+                                let raw_parent = normalized_to_raw
+                                    .get(parent.as_str())
+                                    .cloned()
+                                    .unwrap_or_else(|| parent.clone());
                                 for v in &result.vulnerabilities {
                                     transitive_vulns_by_direct
-                                        .entry_ref(parent.as_str())
+                                        .entry_ref(raw_parent.as_str())
                                         .or_default()
                                         .push(TransitiveVuln {
                                             package_name: tpkg.name.clone(),
@@ -1189,25 +1238,42 @@ impl DependiBackend {
                                     result.vulnerabilities.len(),
                                     tpkg.name,
                                     tpkg.version,
-                                    parent
+                                    raw_parent
                                 );
                             }
+                        }
+
+                        // Also store per-(ecosystem, name, version) so cached re-attribution can
+                        // retrieve the vuln list on subsequent document opens (FIX C).
+                        if !result.vulnerabilities.is_empty() {
+                            let vuln_data_key = VulnCacheKey::new(
+                                ecosystem,
+                                &tpkg.name,
+                                &normalize_version_for_osv(&tpkg.version),
+                            );
+                            bg_ctx
+                                .transitive_vuln_data
+                                .insert(vuln_data_key, result.vulnerabilities.clone());
                         }
                     }
 
                     // Attribute transitive vulns for packages already in vuln_cache.
-                    // Their vuln data lives in version_cache under the ecosystem-prefixed key.
-                    // This ensures re-processing a document never drops transitive attribution
-                    // just because the OSV query was skipped.
+                    // Vuln data for transitives is stored in transitive_vuln_data (not
+                    // version_cache, which only holds direct-dep data). This ensures
+                    // re-processing a document never drops transitive attribution just because
+                    // the OSV query was skipped on the second run (FIX C).
                     for tpkg in &transitive_cached_pkgs {
-                        let cache_key = file_type.cache_key(&tpkg.name);
-                        if let Some(info) = cache.get(&cache_key) {
-                            if info.vulnerabilities.is_empty() {
+                        let normalized_version = normalize_version_for_osv(&tpkg.version);
+                        let vuln_data_key =
+                            VulnCacheKey::new(ecosystem, &tpkg.name, &normalized_version);
+                        if let Some(vulns) = bg_ctx.transitive_vuln_data.get(&vuln_data_key) {
+                            let vulns: Vec<_> = vulns.clone();
+                            if vulns.is_empty() {
                                 continue;
                             }
                             let parents = inverse.get(&tpkg.name).cloned().unwrap_or_default();
                             if parents.is_empty() {
-                                for v in &info.vulnerabilities {
+                                for v in &vulns {
                                     transitive_vulns_by_direct
                                         .entry_ref("(unknown)")
                                         .or_default()
@@ -1219,9 +1285,14 @@ impl DependiBackend {
                                 }
                             } else {
                                 for parent in &parents {
-                                    for v in &info.vulnerabilities {
+                                    // Translate normalized parent name back to raw manifest name.
+                                    let raw_parent = normalized_to_raw
+                                        .get(parent.as_str())
+                                        .cloned()
+                                        .unwrap_or_else(|| parent.clone());
+                                    for v in &vulns {
                                         transitive_vulns_by_direct
-                                            .entry_ref(parent.as_str())
+                                            .entry_ref(raw_parent.as_str())
                                             .or_default()
                                             .push(TransitiveVuln {
                                                 package_name: tpkg.name.clone(),
@@ -1231,10 +1302,10 @@ impl DependiBackend {
                                     }
                                     tracing::debug!(
                                         "Background: Re-attributed (cached) {} transitive vulns from {}@{} to direct dep {}",
-                                        info.vulnerabilities.len(),
+                                        vulns.len(),
                                         tpkg.name,
                                         tpkg.version,
-                                        parent
+                                        raw_parent
                                     );
                                 }
                             }
