@@ -188,6 +188,7 @@ async fn run_scan(
         dart::DartParser, gemfile_lock, go::GoParser, lockfile_graph::LockfileGraph,
         lockfile_graph::LockfilePackage, lockfile_graph::read_lockfile_capped, maven::MavenParser,
         npm::NpmParser, npm_lock, php::PhpParser, python::PythonParser, python_lock,
+        ruby::RubyParser,
     };
     use dependi_lsp::registries::VulnerabilitySeverity;
     use dependi_lsp::vulnerabilities::{
@@ -239,6 +240,8 @@ async fn run_scan(
         (DartParser::new().parse(&content), Ecosystem::Pub)
     } else if file_name.ends_with(".csproj") {
         (CsharpParser::new().parse(&content), Ecosystem::NuGet)
+    } else if file_name == "Gemfile" {
+        (RubyParser::new().parse(&content), Ecosystem::RubyGems)
     } else if file_name == "pom.xml" {
         (MavenParser::new().parse(&content), Ecosystem::Maven)
     } else {

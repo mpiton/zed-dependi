@@ -67,7 +67,9 @@ pub fn create_diagnostics(
                     })
                     .collect();
 
-                if !filtered_vulns.is_empty() {
+                if !filtered_vulns.is_empty()
+                    || !version_info.transitive_vulnerabilities.is_empty()
+                {
                     diagnostics.push(create_vulnerability_summary_diagnostic(
                         dep,
                         &filtered_vulns,
@@ -363,9 +365,13 @@ fn create_vulnerability_summary_diagnostic(
         .iter()
         .map(|t| &t.vulnerability.severity)
         .max_by_key(|s| severity_to_num(s));
-    let max_severity = match max_transitive_sev {
-        Some(ts) if severity_to_num(ts) > severity_to_num(max_direct_sev) => ts,
-        _ => max_direct_sev,
+    let max_severity = if vulns.is_empty() {
+        max_transitive_sev.unwrap_or(&VulnerabilitySeverity::Low)
+    } else {
+        match max_transitive_sev {
+            Some(ts) if severity_to_num(ts) > severity_to_num(max_direct_sev) => ts,
+            _ => max_direct_sev,
+        }
     };
 
     let diagnostic_severity = match max_severity {
@@ -374,19 +380,26 @@ fn create_vulnerability_summary_diagnostic(
         VulnerabilitySeverity::Low => DiagnosticSeverity::HINT,
     };
 
-    // Build summary message
-    let vuln_word = if count == 1 { "vuln" } else { "vulns" };
-    let vuln_ids: Vec<_> = vulns.iter().map(|v| v.id.as_str()).collect();
-    let mut message = format!("⚠ {count} {vuln_word}: {}", vuln_ids.join(", "));
+    // Build summary message: direct only, transitive only, or both
+    let message = if vulns.is_empty() {
+        // Transitive-only case
+        build_transitive_summary_message(transitive_vulns)
+    } else {
+        let vuln_word = if count == 1 { "vuln" } else { "vulns" };
+        let vuln_ids: Vec<_> = vulns.iter().map(|v| v.id.as_str()).collect();
+        let mut msg = format!("⚠ {count} {vuln_word}: {}", vuln_ids.join(", "));
+        if !transitive_vulns.is_empty() {
+            let tv_msg = build_transitive_summary_message(transitive_vulns);
+            msg.push_str(" — ");
+            msg.push_str(&tv_msg);
+        }
+        msg
+    };
 
-    // Append transitive vulnerability summary if present
-    if !transitive_vulns.is_empty() {
-        let tv_msg = build_transitive_summary_message(transitive_vulns);
-        message.push_str(" — ");
-        message.push_str(&tv_msg);
-    }
+    // The diagnostic code uses the total count (direct + transitive CVE entries)
+    let total_count = count + transitive_vulns.len();
 
-    // Collect related information for all vulnerabilities
+    // Collect related information for direct vulnerabilities
     let related_info: Vec<_> = vulns
         .iter()
         .filter_map(|&vuln| {
@@ -418,7 +431,7 @@ fn create_vulnerability_summary_diagnostic(
             },
         },
         severity: Some(diagnostic_severity),
-        code: Some(NumberOrString::String(format!("{count}-vulns"))),
+        code: Some(NumberOrString::String(format!("{total_count}-vulns"))),
         source: Some("dependi-security".to_string()),
         message,
         related_information: (!related_info.is_empty()).then_some(related_info),
@@ -1271,5 +1284,60 @@ mod tests {
             !yanked_diags[0].message.contains("crates.io"),
             "Yanked diagnostic should NOT reference 'crates.io' for npm packages"
         );
+    }
+
+    #[test]
+    fn test_diagnostic_fires_on_transitive_only_vulns() {
+        use crate::registries::{TransitiveVuln, Vulnerability, VulnerabilitySeverity, VersionInfo};
+
+        let deps = vec![create_test_dependency("my-dep", "1.0.0", 5)];
+        let cache = MemoryCache::new();
+        cache.insert(
+            "test:my-dep".to_string(),
+            VersionInfo {
+                latest: Some("1.0.0".to_string()),
+                transitive_vulnerabilities: vec![TransitiveVuln {
+                    package_name: "scheduler".into(),
+                    package_version: "1.2.3".into(),
+                    vulnerability: Vulnerability {
+                        id: "CVE-1".into(),
+                        severity: VulnerabilitySeverity::High,
+                        description: "desc".into(),
+                        url: None,
+                    },
+                }],
+                ..Default::default()
+            },
+        );
+
+        let diagnostics = create_diagnostics(
+            &deps,
+            &cache,
+            |name| format!("test:{name}"),
+            None,
+            FileType::Cargo,
+        );
+
+        let vuln_diags: Vec<_> = diagnostics
+            .iter()
+            .filter(|d| {
+                d.code
+                    .as_ref()
+                    .is_some_and(|c| matches!(c, NumberOrString::String(s) if s.contains("vulns")))
+            })
+            .collect();
+
+        assert_eq!(vuln_diags.len(), 1, "Should emit diagnostic for transitive-only vulns");
+        assert!(
+            vuln_diags[0].message.contains("transitive"),
+            "Message should contain 'transitive', got: {}",
+            vuln_diags[0].message
+        );
+        assert!(
+            vuln_diags[0].message.contains("scheduler@1.2.3"),
+            "Message should contain 'scheduler@1.2.3', got: {}",
+            vuln_diags[0].message
+        );
+        assert_eq!(vuln_diags[0].severity, Some(DiagnosticSeverity::ERROR));
     }
 }
