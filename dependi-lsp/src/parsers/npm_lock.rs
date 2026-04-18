@@ -1219,7 +1219,8 @@ packages:
         let react = graph.packages.iter().find(|p| p.name == "react").unwrap();
         assert!(
             react.dependencies.contains(&"@emotion/cache".to_string()),
-            "scoped dep name should be unquoted, got {:?}", react.dependencies
+            "scoped dep name should be unquoted, got {:?}",
+            react.dependencies
         );
         assert!(react.dependencies.contains(&"react-dom".to_string()));
     }
