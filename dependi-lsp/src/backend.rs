@@ -802,7 +802,7 @@ impl DependiBackend {
                 Some(info)
             }
             Err(e) => {
-                tracing::warn!("Failed to fetch version info for {}: {}", package_name, e);
+                tracing::warn!("Failed to fetch version info for {package_name}: {e}");
                 None
             }
         }
@@ -857,46 +857,49 @@ impl DependiBackend {
                 let mut updated_count = 0;
 
                 // Update vulnerability cache and version_cache with results
-                for (query, result) in queries.iter().zip(results.iter()) {
+                for (
+                    VulnerabilityQuery {
+                        package_name,
+                        version,
+                        ecosystem,
+                    },
+                    osv::QueryResult {
+                        vulnerabilities,
+                        deprecated,
+                    },
+                ) in queries.into_iter().zip(results)
+                {
                     // Mark this package as queried in vuln_cache
-                    let vuln_key =
-                        VulnCacheKey::new(ecosystem, &query.package_name, &query.version);
+                    let vuln_key = VulnCacheKey::new(ecosystem, &package_name, &version);
                     vuln_cache.insert(vuln_key);
 
                     // Store vulnerabilities and deprecated status in version_cache
                     let cache_key = cache_key_map
-                        .get(&query.package_name)
+                        .get(&package_name)
                         .cloned()
-                        .unwrap_or_else(|| file_type.cache_key(&query.package_name));
+                        .unwrap_or_else(|| file_type.cache_key(&package_name));
                     if let Some(mut info) = cache.get(&cache_key) {
-                        info.vulnerabilities = result.vulnerabilities.clone();
-                        info.deprecated = result.deprecated;
-                        if result.deprecated {
+                        info.vulnerabilities = vulnerabilities.clone();
+                        info.deprecated = deprecated;
+                        if deprecated {
                             tracing::info!(
-                                "Background: Package {} {} is deprecated (unmaintained)",
-                                query.package_name,
-                                query.version
+                                "Background: Package {package_name} {version} is deprecated (unmaintained)",
                             );
                         }
                         tracing::debug!(
-                            "Background: Updated {} {} with {} vulnerabilities, deprecated={}",
-                            query.package_name,
-                            query.version,
-                            result.vulnerabilities.len(),
-                            result.deprecated
+                            "Background: Updated {package_name} {version} with {n} vulnerabilities, deprecated={deprecated}",
+                            n = vulnerabilities.len(),
                         );
                         cache.insert(cache_key, info);
                         updated_count += 1;
                     } else {
                         tracing::warn!(
-                            "Background: Could not update vulnerabilities for {}: not found in version cache",
-                            query.package_name
+                            "Background: Could not update vulnerabilities for {package_name}: not found in version cache",
                         );
                     }
                 }
                 tracing::info!(
-                    "Background: Cached vulnerability info for {} packages",
-                    updated_count
+                    "Background: Cached vulnerability info for {updated_count} packages",
                 );
 
                 // Refresh UI with new vulnerability data
@@ -913,10 +916,7 @@ impl DependiBackend {
                 tracing::info!("Background: Vulnerability check complete, UI updated");
             }
             Err(e) => {
-                tracing::warn!(
-                    "Background: Failed to fetch vulnerabilities from OSV.dev: {}",
-                    e
-                );
+                tracing::warn!("Background: Failed to fetch vulnerabilities from OSV.dev: {e}");
             }
         }
     }
