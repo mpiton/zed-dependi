@@ -131,10 +131,14 @@ impl ProcessingContext {
         {
             match crate::parsers::lockfile_graph::read_lockfile_capped(&lock_path).await {
                 Ok(lock_content) => {
-                    let graph = crate::parsers::cargo_lock::parse_cargo_lock_graph(&lock_content);
+                    // Use parse_cargo_lock (HashMap) for resolution: it correctly
+                    // disambiguates multi-version crates via the root package's dep list.
+                    // parse_cargo_lock_graph is kept for the transitive walk below.
+                    let version_map =
+                        crate::parsers::cargo_lock::parse_cargo_lock(&lock_content, None);
                     for dep in &mut dependencies {
-                        if let Some(p) = graph.packages.iter().find(|p| p.name == dep.name) {
-                            dep.resolved_version = Some(p.version.clone());
+                        if let Some(v) = version_map.get(&dep.name) {
+                            dep.resolved_version = Some(v.clone());
                         }
                     }
                     tracing::debug!(
@@ -145,6 +149,7 @@ impl ProcessingContext {
                             .count(),
                         lock_path.display()
                     );
+                    let graph = crate::parsers::cargo_lock::parse_cargo_lock_graph(&lock_content);
                     lockfile_graph = Some(std::sync::Arc::new(graph));
                 }
                 Err(e) => {
@@ -954,30 +959,41 @@ impl DependiBackend {
             })
             .unwrap_or_default();
 
-        // Build queries for direct packages not in vulnerability cache
-        let direct_queries: Vec<VulnerabilityQuery> = dependencies
-            .iter()
-            .filter(|dep| {
-                let normalized_version = normalize_version_for_osv(dep.effective_version());
-                let vuln_key = VulnCacheKey::new(ecosystem, &dep.name, &normalized_version);
-                !vuln_cache.contains(&vuln_key)
-            })
-            .map(|dep| VulnerabilityQuery {
+        // Build queries for direct packages not in vulnerability cache.
+        // Track the filtered subset so we can correlate results back.
+        let mut direct_queries: Vec<VulnerabilityQuery> = Vec::new();
+        let mut direct_query_deps: Vec<&crate::parsers::Dependency> = Vec::new();
+        for dep in dependencies.iter() {
+            let normalized_version = normalize_version_for_osv(dep.effective_version());
+            let vuln_key = VulnCacheKey::new(ecosystem, &dep.name, &normalized_version);
+            if vuln_cache.contains(&vuln_key) {
+                continue;
+            }
+            direct_queries.push(VulnerabilityQuery {
                 ecosystem,
                 package_name: dep.name.clone(),
-                version: normalize_version_for_osv(dep.effective_version()),
-            })
-            .collect();
+                version: normalized_version,
+            });
+            direct_query_deps.push(dep);
+        }
 
-        // Build queries for transitive packages
-        let transitive_queries: Vec<VulnerabilityQuery> = transitives
-            .iter()
-            .map(|t| VulnerabilityQuery {
+        // Build queries for transitive packages not in vulnerability cache.
+        let mut transitive_queries: Vec<VulnerabilityQuery> = Vec::new();
+        let mut transitive_query_pkgs: Vec<&crate::parsers::lockfile_graph::LockfilePackage> =
+            Vec::new();
+        for t in transitives.iter() {
+            let normalized_version = normalize_version_for_osv(&t.version);
+            let vuln_key = VulnCacheKey::new(ecosystem, &t.name, &normalized_version);
+            if vuln_cache.contains(&vuln_key) {
+                continue;
+            }
+            transitive_queries.push(VulnerabilityQuery {
                 ecosystem,
                 package_name: t.name.clone(),
-                version: normalize_version_for_osv(&t.version),
-            })
-            .collect();
+                version: normalized_version,
+            });
+            transitive_query_pkgs.push(t);
+        }
 
         let direct_count = direct_queries.len();
         let mut all_queries = direct_queries;
@@ -992,7 +1008,7 @@ impl DependiBackend {
             "Background: Querying OSV.dev for {} packages ({} direct, {} transitive)",
             all_queries.len(),
             direct_count,
-            transitives.len()
+            transitive_query_pkgs.len()
         );
 
         // Batch query OSV.dev
@@ -1002,35 +1018,34 @@ impl DependiBackend {
 
                 let (direct_results, transitive_results) = results.split_at(direct_count);
 
-                // Update vulnerability cache and version_cache with direct results
-                for (query, result) in all_queries[..direct_count]
-                    .iter()
-                    .zip(direct_results.iter())
-                {
+                // Update vulnerability cache and version_cache with direct results.
+                // direct_query_deps is the filtered list (cached ones were skipped above).
+                for (dep, result) in direct_query_deps.iter().zip(direct_results.iter()) {
+                    let normalized_version = normalize_version_for_osv(dep.effective_version());
                     // Mark this package as queried in vuln_cache
                     let vuln_key =
-                        VulnCacheKey::new(ecosystem, &query.package_name, &query.version);
+                        VulnCacheKey::new(ecosystem, &dep.name, &normalized_version);
                     vuln_cache.insert(vuln_key);
 
                     // Store vulnerabilities and deprecated status in version_cache
                     let cache_key = cache_key_map
-                        .get(&query.package_name)
+                        .get(&dep.name)
                         .cloned()
-                        .unwrap_or_else(|| file_type.cache_key(&query.package_name));
+                        .unwrap_or_else(|| file_type.cache_key(&dep.name));
                     if let Some(mut info) = cache.get(&cache_key) {
                         info.vulnerabilities = result.vulnerabilities.clone();
                         info.deprecated = result.deprecated;
                         if result.deprecated {
                             tracing::info!(
                                 "Background: Package {} {} is deprecated (unmaintained)",
-                                query.package_name,
-                                query.version
+                                dep.name,
+                                normalized_version
                             );
                         }
                         tracing::debug!(
                             "Background: Updated {} {} with {} vulnerabilities, deprecated={}",
-                            query.package_name,
-                            query.version,
+                            dep.name,
+                            normalized_version,
                             result.vulnerabilities.len(),
                             result.deprecated
                         );
@@ -1039,18 +1054,27 @@ impl DependiBackend {
                     } else {
                         tracing::warn!(
                             "Background: Could not update vulnerabilities for {}: not found in version cache",
-                            query.package_name
+                            dep.name
                         );
                     }
                 }
 
-                // Attach transitive vulnerabilities to the first direct parent that reaches them
+                // Attach transitive vulnerabilities to the first direct parent that reaches them.
+                // transitive_query_pkgs is the filtered list (cached ones were skipped above).
                 if let Some(graph) = lockfile_graph.as_deref() {
                     use crate::registries::TransitiveVuln;
 
                     let inverse = graph.reverse_index(&direct_names);
 
-                    for (tpkg, result) in transitives.iter().zip(transitive_results.iter()) {
+                    for (tpkg, result) in
+                        transitive_query_pkgs.iter().zip(transitive_results.iter())
+                    {
+                        // Mark this transitive package as queried in vuln_cache
+                        let normalized_version = normalize_version_for_osv(&tpkg.version);
+                        let vuln_key =
+                            VulnCacheKey::new(ecosystem, &tpkg.name, &normalized_version);
+                        vuln_cache.insert(vuln_key);
+
                         if result.vulnerabilities.is_empty() {
                             continue;
                         }

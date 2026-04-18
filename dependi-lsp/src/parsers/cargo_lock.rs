@@ -72,8 +72,10 @@ pub fn parse_cargo_lock(content: &str, root_package: Option<&str>) -> HashMap<St
 
 /// Parse Cargo.lock into a full dependency graph.
 ///
-/// Dependency strings in Cargo.lock follow the form "name" or "name version"
-/// (or v1 legacy "name version (source)"). We keep only the name.
+/// Dependency strings are stored as-is (e.g. `"serde"` or `"serde 1.0.195"`).
+/// Cargo writes the version when multiple versions of the same crate are locked,
+/// so preserving it allows correct transitive attribution.  Graph-walk code
+/// normalises to the name portion when resolving edges.
 pub fn parse_cargo_lock_graph(content: &str) -> LockfileGraph {
     let mut graph = LockfileGraph::default();
 
@@ -100,7 +102,7 @@ pub fn parse_cargo_lock_graph(content: &str) -> LockfileGraph {
             .map(|arr| {
                 arr.iter()
                     .filter_map(|d| d.as_str())
-                    .map(|s| s.split_whitespace().next().unwrap_or(s).to_string())
+                    .map(|s| s.to_string())
                     .collect::<Vec<_>>()
             })
             .unwrap_or_default();
@@ -325,10 +327,33 @@ version = "0.8.10"
         let graph = parse_cargo_lock_graph(content);
         assert_eq!(graph.packages.len(), 4);
         let root = graph.packages.iter().find(|p| p.name == "root").unwrap();
+        // Dependencies are stored as-is; "serde" has no version, "tokio 1.36.0" keeps it.
         assert!(root.dependencies.contains(&"serde".to_string()));
-        assert!(root.dependencies.contains(&"tokio".to_string()));
+        assert!(root.dependencies.contains(&"tokio 1.36.0".to_string()));
         let tokio = graph.packages.iter().find(|p| p.name == "tokio").unwrap();
         assert_eq!(tokio.dependencies, vec!["mio".to_string()]);
+    }
+
+    #[test]
+    fn test_parse_cargo_lock_graph_preserves_dep_version_tokens() {
+        let content = r#"
+[[package]]
+name = "root"
+version = "0.1.0"
+dependencies = ["hashbrown 0.15.5", "hashbrown 0.16.1"]
+
+[[package]]
+name = "hashbrown"
+version = "0.15.5"
+
+[[package]]
+name = "hashbrown"
+version = "0.16.1"
+"#;
+        let graph = parse_cargo_lock_graph(content);
+        let root = graph.packages.iter().find(|p| p.name == "root").unwrap();
+        assert!(root.dependencies.iter().any(|d| d == "hashbrown 0.15.5"));
+        assert!(root.dependencies.iter().any(|d| d == "hashbrown 0.16.1"));
     }
 
     #[test]

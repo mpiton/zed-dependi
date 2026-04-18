@@ -42,6 +42,9 @@ pub struct LockfileGraph {
 impl LockfileGraph {
     /// DFS from `root_name`; returns unique transitive packages (excluding `root_name` itself).
     /// Returns empty vec if root is unknown. Cycles are handled via a visited set.
+    ///
+    /// Dependency strings may be `"name"` or `"name version"` (Cargo multi-version format).
+    /// The version suffix is stripped when resolving graph edges so that both forms work.
     pub fn transitive_deps_of(&self, root_name: &str) -> Vec<&LockfilePackage> {
         let mut visited: HashSet<&str> = HashSet::new();
         let mut stack: Vec<&str> = Vec::new();
@@ -50,7 +53,9 @@ impl LockfileGraph {
         if let Some(root) = self.find(root_name) {
             visited.insert(&root.name);
             for dep in &root.dependencies {
-                stack.push(dep.as_str());
+                // dep can be "name" or "name version" — use the name only for graph walk.
+                let name = dep.split_whitespace().next().unwrap_or(dep.as_str());
+                stack.push(name);
             }
         } else {
             return out;
@@ -63,7 +68,8 @@ impl LockfileGraph {
             if let Some(pkg) = self.find(name) {
                 out.push(pkg);
                 for dep in &pkg.dependencies {
-                    stack.push(dep.as_str());
+                    let n = dep.split_whitespace().next().unwrap_or(dep.as_str());
+                    stack.push(n);
                 }
             }
         }

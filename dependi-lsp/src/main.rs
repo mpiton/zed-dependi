@@ -254,8 +254,10 @@ async fn run_scan(
         return ExitCode::SUCCESS;
     }
 
-    // Detect lockfile and build graph
+    // Detect lockfile and build graph.
+    // For Cargo, we keep the lock content to build a disambiguated version_map separately.
     let mut lockfile_graph = LockfileGraph::default();
+    let mut cargo_lock_content: Option<String> = None;
     if use_lockfile {
         match ecosystem {
             Ecosystem::CratesIo => {
@@ -263,6 +265,7 @@ async fn run_scan(
                     && let Ok(lock_content) = read_lockfile_capped(&path).await
                 {
                     lockfile_graph = cargo_lock::parse_cargo_lock_graph(&lock_content);
+                    cargo_lock_content = Some(lock_content);
                 }
             }
             Ecosystem::Npm => {
@@ -319,12 +322,18 @@ async fn run_scan(
         }
     }
 
-    // Populate resolved_version on direct deps from the graph
-    let version_map: HashMap<String, String> = lockfile_graph
-        .packages
-        .iter()
-        .map(|p| (p.name.clone(), p.version.clone()))
-        .collect();
+    // Populate resolved_version on direct deps.
+    // For Cargo, use parse_cargo_lock (HashMap) which correctly disambiguates multi-version
+    // crates via the root package's dep list.  For other ecosystems, derive from the graph.
+    let version_map: HashMap<String, String> = if let Some(ref content) = cargo_lock_content {
+        cargo_lock::parse_cargo_lock(content, None)
+    } else {
+        lockfile_graph
+            .packages
+            .iter()
+            .map(|p| (p.name.clone(), p.version.clone()))
+            .collect()
+    };
 
     let mut dependencies = dependencies;
     for dep in dependencies.iter_mut() {
