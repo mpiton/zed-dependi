@@ -81,12 +81,12 @@ pub fn parse_composer_lock_graph(content: &str) -> LockfileGraph {
             if let Some(req) = entry.get("require").and_then(|r| r.as_object()) {
                 for dep_name in req.keys() {
                     if dep_name != "php" && !dep_name.starts_with("ext-") {
-                        deps.push(dep_name.clone());
+                        deps.push(normalize_composer_name(dep_name));
                     }
                 }
             }
             graph.packages.push(LockfilePackage {
-                name: name.to_string(),
+                name: normalize_composer_name(name),
                 version: version.to_string(),
                 dependencies: deps,
                 is_root: false,
@@ -268,5 +268,30 @@ mod tests {
             .find(|p| p.name == "symfony/polyfill-php80")
             .unwrap();
         assert!(!polyfill.dependencies.iter().any(|d| d.starts_with("ext-")));
+    }
+
+    #[test]
+    fn test_parse_composer_lock_graph_normalizes_names() {
+        let content = r#"{
+  "packages": [
+    {
+      "name": "Vendor/Package",
+      "version": "1.0.0",
+      "require": { "Dep/Other": "^1.0" }
+    },
+    { "name": "Dep/Other", "version": "1.2.3" }
+  ],
+  "packages-dev": []
+}"#;
+        let graph = parse_composer_lock_graph(content);
+        let names: Vec<&str> = graph.packages.iter().map(|p| p.name.as_str()).collect();
+        assert!(names.contains(&"vendor/package"), "main name should be lowercased, got {names:?}");
+        assert!(names.contains(&"dep/other"));
+        let vp = graph.packages.iter().find(|p| p.name == "vendor/package").unwrap();
+        assert!(
+            vp.dependencies.contains(&"dep/other".to_string()),
+            "require names must also be normalized, got {:?}",
+            vp.dependencies
+        );
     }
 }
