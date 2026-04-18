@@ -21,6 +21,7 @@ pub fn create_diagnostics(
     cache_key_fn: impl Fn(&str) -> String,
     min_severity: Option<VulnerabilitySeverity>,
     file_type: FileType,
+    doc_transitive_vulns: &hashbrown::HashMap<String, Vec<TransitiveVuln>>,
 ) -> Vec<Diagnostic> {
     let mut diagnostics = Vec::new();
 
@@ -55,7 +56,9 @@ pub fn create_diagnostics(
                 );
                 diagnostics.push(create_deprecation_diagnostic(dep, &version_info));
             } else {
-                // Add vulnerability diagnostic (summary) only if not deprecated or yanked
+                // Add vulnerability diagnostic (summary) only if not deprecated or yanked.
+                // Per-document transitive vulns are sourced from doc_transitive_vulns to avoid
+                // cross-workspace contamination from the shared global version_cache.
                 let filtered_vulns: Vec<_> = version_info
                     .vulnerabilities
                     .iter()
@@ -67,12 +70,16 @@ pub fn create_diagnostics(
                     })
                     .collect();
 
-                if !filtered_vulns.is_empty() || !version_info.transitive_vulnerabilities.is_empty()
-                {
+                let transitive_vulns = doc_transitive_vulns
+                    .get(&dep.name)
+                    .map(|v| v.as_slice())
+                    .unwrap_or(&[]);
+
+                if !filtered_vulns.is_empty() || !transitive_vulns.is_empty() {
                     diagnostics.push(create_vulnerability_summary_diagnostic(
                         dep,
                         &filtered_vulns,
-                        &version_info.transitive_vulnerabilities,
+                        transitive_vulns,
                     ));
                 }
             }
@@ -491,6 +498,7 @@ mod tests {
             |name| format!("test:{name}"),
             None,
             FileType::Cargo,
+            &hashbrown::HashMap::new(),
         );
 
         assert_eq!(diagnostics.len(), 1);
@@ -516,6 +524,7 @@ mod tests {
             |name| format!("test:{name}"),
             None,
             FileType::Cargo,
+            &hashbrown::HashMap::new(),
         );
 
         assert_eq!(diagnostics.len(), 0);
@@ -531,6 +540,7 @@ mod tests {
             |name| format!("test:{name}"),
             None,
             FileType::Cargo,
+            &hashbrown::HashMap::new(),
         );
 
         assert_eq!(diagnostics.len(), 0);
@@ -576,6 +586,7 @@ mod tests {
             |name| format!("test:{name}"),
             None,
             FileType::Cargo,
+            &hashbrown::HashMap::new(),
         );
 
         let deprecation_diags: Vec<_> = diagnostics
@@ -619,6 +630,7 @@ mod tests {
             |name| format!("test:{name}"),
             None,
             FileType::Cargo,
+            &hashbrown::HashMap::new(),
         );
 
         let deprecation_diags: Vec<_> = diagnostics
@@ -661,6 +673,7 @@ mod tests {
             |name| format!("test:{name}"),
             None,
             FileType::Cargo,
+            &hashbrown::HashMap::new(),
         );
 
         let deprecation_diags: Vec<_> = diagnostics
@@ -716,6 +729,7 @@ mod tests {
             |name| format!("test:{name}"),
             None,
             FileType::Cargo,
+            &hashbrown::HashMap::new(),
         );
 
         let yanked_diags: Vec<_> = diagnostics
@@ -755,6 +769,7 @@ mod tests {
             |name| format!("test:{name}"),
             None,
             FileType::Cargo,
+            &hashbrown::HashMap::new(),
         );
 
         let yanked_diags: Vec<_> = diagnostics
@@ -793,6 +808,7 @@ mod tests {
             |name| format!("test:{name}"),
             None,
             FileType::Cargo,
+            &hashbrown::HashMap::new(),
         );
 
         let yanked_diags: Vec<_> = diagnostics
@@ -854,6 +870,7 @@ mod tests {
             |name| format!("test:{name}"),
             None,
             FileType::Cargo,
+            &hashbrown::HashMap::new(),
         );
 
         let yanked_diags: Vec<_> = diagnostics
@@ -901,6 +918,7 @@ mod tests {
             |name| format!("test:{name}"),
             None,
             FileType::Cargo,
+            &hashbrown::HashMap::new(),
         );
 
         assert_eq!(diagnostics.len(), 1);
@@ -940,6 +958,7 @@ mod tests {
             |name| format!("test:{name}"),
             None,
             FileType::Cargo,
+            &hashbrown::HashMap::new(),
         );
 
         let vuln_diags: Vec<_> = diagnostics
@@ -989,6 +1008,7 @@ mod tests {
             |name| format!("test:{name}"),
             Some(VulnerabilitySeverity::High),
             FileType::Cargo,
+            &hashbrown::HashMap::new(),
         );
 
         let vuln_diags: Vec<_> = diagnostics
@@ -1024,6 +1044,7 @@ mod tests {
             |name| format!("test:{name}"),
             None,
             FileType::Cargo,
+            &hashbrown::HashMap::new(),
         );
 
         let deprecation_diags: Vec<_> = diagnostics
@@ -1061,6 +1082,7 @@ mod tests {
             |name| format!("test:{name}"),
             None,
             FileType::Cargo,
+            &hashbrown::HashMap::new(),
         );
 
         let yanked_diags: Vec<_> = diagnostics
@@ -1149,6 +1171,7 @@ mod tests {
             |name| format!("test:{name}"),
             None,
             FileType::Cargo,
+            &hashbrown::HashMap::new(),
         );
 
         let vuln_diags: Vec<_> = diagnostics
@@ -1188,6 +1211,7 @@ mod tests {
             |name| format!("test:{name}"),
             None,
             FileType::Cargo,
+            &hashbrown::HashMap::new(),
         );
 
         let vuln_diags: Vec<_> = diagnostics
@@ -1227,6 +1251,7 @@ mod tests {
             |name| format!("test:{name}"),
             None,
             FileType::Cargo,
+            &hashbrown::HashMap::new(),
         );
 
         let vuln_diags: Vec<_> = diagnostics
@@ -1261,6 +1286,7 @@ mod tests {
             |name| format!("test:{name}"),
             None,
             FileType::Npm,
+            &hashbrown::HashMap::new(),
         );
 
         let yanked_diags: Vec<_> = diagnostics
@@ -1297,18 +1323,25 @@ mod tests {
             "test:my-dep".to_string(),
             VersionInfo {
                 latest: Some("1.0.0".to_string()),
-                transitive_vulnerabilities: vec![TransitiveVuln {
-                    package_name: "scheduler".into(),
-                    package_version: "1.2.3".into(),
-                    vulnerability: Vulnerability {
-                        id: "CVE-1".into(),
-                        severity: VulnerabilitySeverity::High,
-                        description: "desc".into(),
-                        url: None,
-                    },
-                }],
                 ..Default::default()
             },
+        );
+
+        // Transitive vulns are now stored per-document, not in version_cache.
+        let mut doc_transitives: hashbrown::HashMap<String, Vec<TransitiveVuln>> =
+            hashbrown::HashMap::new();
+        doc_transitives.insert(
+            "my-dep".to_string(),
+            vec![TransitiveVuln {
+                package_name: "scheduler".into(),
+                package_version: "1.2.3".into(),
+                vulnerability: Vulnerability {
+                    id: "CVE-1".into(),
+                    severity: VulnerabilitySeverity::High,
+                    description: "desc".into(),
+                    url: None,
+                },
+            }],
         );
 
         let diagnostics = create_diagnostics(
@@ -1317,6 +1350,7 @@ mod tests {
             |name| format!("test:{name}"),
             None,
             FileType::Cargo,
+            &doc_transitives,
         );
 
         let vuln_diags: Vec<_> = diagnostics
