@@ -1,12 +1,14 @@
 //! Vulnerability report generation
 //!
 //! This module handles the generation of vulnerability reports
-//! in various formats (JSON, Markdown).
+//! in various formats (JSON, Markdown, HTML).
 
 use core::fmt;
 
 use serde::{Deserialize, Serialize};
 use tower_lsp::lsp_types::Url;
+
+use crate::utils::html_escape;
 
 /// Summary of vulnerabilities grouped by severity level.
 ///
@@ -169,7 +171,7 @@ pub fn fmt_html_report(
     direct: &[VulnerabilityReportEntry],
     transitive: &[TransitiveVulnerabilityReportEntry],
 ) -> impl fmt::Display + fmt::Debug {
-    let file_e = crate::utils::html_escape(file);
+    let file_e = html_escape(file);
     let date = chrono::Local::now().format("%Y-%m-%d").to_string();
 
     fmt::from_fn(move |f| {
@@ -266,17 +268,17 @@ fn severity_class(severity: &str) -> &'static str {
 
 fn write_direct_entry(f: &mut fmt::Formatter<'_>, entry: &VulnerabilityReportEntry) -> fmt::Result {
     let sev_class = severity_class(&entry.severity);
-    let pkg = crate::utils::html_escape(&entry.package);
-    let ver = crate::utils::html_escape(&entry.version);
-    let id = crate::utils::html_escape(&entry.id);
-    let sev_upper = crate::utils::html_escape(&entry.severity.to_uppercase());
-    let desc = crate::utils::html_escape(&entry.description);
+    let pkg = html_escape(&entry.package);
+    let ver = html_escape(&entry.version);
+    let id = html_escape(&entry.id);
+    let sev = html_escape(&entry.severity);
+    let desc = html_escape(&entry.description);
 
-    writeln!(f, "  <section class=\"vuln {sev_class}\">")?;
+    writeln!(f, "  <section class=\"vuln {}\">", html_escape(sev_class))?;
     writeln!(f, "    <h3>{pkg}@{ver}</h3>")?;
     write!(f, "    <p>")?;
     write_id_with_optional_link(f, entry.url.as_deref(), &id)?;
-    write!(f, " <span class=\"sev\">{sev_upper}</span>: {desc}")?;
+    write!(f, " <span class=\"sev\">{sev}</span>: {desc}")?;
     writeln!(f, "</p>")?;
     writeln!(f, "  </section>")
 }
@@ -286,18 +288,18 @@ fn write_transitive_entry(
     entry: &TransitiveVulnerabilityReportEntry,
 ) -> fmt::Result {
     let sev_class = severity_class(&entry.severity);
-    let pkg = crate::utils::html_escape(&entry.package);
-    let ver = crate::utils::html_escape(&entry.version);
-    let id = crate::utils::html_escape(&entry.id);
-    let sev_upper = crate::utils::html_escape(&entry.severity.to_uppercase());
-    let desc = crate::utils::html_escape(&entry.description);
-    let via = crate::utils::html_escape(&entry.via_direct);
+    let pkg = html_escape(&entry.package);
+    let ver = html_escape(&entry.version);
+    let id = html_escape(&entry.id);
+    let sev = html_escape(&entry.severity);
+    let desc = html_escape(&entry.description);
+    let via = html_escape(&entry.via_direct);
 
-    writeln!(f, "  <section class=\"vuln {sev_class}\">")?;
+    writeln!(f, "  <section class=\"vuln {}\">", html_escape(sev_class))?;
     writeln!(f, "    <h3>{pkg}@{ver} — via <code>{via}</code></h3>")?;
     write!(f, "    <p>")?;
     write_id_with_optional_link(f, entry.url.as_deref(), &id)?;
-    write!(f, " <span class=\"sev\">{sev_upper}</span>: {desc}")?;
+    write!(f, " <span class=\"sev\">{sev}</span>: {desc}")?;
     writeln!(f, "</p>")?;
     writeln!(f, "  </section>")
 }
@@ -309,7 +311,7 @@ fn write_id_with_optional_link(
 ) -> fmt::Result {
     match url {
         Some(u) if u.starts_with("http://") || u.starts_with("https://") => {
-            let u_esc = crate::utils::html_escape(u);
+            let u_esc = html_escape(u);
             write!(f, "<a href=\"{u_esc}\">{id_escaped}</a>")
         }
         _ => write!(f, "{id_escaped}"),
@@ -496,7 +498,7 @@ mod tests {
         assert!(report.contains("<section class=\"vuln critical\">"));
         assert!(report.contains("<h3>serde@1.0.0</h3>"));
         assert!(report.contains("<a href=\"https://example.com/cve\">CVE-2021-1234</a>"));
-        assert!(report.contains("<span class=\"sev\">CRITICAL</span>"));
+        assert!(report.contains("<span class=\"sev\">critical</span>"));
         assert!(report.contains("<section class=\"vuln high\">"));
         assert!(report.contains("<h3>scheduler@0.20.0 — via <code>react</code></h3>"));
         assert!(report.contains("CVE-2021-5678"));

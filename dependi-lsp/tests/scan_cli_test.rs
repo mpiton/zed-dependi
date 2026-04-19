@@ -163,6 +163,18 @@ async fn test_scan_html_output() {
         .output()
         .expect("failed to run dependi-lsp");
 
+    // Exit code 0 = clean, 1 = vulns-found (CLI returns ExitCode::FAILURE when
+    // --fail-on-vulns is set and total_vulns > 0; the mock injects one vuln so we
+    // expect 1 here). Any other status (panic, signal) is a real failure.
+    let code = output.status.code();
+    assert!(
+        matches!(code, Some(0) | Some(1)),
+        "dependi-lsp exited with unexpected status: {:?}\nstdout=\n{}\nstderr=\n{}",
+        output.status,
+        String::from_utf8_lossy(&output.stdout),
+        String::from_utf8_lossy(&output.stderr),
+    );
+
     let stdout = String::from_utf8_lossy(&output.stdout);
     assert!(
         stdout.starts_with("<!DOCTYPE html>"),
@@ -181,8 +193,8 @@ async fn test_scan_html_output() {
         "expected transitive section heading, stdout=\n{stdout}"
     );
     assert!(
-        stdout.contains("via <code>"),
-        "expected via <code> attribution markup, stdout=\n{stdout}"
+        stdout.contains("via <code>react</code>"),
+        "expected via <code>react</code> attribution, stdout=\n{stdout}"
     );
     assert!(
         stdout.trim_end().ends_with("</html>"),
