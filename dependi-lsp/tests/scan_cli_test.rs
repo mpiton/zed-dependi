@@ -124,3 +124,79 @@ serde = "1"
     // what we care about is not a panic.
     assert!(output.status.code().is_some(), "process exited abnormally");
 }
+
+#[tokio::test]
+async fn test_scan_html_output() {
+    let server = MockServer::start().await;
+
+    // Same npm fixture as test_scan_uses_lockfile_and_reports_transitive:
+    // direct [react] + transitive [scheduler]. Return vuln on the transitive only.
+    Mock::given(method("POST"))
+        .and(path("/querybatch"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
+            "results": [
+                { "vulns": [] },
+                { "vulns": [{ "id": "CVE-HTML-001", "modified": "2024-01-01T00:00:00Z" }] }
+            ]
+        })))
+        .mount(&server)
+        .await;
+
+    Mock::given(method("GET"))
+        .and(path_regex(r"^/vulns/.+"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
+            "id": "CVE-HTML-001",
+            "summary": "test summary",
+            "details": "test details",
+            "severity": [{ "type": "CVSS_V3", "score": "CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:H/I:H/A:H" }],
+            "references": []
+        })))
+        .mount(&server)
+        .await;
+
+    let fixture = fixture_path("npm-project-with-lockfile/package.json");
+
+    let output = Command::new(dependi_lsp_bin())
+        .env("OSV_ENDPOINT", server.uri())
+        .args(["scan", "--output", "html", "--file"])
+        .arg(&fixture)
+        .output()
+        .expect("failed to run dependi-lsp");
+
+    // CLI returns ExitCode::FAILURE (1) when --fail-on-vulns is set (default)
+    // and total_vulns > 0. The mock injects one vuln, so exit code 1 is required.
+    // Allowing 0 would let a regression that stops failing on vulns silently pass.
+    assert_eq!(
+        output.status.code(),
+        Some(1),
+        "dependi-lsp must exit 1 when vulnerabilities are found\nstdout=\n{}\nstderr=\n{}",
+        String::from_utf8_lossy(&output.stdout),
+        String::from_utf8_lossy(&output.stderr),
+    );
+
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(
+        stdout.starts_with("<!DOCTYPE html>"),
+        "expected HTML output to start with DOCTYPE, stdout=\n{stdout}"
+    );
+    assert!(
+        stdout.contains("<title>Vulnerability Report"),
+        "expected title, stdout=\n{stdout}"
+    );
+    assert!(
+        stdout.contains("CVE-HTML-001"),
+        "expected transitive CVE in HTML, stdout=\n{stdout}"
+    );
+    assert!(
+        stdout.contains("Transitive dependencies"),
+        "expected transitive section heading, stdout=\n{stdout}"
+    );
+    assert!(
+        stdout.contains("via <code>react</code>"),
+        "expected via <code>react</code> attribution, stdout=\n{stdout}"
+    );
+    assert!(
+        stdout.trim_end().ends_with("</html>"),
+        "expected closing </html> tag"
+    );
+}

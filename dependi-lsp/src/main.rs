@@ -29,6 +29,15 @@ enum RegistryType {
     Rubygems,
 }
 
+#[derive(Clone, Copy, Debug, Default, ValueEnum)]
+enum OutputFormat {
+    #[default]
+    Summary,
+    Json,
+    Markdown,
+    Html,
+}
+
 #[derive(Subcommand)]
 enum Commands {
     /// Start the LSP server (default behavior)
@@ -39,9 +48,9 @@ enum Commands {
         #[arg(short, long)]
         file: PathBuf,
 
-        /// Output format: json, markdown, or summary
-        #[arg(short, long, default_value = "summary")]
-        output: String,
+        /// Output format: summary, json, markdown, or html
+        #[arg(short, long, value_enum, default_value_t = OutputFormat::Summary)]
+        output: OutputFormat,
 
         /// Minimum severity level to report (low, medium, high, critical)
         #[arg(short, long, default_value = "low")]
@@ -152,27 +161,30 @@ async fn run_lsp() {
     Server::new(stdin, stdout, socket).serve(service).await;
 }
 
-fn print_markdown_entry(v: &serde_json::Value, via: Option<&str>) {
-    let severity = v["severity"].as_str().unwrap_or("low");
+fn print_markdown_entry(
+    package: &str,
+    version: &str,
+    id: &str,
+    severity: &str,
+    description: &str,
+    url: Option<&str>,
+    via: Option<&str>,
+) {
     let icon = match severity {
         "critical" => "⚠",
         "high" => "▲",
         "medium" => "●",
         _ => "○",
     };
-    let pkg = v["package"].as_str().unwrap_or("");
-    let ver = v["version"].as_str().unwrap_or("");
     match via {
-        Some(parent) => println!("### {pkg}@{ver} — via `{parent}`\n"),
-        None => println!("### {pkg}@{ver}\n"),
+        Some(parent) => println!("### {package}@{version} — via `{parent}`\n"),
+        None => println!("### {package}@{version}\n"),
     }
-    let id = v["id"].as_str().unwrap_or("");
     let sev_upper = severity.to_uppercase();
-    let desc = v["description"].as_str().unwrap_or("");
-    if let Some(url) = v["url"].as_str() {
-        println!("- **[{id}]({url})** ({icon} {sev_upper}): {desc}\n");
+    if let Some(url) = url {
+        println!("- **[{id}]({url})** ({icon} {sev_upper}): {description}\n");
     } else {
-        println!("- **{id}** ({icon} {sev_upper}): {desc}\n");
+        println!("- **{id}** ({icon} {sev_upper}): {description}\n");
     }
 }
 
@@ -192,7 +204,7 @@ fn canonical_name(eco: dependi_lsp::vulnerabilities::Ecosystem, name: &str) -> S
 
 async fn run_scan(
     file: PathBuf,
-    output: String,
+    output: OutputFormat,
     min_severity: String,
     fail_on_vulns: bool,
     use_lockfile: bool,
@@ -205,6 +217,10 @@ async fn run_scan(
         ruby::RubyParser,
     };
     use dependi_lsp::registries::VulnerabilitySeverity;
+    use dependi_lsp::reports::{
+        TransitiveVulnerabilityReportEntry, VulnerabilityReportEntry, VulnerabilitySummary,
+        fmt_html_report,
+    };
     use dependi_lsp::vulnerabilities::{
         Ecosystem, VulnerabilityQuery, normalize_version_for_osv, osv::OsvClient,
     };
@@ -441,8 +457,8 @@ async fn run_scan(
     let mut high_count = 0u32;
     let mut medium_count = 0u32;
     let mut low_count = 0u32;
-    let mut direct_details: Vec<serde_json::Value> = Vec::new();
-    let mut transitive_details: Vec<serde_json::Value> = Vec::new();
+    let mut direct_details: Vec<VulnerabilityReportEntry> = Vec::new();
+    let mut transitive_details: Vec<TransitiveVulnerabilityReportEntry> = Vec::new();
 
     for (dep, result) in dependencies.iter().zip(direct_results.iter()) {
         for vuln in &result.vulnerabilities {
@@ -457,14 +473,14 @@ async fn run_scan(
                 &mut medium_count,
                 &mut low_count,
             );
-            direct_details.push(serde_json::json!({
-                "package": dep.name,
-                "version": dep.effective_version(),
-                "id": vuln.id,
-                "severity": vuln.severity.as_str(),
-                "description": vuln.description,
-                "url": vuln.url,
-            }));
+            direct_details.push(VulnerabilityReportEntry {
+                package: dep.name.clone(),
+                version: dep.effective_version().to_string(),
+                id: vuln.id.clone(),
+                severity: vuln.severity.as_str().to_string(),
+                description: vuln.description.clone(),
+                url: vuln.url.clone(),
+            });
         }
     }
 
@@ -491,36 +507,42 @@ async fn run_scan(
                 .cloned()
                 .unwrap_or_else(|| "(unknown)".to_string());
 
-            transitive_details.push(serde_json::json!({
-                "package": pkg.name,
-                "version": pkg.version,
-                "via_direct": via_direct,
-                "id": vuln.id,
-                "severity": vuln.severity.as_str(),
-                "description": vuln.description,
-                "url": vuln.url,
-            }));
+            transitive_details.push(TransitiveVulnerabilityReportEntry {
+                package: pkg.name.clone(),
+                version: pkg.version.clone(),
+                id: vuln.id.clone(),
+                severity: vuln.severity.as_str().to_string(),
+                description: vuln.description.clone(),
+                url: vuln.url.clone(),
+                via_direct,
+            });
         }
     }
 
     // Output results
-    match output.as_str() {
-        "json" => {
-            let combined: Vec<&serde_json::Value> = direct_details
+    let summary = VulnerabilitySummary {
+        total: total_vulns,
+        critical: critical_count,
+        high: high_count,
+        medium: medium_count,
+        low: low_count,
+    };
+    match output {
+        OutputFormat::Json => {
+            let combined: Vec<serde_json::Value> = direct_details
                 .iter()
-                .chain(transitive_details.iter())
+                .filter_map(|e| serde_json::to_value(e).ok())
+                .chain(
+                    transitive_details
+                        .iter()
+                        .filter_map(|e| serde_json::to_value(e).ok()),
+                )
                 .collect();
             let report = serde_json::json!({
                 "file": file.display().to_string(),
-                "summary": {
-                    "total": total_vulns,
-                    "critical": critical_count,
-                    "high": high_count,
-                    "medium": medium_count,
-                    "low": low_count
-                },
-                "direct": direct_details,
-                "transitive": transitive_details,
+                "summary": &summary,
+                "direct": &direct_details,
+                "transitive": &transitive_details,
                 "vulnerabilities": combined,
             });
             match serde_json::to_string_pretty(&report) {
@@ -528,7 +550,7 @@ async fn run_scan(
                 Err(e) => eprintln!("Failed to serialize report: {e}"),
             }
         }
-        "markdown" => {
+        OutputFormat::Markdown => {
             println!("# Vulnerability Report\n");
             println!("**File**: {}", file.display());
             println!("**Date**: {}\n", chrono::Local::now().format("%Y-%m-%d"));
@@ -544,7 +566,15 @@ async fn run_scan(
             if !direct_details.is_empty() {
                 println!("## Direct dependencies ({})\n", direct_details.len());
                 for v in &direct_details {
-                    print_markdown_entry(v, None);
+                    print_markdown_entry(
+                        &v.package,
+                        &v.version,
+                        &v.id,
+                        &v.severity,
+                        &v.description,
+                        v.url.as_deref(),
+                        None,
+                    );
                 }
             }
             if !transitive_details.is_empty() {
@@ -553,12 +583,30 @@ async fn run_scan(
                     transitive_details.len()
                 );
                 for v in &transitive_details {
-                    let via = v["via_direct"].as_str();
-                    print_markdown_entry(v, via);
+                    print_markdown_entry(
+                        &v.package,
+                        &v.version,
+                        &v.id,
+                        &v.severity,
+                        &v.description,
+                        v.url.as_deref(),
+                        Some(&v.via_direct),
+                    );
                 }
             }
         }
-        _ => {
+        OutputFormat::Html => {
+            print!(
+                "{}",
+                fmt_html_report(
+                    &file.display().to_string(),
+                    &summary,
+                    &direct_details,
+                    &transitive_details
+                )
+            );
+        }
+        OutputFormat::Summary => {
             println!("Vulnerability Scan Results for {}", file.display());
             println!(
                 "  Total: {total_vulns} ({} direct, {} transitive)",
@@ -573,12 +621,7 @@ async fn run_scan(
             if !direct_details.is_empty() {
                 println!("Direct:");
                 for v in &direct_details {
-                    println!(
-                        "  - {}@{} [{}]",
-                        v["package"].as_str().unwrap_or(""),
-                        v["version"].as_str().unwrap_or(""),
-                        v["id"].as_str().unwrap_or("")
-                    );
+                    println!("  - {}@{} [{}]", v.package, v.version, v.id);
                 }
             }
             if !transitive_details.is_empty() {
@@ -586,10 +629,7 @@ async fn run_scan(
                 for v in &transitive_details {
                     println!(
                         "  - {}@{} (via {}) [{}]",
-                        v["package"].as_str().unwrap_or(""),
-                        v["version"].as_str().unwrap_or(""),
-                        v["via_direct"].as_str().unwrap_or("?"),
-                        v["id"].as_str().unwrap_or("")
+                        v.package, v.version, v.via_direct, v.id
                     );
                 }
             }
