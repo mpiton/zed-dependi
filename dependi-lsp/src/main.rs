@@ -39,7 +39,7 @@ enum Commands {
         #[arg(short, long)]
         file: PathBuf,
 
-        /// Output format: json, markdown, or summary
+        /// Output format: summary, json, markdown, or html
         #[arg(short, long, default_value = "summary")]
         output: String,
 
@@ -557,6 +557,51 @@ async fn run_scan(
                     print_markdown_entry(v, via);
                 }
             }
+        }
+        "html" => {
+            use dependi_lsp::reports::{
+                TransitiveVulnerabilityReportEntry, VulnerabilityReportEntry,
+                VulnerabilitySummary, fmt_html_report,
+            };
+
+            fn value_to_direct(v: &serde_json::Value) -> VulnerabilityReportEntry {
+                VulnerabilityReportEntry {
+                    package: v["package"].as_str().unwrap_or("").to_string(),
+                    version: v["version"].as_str().unwrap_or("").to_string(),
+                    id: v["id"].as_str().unwrap_or("").to_string(),
+                    severity: v["severity"].as_str().unwrap_or("low").to_string(),
+                    description: v["description"].as_str().unwrap_or("").to_string(),
+                    url: v["url"].as_str().map(|s| s.to_string()),
+                }
+            }
+
+            fn value_to_transitive(v: &serde_json::Value) -> TransitiveVulnerabilityReportEntry {
+                TransitiveVulnerabilityReportEntry {
+                    package: v["package"].as_str().unwrap_or("").to_string(),
+                    version: v["version"].as_str().unwrap_or("").to_string(),
+                    id: v["id"].as_str().unwrap_or("").to_string(),
+                    severity: v["severity"].as_str().unwrap_or("low").to_string(),
+                    description: v["description"].as_str().unwrap_or("").to_string(),
+                    url: v["url"].as_str().map(|s| s.to_string()),
+                    via_direct: v["via_direct"].as_str().unwrap_or("(unknown)").to_string(),
+                }
+            }
+
+            let direct: Vec<VulnerabilityReportEntry> =
+                direct_details.iter().map(value_to_direct).collect();
+            let transitive: Vec<TransitiveVulnerabilityReportEntry> =
+                transitive_details.iter().map(value_to_transitive).collect();
+            let summary = VulnerabilitySummary {
+                total: total_vulns,
+                critical: critical_count,
+                high: high_count,
+                medium: medium_count,
+                low: low_count,
+            };
+            print!(
+                "{}",
+                fmt_html_report(&file.display().to_string(), &summary, &direct, &transitive)
+            );
         }
         _ => {
             println!("Vulnerability Scan Results for {}", file.display());
