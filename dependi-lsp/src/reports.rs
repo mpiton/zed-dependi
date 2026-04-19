@@ -179,6 +179,10 @@ pub fn fmt_html_report(
         writeln!(f, "<html lang=\"en\">")?;
         writeln!(f, "<head>")?;
         writeln!(f, "  <meta charset=\"utf-8\">")?;
+        writeln!(
+            f,
+            "  <meta name=\"viewport\" content=\"width=device-width, initial-scale=1\">"
+        )?;
         writeln!(f, "  <title>Vulnerability Report — {file_e}</title>")?;
         writeln!(f, "  <style>{HTML_REPORT_STYLE}</style>")?;
         writeln!(f, "</head>")?;
@@ -274,7 +278,7 @@ fn write_direct_entry(f: &mut fmt::Formatter<'_>, entry: &VulnerabilityReportEnt
     let sev = html_escape(&entry.severity);
     let desc = html_escape(&entry.description);
 
-    writeln!(f, "  <section class=\"vuln {}\">", html_escape(sev_class))?;
+    writeln!(f, "  <section class=\"vuln {sev_class}\">")?;
     writeln!(f, "    <h3>{pkg}@{ver}</h3>")?;
     write!(f, "    <p>")?;
     write_id_with_optional_link(f, entry.url.as_deref(), &id)?;
@@ -295,7 +299,7 @@ fn write_transitive_entry(
     let desc = html_escape(&entry.description);
     let via = html_escape(&entry.via_direct);
 
-    writeln!(f, "  <section class=\"vuln {}\">", html_escape(sev_class))?;
+    writeln!(f, "  <section class=\"vuln {sev_class}\">")?;
     writeln!(f, "    <h3>{pkg}@{ver} — via <code>{via}</code></h3>")?;
     write!(f, "    <p>")?;
     write_id_with_optional_link(f, entry.url.as_deref(), &id)?;

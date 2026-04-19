@@ -163,14 +163,13 @@ async fn test_scan_html_output() {
         .output()
         .expect("failed to run dependi-lsp");
 
-    // Exit code 0 = clean, 1 = vulns-found (CLI returns ExitCode::FAILURE when
-    // --fail-on-vulns is set and total_vulns > 0; the mock injects one vuln so we
-    // expect 1 here). Any other status (panic, signal) is a real failure.
-    let code = output.status.code();
-    assert!(
-        matches!(code, Some(0) | Some(1)),
-        "dependi-lsp exited with unexpected status: {:?}\nstdout=\n{}\nstderr=\n{}",
-        output.status,
+    // CLI returns ExitCode::FAILURE (1) when --fail-on-vulns is set (default)
+    // and total_vulns > 0. The mock injects one vuln, so exit code 1 is required.
+    // Allowing 0 would let a regression that stops failing on vulns silently pass.
+    assert_eq!(
+        output.status.code(),
+        Some(1),
+        "dependi-lsp must exit 1 when vulnerabilities are found\nstdout=\n{}\nstderr=\n{}",
         String::from_utf8_lossy(&output.stdout),
         String::from_utf8_lossy(&output.stderr),
     );
