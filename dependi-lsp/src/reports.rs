@@ -515,4 +515,65 @@ mod tests {
         assert!(report.contains("<tr class=\"critical\"><td>Critical</td><td>1</td></tr>"));
         assert!(report.contains("<tr class=\"high\"><td>High</td><td>1</td></tr>"));
     }
+
+    #[test]
+    fn test_fmt_html_report_escapes_hostile_content() {
+        let summary = VulnerabilitySummary {
+            total: 1,
+            critical: 1,
+            high: 0,
+            medium: 0,
+            low: 0,
+        };
+        let direct = vec![VulnerabilityReportEntry {
+            package: "pkg<script>".to_string(),
+            version: "1.0".to_string(),
+            id: "CVE-XSS-1".to_string(),
+            severity: "critical".to_string(),
+            description: "<script>alert('x')</script>".to_string(),
+            url: Some("https://example.com/\"onmouseover=\"alert(1)".to_string()),
+        }];
+
+        let report = generate_html_report(
+            "/project/<a>.toml",
+            &summary,
+            &direct,
+            &[],
+        );
+
+        assert!(
+            !report.contains("<script>"),
+            "expected <script> to be escaped, got:\n{report}"
+        );
+        assert!(report.contains("&lt;script&gt;alert(&#39;x&#39;)&lt;/script&gt;"));
+        assert!(report.contains("pkg&lt;script&gt;"));
+        assert!(report.contains("/project/&lt;a&gt;.toml"));
+        assert!(!report.contains("\"onmouseover"));
+        assert!(report.contains("&quot;onmouseover"));
+    }
+
+    #[test]
+    fn test_fmt_html_report_rejects_non_http_url() {
+        let summary = VulnerabilitySummary {
+            total: 1,
+            critical: 1,
+            high: 0,
+            medium: 0,
+            low: 0,
+        };
+        let direct = vec![VulnerabilityReportEntry {
+            package: "pkg".to_string(),
+            version: "1.0".to_string(),
+            id: "CVE-EVIL".to_string(),
+            severity: "critical".to_string(),
+            description: "desc".to_string(),
+            url: Some("javascript:alert(1)".to_string()),
+        }];
+
+        let report = generate_html_report("/project/Cargo.toml", &summary, &direct, &[]);
+
+        assert!(!report.contains("href=\"javascript"));
+        assert!(!report.contains("<a href"));
+        assert!(report.contains("CVE-EVIL"));
+    }
 }
