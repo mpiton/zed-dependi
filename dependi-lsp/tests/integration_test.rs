@@ -147,6 +147,7 @@ fn test_cache_integration() {
         yanked: false,
         yanked_versions: vec![],
         release_dates: Default::default(),
+        transitive_vulnerabilities: vec![],
     };
 
     cache.insert("crates:serde".to_string(), serde_info.clone());

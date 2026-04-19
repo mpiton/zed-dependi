@@ -265,6 +265,7 @@ impl Registry for CratesIoRegistry {
             yanked,
             yanked_versions,
             release_dates,
+            transitive_vulnerabilities: vec![],
         })
     }
 }

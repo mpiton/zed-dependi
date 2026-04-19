@@ -61,6 +61,7 @@ pub mod dart;
 pub mod gemfile_lock;
 pub mod go;
 pub mod go_sum;
+pub mod lockfile_graph;
 pub mod maven;
 pub mod npm;
 pub mod npm_lock;

@@ -365,6 +365,7 @@ fn create_version_info() -> VersionInfo {
         yanked: false,
         yanked_versions: vec!["0.1.0".to_string(), "0.2.0".to_string()],
         release_dates: Default::default(),
+        transitive_vulnerabilities: vec![],
     }
 }
 

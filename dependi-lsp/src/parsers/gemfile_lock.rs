@@ -132,6 +132,96 @@ pub fn parse_gemfile_lock(content: &str) -> HashMap<String, String> {
     map
 }
 
+use crate::parsers::lockfile_graph::{LockfileGraph, LockfilePackage};
+
+#[derive(PartialEq)]
+enum GemSection {
+    None,
+    Gem,
+    Other,
+}
+
+/// Parse Gemfile.lock into a dependency graph.
+/// Only the GEM section (RubyGems.org) is included. PATH and GIT sections are excluded.
+/// The GEM/specs section uses 4-space indent for top-level gems (name + version)
+/// and 6-space indent for their dependency list (name + constraint).
+pub fn parse_gemfile_lock_graph(content: &str) -> LockfileGraph {
+    let mut graph = LockfileGraph::default();
+    let mut section = GemSection::None;
+    let mut in_specs = false;
+    let mut current: Option<LockfilePackage> = None;
+
+    for line in content.lines() {
+        let trimmed = line.trim_end();
+
+        // Section headers are at column 0 (no leading spaces, non-empty)
+        if !trimmed.is_empty() && !trimmed.starts_with(' ') {
+            if let Some(done) = current.take() {
+                graph.packages.push(done);
+            }
+            section = match trimmed.trim() {
+                "GEM" => GemSection::Gem,
+                _ => GemSection::Other,
+            };
+            in_specs = false;
+            continue;
+        }
+
+        if section != GemSection::Gem {
+            continue;
+        }
+
+        if trimmed.trim() == "specs:" {
+            in_specs = true;
+            continue;
+        }
+
+        if !in_specs {
+            continue;
+        }
+
+        if trimmed.is_empty() || !trimmed.starts_with("    ") {
+            if let Some(done) = current.take() {
+                graph.packages.push(done);
+            }
+            if !trimmed.starts_with("    ") {
+                in_specs = false;
+            }
+            continue;
+        }
+
+        // Level-1 gem: "    name (version)"
+        if trimmed.starts_with("    ") && !trimmed.starts_with("      ") {
+            if let Some(done) = current.take() {
+                graph.packages.push(done);
+            }
+            let s = trimmed.trim();
+            if let Some((name, rest)) = s.split_once(' ') {
+                let raw_version = rest.trim().trim_matches(|c| c == '(' || c == ')');
+                let version = strip_platform_suffix(raw_version).to_string();
+                current = Some(LockfilePackage {
+                    name: normalize_gem_name(name),
+                    version,
+                    dependencies: Vec::new(),
+                    is_root: false,
+                });
+            }
+        } else if let Some(cur) = current.as_mut() {
+            // Level-2 sub-dep: "      name (constraint)"
+            let s = trimmed.trim();
+            let dep_name = s.split_whitespace().next().unwrap_or("");
+            if !dep_name.is_empty() {
+                cur.dependencies.push(normalize_gem_name(dep_name));
+            }
+        }
+    }
+
+    if let Some(done) = current {
+        graph.packages.push(done);
+    }
+    graph
+}
+
 /// Find the Gemfile.lock file co-located with a Gemfile.
 ///
 /// Bundler always places Gemfile.lock in the same directory as Gemfile,
@@ -322,6 +412,97 @@ GEM
 ";
         let map = parse_gemfile_lock(content);
         assert_eq!(map.get("nokogiri").map(|s| s.as_str()), Some("1.15.4"));
+    }
+
+    #[test]
+    fn test_parse_gemfile_lock_graph() {
+        let content = r#"
+GEM
+  remote: https://rubygems.org/
+  specs:
+    rack (3.0.0)
+    rails (7.0.4)
+      rack (~> 3.0)
+      actioncable (= 7.0.4)
+    actioncable (7.0.4)
+      actionpack (= 7.0.4)
+    actionpack (7.0.4)
+"#;
+        let graph = parse_gemfile_lock_graph(content);
+        let rails = graph.packages.iter().find(|p| p.name == "rails").unwrap();
+        assert_eq!(rails.version, "7.0.4");
+        assert!(rails.dependencies.contains(&"rack".to_string()));
+        assert!(rails.dependencies.contains(&"actioncable".to_string()));
+        let rack = graph.packages.iter().find(|p| p.name == "rack").unwrap();
+        assert!(rack.dependencies.is_empty());
+    }
+
+    #[test]
+    fn test_parse_gemfile_lock_graph_ignores_path_and_git_sections() {
+        let content = r#"
+PATH
+  remote: .
+  specs:
+    local_gem (0.1.0)
+      rack (~> 3.0)
+
+GIT
+  remote: https://github.com/rails/rails.git
+  specs:
+    rails_fork (7.0.4)
+
+GEM
+  remote: https://rubygems.org/
+  specs:
+    rack (3.0.0)
+    rails (7.0.4)
+      rack (~> 3.0)
+"#;
+        let graph = parse_gemfile_lock_graph(content);
+        let names: Vec<&str> = graph.packages.iter().map(|p| p.name.as_str()).collect();
+        assert!(names.contains(&"rack"));
+        assert!(names.contains(&"rails"));
+        assert!(!names.contains(&"local_gem"), "PATH gems must be excluded");
+        assert!(!names.contains(&"rails_fork"), "GIT gems must be excluded");
+    }
+
+    #[test]
+    fn test_parse_gemfile_lock_graph_normalizes_names() {
+        let content = r#"
+GEM
+  specs:
+    ActiveRecord (7.0.0)
+      active_support (= 7.0.0)
+    active_support (7.0.0)
+"#;
+        let graph = parse_gemfile_lock_graph(content);
+        // normalize_gem_name lowercases names
+        assert!(graph.packages.iter().any(|p| p.name == "activerecord"));
+        assert!(graph.packages.iter().any(|p| p.name == "active_support"));
+    }
+
+    #[test]
+    fn test_parse_gemfile_lock_graph_strips_platform_suffix() {
+        let content = r#"
+GEM
+  remote: https://rubygems.org/
+  specs:
+    nokogiri (1.15.4-x86_64-linux)
+    rack (3.0.0)
+"#;
+        let graph = parse_gemfile_lock_graph(content);
+        let nokogiri = graph
+            .packages
+            .iter()
+            .find(|p| p.name == "nokogiri")
+            .unwrap();
+        assert_eq!(
+            nokogiri.version, "1.15.4",
+            "platform suffix must be stripped, got {:?}",
+            nokogiri.version
+        );
+        let rack = graph.packages.iter().find(|p| p.name == "rack").unwrap();
+        assert_eq!(rack.version, "3.0.0");
     }
 
     #[test]

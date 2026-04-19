@@ -10,6 +10,8 @@ use std::path::{Path, PathBuf};
 
 use hashbrown::HashMap;
 
+use crate::parsers::lockfile_graph::{LockfileGraph, LockfilePackage};
+
 /// Type of Python lockfile detected.
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub enum PythonLockfileType {
@@ -247,6 +249,121 @@ fn parse_pipfile_lock(content: &str) -> HashMap<String, String> {
     }
 
     map
+}
+
+// ---------------------------------------------------------------------------
+// Graph parsers (lockfile → LockfileGraph)
+// ---------------------------------------------------------------------------
+
+/// Parse poetry.lock into a graph.
+pub fn parse_poetry_lock_graph(content: &str) -> LockfileGraph {
+    let mut graph = LockfileGraph::default();
+    let value: toml::Value = match toml::from_str(content) {
+        Ok(v) => v,
+        Err(_) => return graph,
+    };
+    let Some(packages) = value.get("package").and_then(|p| p.as_array()) else {
+        return graph;
+    };
+    for pkg in packages {
+        let Some(name) = pkg.get("name").and_then(|n| n.as_str()) else {
+            continue;
+        };
+        let Some(version) = pkg.get("version").and_then(|v| v.as_str()) else {
+            continue;
+        };
+        let deps = pkg
+            .get("dependencies")
+            .and_then(|d| d.as_table())
+            .map(|t| {
+                t.keys()
+                    .map(|k| normalize_python_name(k))
+                    .collect::<Vec<_>>()
+            })
+            .unwrap_or_default();
+        graph.packages.push(LockfilePackage {
+            name: normalize_python_name(name),
+            version: version.to_string(),
+            dependencies: deps,
+            is_root: false,
+        });
+    }
+    graph
+}
+
+/// Parse Pipfile.lock into a graph. Pipfile.lock does NOT record sub-deps natively;
+/// the graph will include all packages but edges are limited to what's explicitly present.
+pub fn parse_pipfile_lock_graph(content: &str) -> LockfileGraph {
+    let mut graph = LockfileGraph::default();
+    let value: serde_json::Value = match serde_json::from_str(content) {
+        Ok(v) => v,
+        Err(_) => return graph,
+    };
+    for section in &["default", "develop"] {
+        let Some(obj) = value.get(section).and_then(|s| s.as_object()) else {
+            continue;
+        };
+        for (name, entry) in obj {
+            let Some(version_raw) = entry.get("version").and_then(|v| v.as_str()) else {
+                continue;
+            };
+            let version = version_raw.trim_start_matches("==").to_string();
+            let deps: Vec<String> = entry
+                .get("dependencies")
+                .and_then(|d| d.as_array())
+                .map(|a| {
+                    a.iter()
+                        .filter_map(|e| e.as_str())
+                        .map(normalize_python_name)
+                        .collect()
+                })
+                .unwrap_or_default();
+            graph.packages.push(LockfilePackage {
+                name: normalize_python_name(name),
+                version,
+                dependencies: deps,
+                is_root: false,
+            });
+        }
+    }
+    graph
+}
+
+/// Parse uv.lock into a graph.
+pub fn parse_uv_lock_graph(content: &str) -> LockfileGraph {
+    let mut graph = LockfileGraph::default();
+    let value: toml::Value = match toml::from_str(content) {
+        Ok(v) => v,
+        Err(_) => return graph,
+    };
+    let Some(packages) = value.get("package").and_then(|p| p.as_array()) else {
+        return graph;
+    };
+    for pkg in packages {
+        let Some(name) = pkg.get("name").and_then(|n| n.as_str()) else {
+            continue;
+        };
+        let Some(version) = pkg.get("version").and_then(|v| v.as_str()) else {
+            continue;
+        };
+        let deps = pkg
+            .get("dependencies")
+            .and_then(|d| d.as_array())
+            .map(|arr| {
+                arr.iter()
+                    .filter_map(|item| item.get("name").and_then(|n| n.as_str()))
+                    .map(normalize_python_name)
+                    .collect::<Vec<_>>()
+            })
+            .unwrap_or_default();
+        graph.packages.push(LockfilePackage {
+            name: normalize_python_name(name),
+            version: version.to_string(),
+            dependencies: deps,
+            is_root: false,
+        });
+    }
+    graph
 }
 
 // ---------------------------------------------------------------------------
@@ -765,5 +882,83 @@ version = "6.1"
     fn parse_invalid_toml() {
         let map = parse_toml_package_array("not valid toml ][");
         assert!(map.is_empty());
+    }
+
+    // -- graph parsers --------------------------------------------------------
+
+    #[test]
+    fn test_parse_poetry_lock_graph() {
+        let content = r#"
+[[package]]
+name = "requests"
+version = "2.31.0"
+
+[package.dependencies]
+urllib3 = ">=1.21.1,<3"
+certifi = ">=2017.4.17"
+
+[[package]]
+name = "urllib3"
+version = "2.0.7"
+
+[[package]]
+name = "certifi"
+version = "2023.11.17"
+"#;
+        let graph = parse_poetry_lock_graph(content);
+        let requests = graph
+            .packages
+            .iter()
+            .find(|p| p.name == "requests")
+            .unwrap();
+        assert_eq!(requests.version, "2.31.0");
+        assert!(requests.dependencies.contains(&"urllib3".to_string()));
+        assert!(requests.dependencies.contains(&"certifi".to_string()));
+    }
+
+    #[test]
+    fn test_parse_pipfile_lock_graph() {
+        let content = r#"{
+  "default": {
+    "requests": { "version": "==2.31.0", "dependencies": ["urllib3"] },
+    "urllib3": { "version": "==2.0.7" }
+  },
+  "develop": {}
+}"#;
+        let graph = parse_pipfile_lock_graph(content);
+        let requests = graph
+            .packages
+            .iter()
+            .find(|p| p.name == "requests")
+            .unwrap();
+        assert_eq!(requests.version, "2.31.0");
+        assert!(requests.dependencies.contains(&"urllib3".to_string()));
+    }
+
+    #[test]
+    fn test_parse_uv_lock_graph() {
+        let content = r#"
+version = 1
+
+[[package]]
+name = "requests"
+version = "2.31.0"
+dependencies = [
+    { name = "urllib3" },
+    { name = "certifi" },
+]
+
+[[package]]
+name = "urllib3"
+version = "2.0.7"
+"#;
+        let graph = parse_uv_lock_graph(content);
+        let requests = graph
+            .packages
+            .iter()
+            .find(|p| p.name == "requests")
+            .unwrap();
+        assert!(requests.dependencies.contains(&"urllib3".to_string()));
+        assert!(requests.dependencies.contains(&"certifi".to_string()));
     }
 }

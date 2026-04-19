@@ -4,6 +4,8 @@ use std::path::{Path, PathBuf};
 
 use hashbrown::HashMap;
 
+use crate::parsers::lockfile_graph::{LockfileGraph, LockfilePackage};
+
 /// Parse a Cargo.lock file and return a map of package name → resolved version.
 ///
 /// Cargo.lock uses `[[package]]` TOML array-of-tables entries with `name` and `version` fields.
@@ -66,6 +68,54 @@ pub fn parse_cargo_lock(content: &str, root_package: Option<&str>) -> HashMap<St
     }
 
     map
+}
+
+/// Parse Cargo.lock into a full dependency graph.
+///
+/// Dependency strings are stored as-is (e.g. `"serde"` or `"serde 1.0.195"`).
+/// Cargo writes the version when multiple versions of the same crate are locked,
+/// so preserving it allows correct transitive attribution.  Graph-walk code
+/// normalises to the name portion when resolving edges.
+pub fn parse_cargo_lock_graph(content: &str) -> LockfileGraph {
+    let mut graph = LockfileGraph::default();
+
+    let value: toml::Value = match toml::from_str(content) {
+        Ok(v) => v,
+        Err(_) => return graph,
+    };
+
+    let packages = match value.get("package").and_then(|p| p.as_array()) {
+        Some(pkgs) => pkgs,
+        None => return graph,
+    };
+
+    for pkg in packages {
+        let Some(name) = pkg.get("name").and_then(|n| n.as_str()) else {
+            continue;
+        };
+        let Some(version) = pkg.get("version").and_then(|v| v.as_str()) else {
+            continue;
+        };
+        let deps = pkg
+            .get("dependencies")
+            .and_then(|d| d.as_array())
+            .map(|arr| {
+                arr.iter()
+                    .filter_map(|d| d.as_str())
+                    .map(|s| s.to_string())
+                    .collect::<Vec<_>>()
+            })
+            .unwrap_or_default();
+
+        graph.packages.push(LockfilePackage {
+            name: name.to_string(),
+            version: version.to_string(),
+            dependencies: deps,
+            is_root: false,
+        });
+    }
+
+    graph
 }
 
 /// Find the Cargo.lock file by walking up from a Cargo.toml path.
@@ -251,5 +301,70 @@ version = "1.0.195"
 "#;
         let map = parse_cargo_lock(content, Some("my-crate"));
         assert_eq!(map.get("serde").map(|s| s.as_str()), Some("1.0.195"));
+    }
+
+    #[test]
+    fn test_parse_graph_captures_dependencies() {
+        let content = r#"
+[[package]]
+name = "root"
+version = "0.1.0"
+dependencies = ["serde", "tokio 1.36.0"]
+
+[[package]]
+name = "serde"
+version = "1.0.195"
+
+[[package]]
+name = "tokio"
+version = "1.36.0"
+dependencies = ["mio"]
+
+[[package]]
+name = "mio"
+version = "0.8.10"
+"#;
+        let graph = parse_cargo_lock_graph(content);
+        assert_eq!(graph.packages.len(), 4);
+        let root = graph.packages.iter().find(|p| p.name == "root").unwrap();
+        // Dependencies are stored as-is; "serde" has no version, "tokio 1.36.0" keeps it.
+        assert!(root.dependencies.contains(&"serde".to_string()));
+        assert!(root.dependencies.contains(&"tokio 1.36.0".to_string()));
+        let tokio = graph.packages.iter().find(|p| p.name == "tokio").unwrap();
+        assert_eq!(tokio.dependencies, vec!["mio".to_string()]);
+    }
+
+    #[test]
+    fn test_parse_cargo_lock_graph_preserves_dep_version_tokens() {
+        let content = r#"
+[[package]]
+name = "root"
+version = "0.1.0"
+dependencies = ["hashbrown 0.15.5", "hashbrown 0.16.1"]
+
+[[package]]
+name = "hashbrown"
+version = "0.15.5"
+
+[[package]]
+name = "hashbrown"
+version = "0.16.1"
+"#;
+        let graph = parse_cargo_lock_graph(content);
+        let root = graph.packages.iter().find(|p| p.name == "root").unwrap();
+        assert!(root.dependencies.iter().any(|d| d == "hashbrown 0.15.5"));
+        assert!(root.dependencies.iter().any(|d| d == "hashbrown 0.16.1"));
+    }
+
+    #[test]
+    fn test_parse_graph_empty() {
+        let graph = parse_cargo_lock_graph("");
+        assert!(graph.packages.is_empty());
+    }
+
+    #[test]
+    fn test_parse_graph_invalid_toml() {
+        let graph = parse_cargo_lock_graph("not valid ][ toml");
+        assert!(graph.packages.is_empty());
     }
 }

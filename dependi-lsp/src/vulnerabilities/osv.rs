@@ -40,6 +40,19 @@ impl OsvClient {
         })
     }
 
+    /// Constructor used in tests to point the client at a mock server.
+    pub fn with_endpoint(endpoint: String) -> Self {
+        Self {
+            base_url: endpoint,
+            client: Arc::new(
+                Client::builder()
+                    .timeout(Duration::from_secs(30))
+                    .build()
+                    .expect("reqwest client should build"),
+            ),
+        }
+    }
+
     fn convert_vulnerability(osv: &OsvVulnerability) -> Vulnerability {
         let id = osv
             .aliases
@@ -419,6 +432,24 @@ mod tests {
 
         let vuln = &result.vulnerabilities[0];
         assert!(vuln.id.starts_with("RUSTSEC"));
+    }
+
+    #[tokio::test]
+    async fn test_osv_client_with_endpoint_uses_custom_url() {
+        let client = OsvClient::with_endpoint("http://127.0.0.1:1".to_string());
+        // Port 1 is not listening; a real query must error, proving the client
+        // actually attempted to reach the custom URL (and not fallen back to
+        // api.osv.dev).
+        let query = VulnerabilityQuery {
+            ecosystem: Ecosystem::CratesIo,
+            package_name: "serde".to_string(),
+            version: "1.0.0".to_string(),
+        };
+        let result = client.query_batch(&[query]).await;
+        assert!(
+            result.is_err(),
+            "query to unreachable endpoint should error, got {result:?}"
+        );
     }
 
     #[test]

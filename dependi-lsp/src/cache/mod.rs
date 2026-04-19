@@ -362,6 +362,7 @@ mod tests {
             yanked: false,
             yanked_versions: vec![],
             release_dates: Default::default(),
+            transitive_vulnerabilities: vec![],
         }
     }
 

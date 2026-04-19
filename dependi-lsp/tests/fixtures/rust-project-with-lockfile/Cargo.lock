@@ -1,0 +1,13 @@
+[[package]]
+name = "demo"
+version = "0.1.0"
+dependencies = ["serde"]
+
+[[package]]
+name = "serde"
+version = "1.0.195"
+dependencies = ["serde_derive"]
+
+[[package]]
+name = "serde_derive"
+version = "1.0.195"

@@ -64,7 +64,7 @@ pub struct VulnerabilityQuery {
 ///
 /// If normalization would produce an empty string (e.g. operator-only input),
 /// the original trimmed input is returned unchanged.
-pub(crate) fn normalize_version_for_osv(version: &str) -> String {
+pub fn normalize_version_for_osv(version: &str) -> String {
     // Step 1: trim surrounding whitespace
     let trimmed = version.trim();
 

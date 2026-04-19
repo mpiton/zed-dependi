@@ -50,6 +50,10 @@ enum Commands {
         /// Exit with code 1 if vulnerabilities are found
         #[arg(long, default_value = "true")]
         fail_on_vulns: bool,
+
+        /// Disable lockfile-based scanning (enabled by default).
+        #[arg(long = "no-use-lockfile", action = clap::ArgAction::SetTrue)]
+        no_use_lockfile: bool,
     },
     /// Profile dependency file parsing (for use with cargo-flamegraph)
     ProfileParse {
@@ -115,7 +119,8 @@ async fn main() -> ExitCode {
             output,
             min_severity,
             fail_on_vulns,
-        }) => run_scan(file, output, min_severity, fail_on_vulns).await,
+            no_use_lockfile,
+        }) => run_scan(file, output, min_severity, fail_on_vulns, !no_use_lockfile).await,
         Some(Commands::ProfileParse { file, iterations }) => {
             run_profile_parse(file, iterations).await
         }
@@ -147,21 +152,93 @@ async fn run_lsp() {
     Server::new(stdin, stdout, socket).serve(service).await;
 }
 
+fn print_markdown_entry(v: &serde_json::Value, via: Option<&str>) {
+    let severity = v["severity"].as_str().unwrap_or("low");
+    let icon = match severity {
+        "critical" => "⚠",
+        "high" => "▲",
+        "medium" => "●",
+        _ => "○",
+    };
+    let pkg = v["package"].as_str().unwrap_or("");
+    let ver = v["version"].as_str().unwrap_or("");
+    match via {
+        Some(parent) => println!("### {pkg}@{ver} — via `{parent}`\n"),
+        None => println!("### {pkg}@{ver}\n"),
+    }
+    let id = v["id"].as_str().unwrap_or("");
+    let sev_upper = severity.to_uppercase();
+    let desc = v["description"].as_str().unwrap_or("");
+    if let Some(url) = v["url"].as_str() {
+        println!("- **[{id}]({url})** ({icon} {sev_upper}): {desc}\n");
+    } else {
+        println!("- **{id}** ({icon} {sev_upper}): {desc}\n");
+    }
+}
+
+fn canonical_name(eco: dependi_lsp::vulnerabilities::Ecosystem, name: &str) -> String {
+    use dependi_lsp::parsers::{
+        composer_lock::normalize_composer_name, gemfile_lock::normalize_gem_name,
+        python_lock::normalize_python_name,
+    };
+    use dependi_lsp::vulnerabilities::Ecosystem;
+    match eco {
+        Ecosystem::PyPI => normalize_python_name(name),
+        Ecosystem::Packagist => normalize_composer_name(name),
+        Ecosystem::RubyGems => normalize_gem_name(name),
+        _ => name.to_string(),
+    }
+}
+
 async fn run_scan(
     file: PathBuf,
     output: String,
     min_severity: String,
     fail_on_vulns: bool,
+    use_lockfile: bool,
 ) -> ExitCode {
     use dependi_lsp::parsers::{
-        Parser, cargo::CargoParser, csharp::CsharpParser, dart::DartParser, go::GoParser,
-        maven::MavenParser, npm::NpmParser, php::PhpParser, python::PythonParser,
+        Parser, cargo::CargoParser, cargo_lock, composer_lock, csharp::CsharpParser,
+        dart::DartParser, gemfile_lock, go::GoParser, lockfile_graph::LockfileGraph,
+        lockfile_graph::LockfilePackage, lockfile_graph::read_lockfile_capped, maven::MavenParser,
+        npm::NpmParser, npm_lock, php::PhpParser, python::PythonParser, python_lock,
+        ruby::RubyParser,
     };
     use dependi_lsp::registries::VulnerabilitySeverity;
-    use dependi_lsp::vulnerabilities::{Ecosystem, VulnerabilityQuery, osv::OsvClient};
+    use dependi_lsp::vulnerabilities::{
+        Ecosystem, VulnerabilityQuery, normalize_version_for_osv, osv::OsvClient,
+    };
+    use hashbrown::{HashMap, HashSet};
 
-    // Read file (using async I/O)
-    let content = match tokio::fs::read_to_string(&file).await {
+    fn inc_sev(
+        sev: dependi_lsp::registries::VulnerabilitySeverity,
+        total: &mut u32,
+        crit: &mut u32,
+        high: &mut u32,
+        med: &mut u32,
+        low: &mut u32,
+    ) {
+        use dependi_lsp::registries::VulnerabilitySeverity;
+        *total += 1;
+        match sev {
+            VulnerabilitySeverity::Critical => *crit += 1,
+            VulnerabilitySeverity::High => *high += 1,
+            VulnerabilitySeverity::Medium => *med += 1,
+            VulnerabilitySeverity::Low => *low += 1,
+        }
+    }
+
+    fn cargo_root_package_name(manifest_content: &str) -> Option<String> {
+        let value: toml::Value = toml::from_str(manifest_content).ok()?;
+        value
+            .get("package")?
+            .get("name")?
+            .as_str()
+            .map(|s| s.to_string())
+    }
+
+    // Read file (capped at 50 MiB to prevent hostile large inputs)
+    let content = match read_lockfile_capped(&file).await {
         Ok(c) => c,
         Err(e) => {
             eprintln!("Error reading file: {e}");
@@ -186,6 +263,8 @@ async fn run_scan(
         (DartParser::new().parse(&content), Ecosystem::Pub)
     } else if file_name.ends_with(".csproj") {
         (CsharpParser::new().parse(&content), Ecosystem::NuGet)
+    } else if file_name == "Gemfile" {
+        (RubyParser::new().parse(&content), Ecosystem::RubyGems)
     } else if file_name == "pom.xml" {
         (MavenParser::new().parse(&content), Ecosystem::Maven)
     } else {
@@ -198,24 +277,152 @@ async fn run_scan(
         return ExitCode::SUCCESS;
     }
 
-    eprintln!(
-        "Scanning {} dependencies in {}...",
-        dependencies.len(),
-        file.display()
-    );
+    // Detect lockfile and build graph.
+    // For Cargo, we keep the lock content to build a disambiguated version_map separately.
+    let mut lockfile_graph = LockfileGraph::default();
+    let mut cargo_lock_content: Option<String> = None;
+    if use_lockfile {
+        match ecosystem {
+            Ecosystem::CratesIo => {
+                if let Some(path) = cargo_lock::find_cargo_lock(&file).await
+                    && let Ok(lock_content) = read_lockfile_capped(&path).await
+                {
+                    lockfile_graph = cargo_lock::parse_cargo_lock_graph(&lock_content);
+                    cargo_lock_content = Some(lock_content);
+                }
+            }
+            Ecosystem::Npm => {
+                if let Some((path, kind)) = npm_lock::find_npm_lockfile(&file).await
+                    && let Ok(lock_content) = read_lockfile_capped(&path).await
+                {
+                    lockfile_graph = match kind {
+                        npm_lock::NpmLockfileType::PackageLock => {
+                            npm_lock::parse_package_lock_graph(&lock_content)
+                        }
+                        npm_lock::NpmLockfileType::YarnLock => {
+                            npm_lock::parse_yarn_lock_graph(&lock_content)
+                        }
+                        npm_lock::NpmLockfileType::PnpmLock => {
+                            npm_lock::parse_pnpm_lock_graph(&lock_content)
+                        }
+                        npm_lock::NpmLockfileType::BunLock => LockfileGraph::default(),
+                    };
+                }
+            }
+            Ecosystem::PyPI => {
+                let hint = python_lock::detect_python_tool(&content);
+                if let Some((path, kind)) = python_lock::find_python_lockfile(&file, hint).await
+                    && let Ok(lock_content) = read_lockfile_capped(&path).await
+                {
+                    lockfile_graph = match kind {
+                        python_lock::PythonLockfileType::PoetryLock => {
+                            python_lock::parse_poetry_lock_graph(&lock_content)
+                        }
+                        python_lock::PythonLockfileType::UvLock => {
+                            python_lock::parse_uv_lock_graph(&lock_content)
+                        }
+                        python_lock::PythonLockfileType::PipfileLock => {
+                            python_lock::parse_pipfile_lock_graph(&lock_content)
+                        }
+                        python_lock::PythonLockfileType::PdmLock => LockfileGraph::default(),
+                    };
+                }
+            }
+            Ecosystem::Packagist => {
+                if let Some(path) = composer_lock::find_composer_lock(&file).await
+                    && let Ok(lock_content) = read_lockfile_capped(&path).await
+                {
+                    lockfile_graph = composer_lock::parse_composer_lock_graph(&lock_content);
+                }
+            }
+            Ecosystem::RubyGems => {
+                if let Some(path) = gemfile_lock::find_gemfile_lock(&file).await
+                    && let Ok(lock_content) = read_lockfile_capped(&path).await
+                {
+                    lockfile_graph = gemfile_lock::parse_gemfile_lock_graph(&lock_content);
+                }
+            }
+            _ => {} // Go/Pub/NuGet/Maven — no graph parser in this PR
+        }
+    }
 
-    // Build vulnerability queries
-    let queries: Vec<VulnerabilityQuery> = dependencies
+    // Populate resolved_version on direct deps.
+    // For Cargo, use parse_cargo_lock (HashMap) which correctly disambiguates multi-version
+    // crates via the root package's dep list.  For other ecosystems, derive from the graph.
+    let version_map: HashMap<String, String> = if let Some(ref lock_content) = cargo_lock_content {
+        let root_name = cargo_root_package_name(&content);
+        cargo_lock::parse_cargo_lock(lock_content, root_name.as_deref())
+    } else {
+        lockfile_graph
+            .packages
+            .iter()
+            .map(|p| (p.name.clone(), p.version.clone()))
+            .collect()
+    };
+
+    let mut dependencies = dependencies;
+    for dep in dependencies.iter_mut() {
+        let key = canonical_name(ecosystem, &dep.name);
+        if let Some(v) = version_map.get(&key) {
+            dep.resolved_version = Some(v.clone());
+        }
+    }
+
+    // Flag graph's root packages (matching manifest deps)
+    let direct_names: HashSet<String> = dependencies
+        .iter()
+        .map(|d| canonical_name(ecosystem, &d.name))
+        .collect();
+    for pkg in lockfile_graph.packages.iter_mut() {
+        if direct_names.contains(&pkg.name) {
+            pkg.is_root = true;
+        }
+    }
+
+    // Extract transitives (packages in the lockfile but not in the manifest)
+    let direct_names_vec: Vec<String> = dependencies
+        .iter()
+        .map(|d| canonical_name(ecosystem, &d.name))
+        .collect();
+    let normalized_to_raw: HashMap<String, String> = dependencies
+        .iter()
+        .map(|d| (canonical_name(ecosystem, &d.name), d.name.clone()))
+        .collect();
+    let transitives: Vec<LockfilePackage> = lockfile_graph
+        .transitives_only(&direct_names_vec)
+        .into_iter()
+        .cloned()
+        .collect();
+
+    // Build queries: direct first, then transitive. Remember the split index.
+    let mut queries: Vec<VulnerabilityQuery> = dependencies
         .iter()
         .map(|dep| VulnerabilityQuery {
             ecosystem,
             package_name: dep.name.clone(),
-            version: dep.version.clone(),
+            version: normalize_version_for_osv(dep.effective_version()),
         })
         .collect();
+    let direct_count = queries.len();
+    for t in &transitives {
+        queries.push(VulnerabilityQuery {
+            ecosystem,
+            package_name: t.name.clone(),
+            version: normalize_version_for_osv(&t.version),
+        });
+    }
 
-    // Query OSV.dev
-    let osv_client = OsvClient::default();
+    eprintln!(
+        "Scanning {direct_count} direct + {} transitive dependencies in {}...",
+        transitives.len(),
+        file.display()
+    );
+
+    // Allow tests to inject a custom OSV endpoint
+    let osv_client = match std::env::var("OSV_ENDPOINT") {
+        Ok(url) => OsvClient::with_endpoint(url),
+        Err(_) => OsvClient::default(),
+    };
     let results = match osv_client.query_batch(&queries).await {
         Ok(r) => r,
         Err(e) => {
@@ -224,39 +431,74 @@ async fn run_scan(
         }
     };
 
+    let (direct_results, transitive_results) = results.split_at(direct_count);
+
     // Parse minimum severity using shared method
     let min_sev = VulnerabilitySeverity::from_str_loose(&min_severity);
 
-    // Filter and collect vulnerabilities
-    let mut total_vulns = 0;
-    let mut critical_count = 0;
-    let mut high_count = 0;
-    let mut medium_count = 0;
-    let mut low_count = 0;
-    let mut vuln_details: Vec<serde_json::Value> = Vec::new();
+    let mut total_vulns = 0u32;
+    let mut critical_count = 0u32;
+    let mut high_count = 0u32;
+    let mut medium_count = 0u32;
+    let mut low_count = 0u32;
+    let mut direct_details: Vec<serde_json::Value> = Vec::new();
+    let mut transitive_details: Vec<serde_json::Value> = Vec::new();
 
-    for (dep, result) in dependencies.iter().zip(results.iter()) {
+    for (dep, result) in dependencies.iter().zip(direct_results.iter()) {
         for vuln in &result.vulnerabilities {
-            // Filter by severity using shared method
             if !vuln.severity.meets_threshold(&min_sev) {
                 continue;
             }
-
-            total_vulns += 1;
-            match vuln.severity {
-                VulnerabilitySeverity::Critical => critical_count += 1,
-                VulnerabilitySeverity::High => high_count += 1,
-                VulnerabilitySeverity::Medium => medium_count += 1,
-                VulnerabilitySeverity::Low => low_count += 1,
-            }
-
-            vuln_details.push(serde_json::json!({
+            inc_sev(
+                vuln.severity,
+                &mut total_vulns,
+                &mut critical_count,
+                &mut high_count,
+                &mut medium_count,
+                &mut low_count,
+            );
+            direct_details.push(serde_json::json!({
                 "package": dep.name,
-                "version": dep.version,
+                "version": dep.effective_version(),
                 "id": vuln.id,
                 "severity": vuln.severity.as_str(),
                 "description": vuln.description,
-                "url": vuln.url
+                "url": vuln.url,
+            }));
+        }
+    }
+
+    let inverse = lockfile_graph.reverse_index(&direct_names_vec);
+
+    for (pkg, result) in transitives.iter().zip(transitive_results.iter()) {
+        for vuln in &result.vulnerabilities {
+            if !vuln.severity.meets_threshold(&min_sev) {
+                continue;
+            }
+            inc_sev(
+                vuln.severity,
+                &mut total_vulns,
+                &mut critical_count,
+                &mut high_count,
+                &mut medium_count,
+                &mut low_count,
+            );
+
+            let via_direct = inverse
+                .get(&pkg.name)
+                .and_then(|parents| parents.first())
+                .and_then(|n| normalized_to_raw.get(n))
+                .cloned()
+                .unwrap_or_else(|| "(unknown)".to_string());
+
+            transitive_details.push(serde_json::json!({
+                "package": pkg.name,
+                "version": pkg.version,
+                "via_direct": via_direct,
+                "id": vuln.id,
+                "severity": vuln.severity.as_str(),
+                "description": vuln.description,
+                "url": vuln.url,
             }));
         }
     }
@@ -264,6 +506,10 @@ async fn run_scan(
     // Output results
     match output.as_str() {
         "json" => {
+            let combined: Vec<&serde_json::Value> = direct_details
+                .iter()
+                .chain(transitive_details.iter())
+                .collect();
             let report = serde_json::json!({
                 "file": file.display().to_string(),
                 "summary": {
@@ -273,7 +519,9 @@ async fn run_scan(
                     "medium": medium_count,
                     "low": low_count
                 },
-                "vulnerabilities": vuln_details
+                "direct": direct_details,
+                "transitive": transitive_details,
+                "vulnerabilities": combined,
             });
             match serde_json::to_string_pretty(&report) {
                 Ok(json) => println!("{json}"),
@@ -293,54 +541,60 @@ async fn run_scan(
             println!("| ○ Low | {low_count} |");
             println!("| **Total** | **{total_vulns}** |\n");
 
-            if !vuln_details.is_empty() {
-                println!("## Vulnerabilities\n");
-                for vuln in &vuln_details {
-                    let severity = vuln["severity"].as_str();
-                    let severity_icon = match severity.unwrap_or("low") {
-                        "critical" => "⚠",
-                        "high" => "▲",
-                        "medium" => "●",
-                        _ => "○",
-                    };
-                    println!(
-                        "### {}@{}\n",
-                        vuln["package"].as_str().unwrap_or(""),
-                        vuln["version"].as_str().unwrap_or("")
-                    );
-                    if let Some(url) = vuln["url"].as_str() {
-                        println!(
-                            "- **[{}]({url})** ({severity_icon} {}): {}",
-                            vuln["id"].as_str().unwrap_or(""),
-                            severity.unwrap_or("").to_uppercase(),
-                            vuln["description"].as_str().unwrap_or("")
-                        );
-                    } else {
-                        println!(
-                            "- **{}** ({severity_icon} {}): {}",
-                            vuln["id"].as_str().unwrap_or(""),
-                            severity.unwrap_or("").to_uppercase(),
-                            vuln["description"].as_str().unwrap_or("")
-                        );
-                    }
-                    println!();
+            if !direct_details.is_empty() {
+                println!("## Direct dependencies ({})\n", direct_details.len());
+                for v in &direct_details {
+                    print_markdown_entry(v, None);
+                }
+            }
+            if !transitive_details.is_empty() {
+                println!(
+                    "## Transitive dependencies ({})\n",
+                    transitive_details.len()
+                );
+                for v in &transitive_details {
+                    let via = v["via_direct"].as_str();
+                    print_markdown_entry(v, via);
                 }
             }
         }
         _ => {
-            // Summary format
-            println!("Vulnerability Scan Results for {}\n", file.display());
+            println!("Vulnerability Scan Results for {}", file.display());
+            println!(
+                "  Total: {total_vulns} ({} direct, {} transitive)",
+                direct_details.len(),
+                transitive_details.len()
+            );
             println!("  ⚠ Critical: {critical_count}");
             println!("  ▲ High:     {high_count}");
             println!("  ● Medium:   {medium_count}");
-            println!("  ○ Low:      {low_count}");
-            println!("  ─────────────");
-            println!("  Total:      {total_vulns}\n");
+            println!("  ○ Low:      {low_count}\n");
 
+            if !direct_details.is_empty() {
+                println!("Direct:");
+                for v in &direct_details {
+                    println!(
+                        "  - {}@{} [{}]",
+                        v["package"].as_str().unwrap_or(""),
+                        v["version"].as_str().unwrap_or(""),
+                        v["id"].as_str().unwrap_or("")
+                    );
+                }
+            }
+            if !transitive_details.is_empty() {
+                println!("Transitive:");
+                for v in &transitive_details {
+                    println!(
+                        "  - {}@{} (via {}) [{}]",
+                        v["package"].as_str().unwrap_or(""),
+                        v["version"].as_str().unwrap_or(""),
+                        v["via_direct"].as_str().unwrap_or("?"),
+                        v["id"].as_str().unwrap_or("")
+                    );
+                }
+            }
             if total_vulns == 0 {
-                println!("[OK] No vulnerabilities found!");
-            } else {
-                println!("⚠ {total_vulns} vulnerabilities found!");
+                println!("\n[OK] No vulnerabilities found!");
             }
         }
     }
@@ -356,10 +610,11 @@ async fn run_scan(
 async fn run_profile_parse(file: PathBuf, iterations: u32) -> ExitCode {
     use dependi_lsp::parsers::{
         Parser, cargo::CargoParser, csharp::CsharpParser, dart::DartParser, go::GoParser,
-        maven::MavenParser, npm::NpmParser, php::PhpParser, python::PythonParser, ruby::RubyParser,
+        lockfile_graph::read_lockfile_capped, maven::MavenParser, npm::NpmParser, php::PhpParser,
+        python::PythonParser, ruby::RubyParser,
     };
 
-    let content = match tokio::fs::read_to_string(&file).await {
+    let content = match read_lockfile_capped(&file).await {
         Ok(c) => c,
         Err(e) => {
             eprintln!("Error reading file: {e}");
@@ -559,7 +814,8 @@ async fn run_profile_full(file: PathBuf, iterations: u32, verbose: bool) -> Exit
     use dependi_lsp::config::NpmRegistryConfig;
     use dependi_lsp::parsers::{
         Parser, cargo::CargoParser, csharp::CsharpParser, dart::DartParser, go::GoParser,
-        maven::MavenParser, npm::NpmParser, php::PhpParser, python::PythonParser, ruby::RubyParser,
+        lockfile_graph::read_lockfile_capped, maven::MavenParser, npm::NpmParser, php::PhpParser,
+        python::PythonParser, ruby::RubyParser,
     };
     use dependi_lsp::registries::{
         Registry, crates_io::CratesIoRegistry, go_proxy::GoProxyRegistry,
@@ -570,7 +826,7 @@ async fn run_profile_full(file: PathBuf, iterations: u32, verbose: bool) -> Exit
     use dependi_lsp::vulnerabilities::{Ecosystem, VulnerabilityQuery, osv::OsvClient};
     use futures::future::join_all;
 
-    let content = match tokio::fs::read_to_string(&file).await {
+    let content = match read_lockfile_capped(&file).await {
         Ok(c) => c,
         Err(e) => {
             eprintln!("Error reading file: {e}");

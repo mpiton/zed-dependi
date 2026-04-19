@@ -266,6 +266,7 @@ impl Registry for NuGetRegistry {
             yanked: false,
             yanked_versions: vec![], // Not applicable to NuGet
             release_dates,
+            transitive_vulnerabilities: vec![],
         })
     }
 }

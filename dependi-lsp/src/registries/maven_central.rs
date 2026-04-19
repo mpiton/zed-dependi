@@ -137,6 +137,7 @@ impl Registry for MavenCentralRegistry {
             yanked: false,
             yanked_versions: vec![],
             release_dates: hashbrown::HashMap::new(),
+            transitive_vulnerabilities: vec![],
         })
     }
 

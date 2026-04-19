@@ -8,7 +8,7 @@ use crate::cache::ReadCache;
 use crate::file_types::FileType;
 use crate::parsers::Dependency;
 use crate::providers::inlay_hints::{VersionStatus, compare_versions, is_local_dependency};
-use crate::registries::{VersionInfo, Vulnerability, VulnerabilitySeverity};
+use crate::registries::{TransitiveVuln, VersionInfo, Vulnerability, VulnerabilitySeverity};
 use crate::utils::fmt_truncate_string;
 
 /// Create diagnostics for a list of dependencies
@@ -21,6 +21,7 @@ pub fn create_diagnostics(
     cache_key_fn: impl Fn(&str) -> String,
     min_severity: Option<VulnerabilitySeverity>,
     file_type: FileType,
+    doc_transitive_vulns: &hashbrown::HashMap<String, Vec<TransitiveVuln>>,
 ) -> Vec<Diagnostic> {
     let mut diagnostics = Vec::new();
 
@@ -55,7 +56,9 @@ pub fn create_diagnostics(
                 );
                 diagnostics.push(create_deprecation_diagnostic(dep, &version_info));
             } else {
-                // Add vulnerability diagnostic (summary) only if not deprecated or yanked
+                // Add vulnerability diagnostic (summary) only if not deprecated or yanked.
+                // Per-document transitive vulns are sourced from doc_transitive_vulns to avoid
+                // cross-workspace contamination from the shared global version_cache.
                 let filtered_vulns: Vec<_> = version_info
                     .vulnerabilities
                     .iter()
@@ -67,10 +70,27 @@ pub fn create_diagnostics(
                     })
                     .collect();
 
-                if !filtered_vulns.is_empty() {
+                let filtered_transitive: Vec<&TransitiveVuln> = doc_transitive_vulns
+                    .get(&dep.name)
+                    .map(|v| {
+                        v.iter()
+                            .filter(|t| {
+                                min_severity
+                                    .as_ref()
+                                    .map(|min| {
+                                        meets_severity_threshold(&t.vulnerability.severity, min)
+                                    })
+                                    .unwrap_or(true)
+                            })
+                            .collect()
+                    })
+                    .unwrap_or_default();
+
+                if !filtered_vulns.is_empty() || !filtered_transitive.is_empty() {
                     diagnostics.push(create_vulnerability_summary_diagnostic(
                         dep,
                         &filtered_vulns,
+                        &filtered_transitive,
                     ));
                 }
             }
@@ -315,25 +335,61 @@ fn create_yanked_diagnostic(
     }
 }
 
+/// Build a short message listing transitive vulnerabilities for a direct dep.
+/// Shows up to 3 entries, then "+N more".
+pub fn build_transitive_summary_message(tv: &[&TransitiveVuln]) -> String {
+    if tv.is_empty() {
+        return String::new();
+    }
+    let mut parts: Vec<String> = tv
+        .iter()
+        .take(3)
+        .map(|t| {
+            let name = &t.package_name;
+            let ver = &t.package_version;
+            let id = &t.vulnerability.id;
+            format!("{name}@{ver} ({id})")
+        })
+        .collect();
+    if tv.len() > 3 {
+        parts.push(format!("+{} more", tv.len() - 3));
+    }
+    let n = tv.len();
+    format!("{n} transitive vuln(s): {}", parts.join(", "))
+}
+
 /// Create a summary diagnostic for multiple vulnerabilities
 fn create_vulnerability_summary_diagnostic(
     dep: &Dependency,
     vulns: &[&Vulnerability],
+    transitive_vulns: &[&TransitiveVuln],
 ) -> Diagnostic {
     let count = vulns.len();
 
-    // Use the highest severity among all vulnerabilities
+    // Use the highest severity among all vulnerabilities (direct + transitive)
     let severity_to_num = |s: &VulnerabilitySeverity| match s {
         VulnerabilitySeverity::Critical => 4,
         VulnerabilitySeverity::High => 3,
         VulnerabilitySeverity::Medium => 2,
         VulnerabilitySeverity::Low => 1,
     };
-    let max_severity = vulns
+    let max_direct_sev = vulns
         .iter()
         .map(|v| &v.severity)
         .max_by_key(|s| severity_to_num(s))
         .unwrap_or(&VulnerabilitySeverity::Low);
+    let max_transitive_sev = transitive_vulns
+        .iter()
+        .map(|t| &t.vulnerability.severity)
+        .max_by_key(|s| severity_to_num(s));
+    let max_severity = if vulns.is_empty() {
+        max_transitive_sev.unwrap_or(&VulnerabilitySeverity::Low)
+    } else {
+        match max_transitive_sev {
+            Some(ts) if severity_to_num(ts) > severity_to_num(max_direct_sev) => ts,
+            _ => max_direct_sev,
+        }
+    };
 
     let diagnostic_severity = match max_severity {
         VulnerabilitySeverity::Critical | VulnerabilitySeverity::High => DiagnosticSeverity::ERROR,
@@ -341,12 +397,26 @@ fn create_vulnerability_summary_diagnostic(
         VulnerabilitySeverity::Low => DiagnosticSeverity::HINT,
     };
 
-    // Build summary message
-    let vuln_word = if count == 1 { "vuln" } else { "vulns" };
-    let vuln_ids: Vec<_> = vulns.iter().map(|v| v.id.as_str()).collect();
-    let message = format!("⚠ {count} {vuln_word}: {}", vuln_ids.join(", "));
+    // Build summary message: direct only, transitive only, or both
+    let message = if vulns.is_empty() {
+        // Transitive-only case
+        build_transitive_summary_message(transitive_vulns)
+    } else {
+        let vuln_word = if count == 1 { "vuln" } else { "vulns" };
+        let vuln_ids: Vec<_> = vulns.iter().map(|v| v.id.as_str()).collect();
+        let mut msg = format!("⚠ {count} {vuln_word}: {}", vuln_ids.join(", "));
+        if !transitive_vulns.is_empty() {
+            let tv_msg = build_transitive_summary_message(transitive_vulns);
+            msg.push_str(" — ");
+            msg.push_str(&tv_msg);
+        }
+        msg
+    };
 
-    // Collect related information for all vulnerabilities
+    // The diagnostic code uses the total count (direct + transitive vuln entries)
+    let total_count = count + transitive_vulns.len();
+
+    // Collect related information for direct vulnerabilities
     let related_info: Vec<_> = vulns
         .iter()
         .filter_map(|&vuln| {
@@ -378,7 +448,7 @@ fn create_vulnerability_summary_diagnostic(
             },
         },
         severity: Some(diagnostic_severity),
-        code: Some(NumberOrString::String(format!("{count}-vulns"))),
+        code: Some(NumberOrString::String(format!("{total_count}-vulns"))),
         source: Some("dependi-security".to_string()),
         message,
         related_information: (!related_info.is_empty()).then_some(related_info),
@@ -439,6 +509,7 @@ mod tests {
             |name| format!("test:{name}"),
             None,
             FileType::Cargo,
+            &hashbrown::HashMap::new(),
         );
 
         assert_eq!(diagnostics.len(), 1);
@@ -464,6 +535,7 @@ mod tests {
             |name| format!("test:{name}"),
             None,
             FileType::Cargo,
+            &hashbrown::HashMap::new(),
         );
 
         assert_eq!(diagnostics.len(), 0);
@@ -479,6 +551,7 @@ mod tests {
             |name| format!("test:{name}"),
             None,
             FileType::Cargo,
+            &hashbrown::HashMap::new(),
         );
 
         assert_eq!(diagnostics.len(), 0);
@@ -524,6 +597,7 @@ mod tests {
             |name| format!("test:{name}"),
             None,
             FileType::Cargo,
+            &hashbrown::HashMap::new(),
         );
 
         let deprecation_diags: Vec<_> = diagnostics
@@ -567,6 +641,7 @@ mod tests {
             |name| format!("test:{name}"),
             None,
             FileType::Cargo,
+            &hashbrown::HashMap::new(),
         );
 
         let deprecation_diags: Vec<_> = diagnostics
@@ -609,6 +684,7 @@ mod tests {
             |name| format!("test:{name}"),
             None,
             FileType::Cargo,
+            &hashbrown::HashMap::new(),
         );
 
         let deprecation_diags: Vec<_> = diagnostics
@@ -664,6 +740,7 @@ mod tests {
             |name| format!("test:{name}"),
             None,
             FileType::Cargo,
+            &hashbrown::HashMap::new(),
         );
 
         let yanked_diags: Vec<_> = diagnostics
@@ -703,6 +780,7 @@ mod tests {
             |name| format!("test:{name}"),
             None,
             FileType::Cargo,
+            &hashbrown::HashMap::new(),
         );
 
         let yanked_diags: Vec<_> = diagnostics
@@ -741,6 +819,7 @@ mod tests {
             |name| format!("test:{name}"),
             None,
             FileType::Cargo,
+            &hashbrown::HashMap::new(),
         );
 
         let yanked_diags: Vec<_> = diagnostics
@@ -802,6 +881,7 @@ mod tests {
             |name| format!("test:{name}"),
             None,
             FileType::Cargo,
+            &hashbrown::HashMap::new(),
         );
 
         let yanked_diags: Vec<_> = diagnostics
@@ -849,6 +929,7 @@ mod tests {
             |name| format!("test:{name}"),
             None,
             FileType::Cargo,
+            &hashbrown::HashMap::new(),
         );
 
         assert_eq!(diagnostics.len(), 1);
@@ -888,6 +969,7 @@ mod tests {
             |name| format!("test:{name}"),
             None,
             FileType::Cargo,
+            &hashbrown::HashMap::new(),
         );
 
         let vuln_diags: Vec<_> = diagnostics
@@ -937,6 +1019,7 @@ mod tests {
             |name| format!("test:{name}"),
             Some(VulnerabilitySeverity::High),
             FileType::Cargo,
+            &hashbrown::HashMap::new(),
         );
 
         let vuln_diags: Vec<_> = diagnostics
@@ -972,6 +1055,7 @@ mod tests {
             |name| format!("test:{name}"),
             None,
             FileType::Cargo,
+            &hashbrown::HashMap::new(),
         );
 
         let deprecation_diags: Vec<_> = diagnostics
@@ -1009,6 +1093,7 @@ mod tests {
             |name| format!("test:{name}"),
             None,
             FileType::Cargo,
+            &hashbrown::HashMap::new(),
         );
 
         let yanked_diags: Vec<_> = diagnostics
@@ -1024,6 +1109,55 @@ mod tests {
         assert!(yanked_diags[0].related_information.is_some());
         let related = yanked_diags[0].related_information.as_ref().unwrap();
         assert_eq!(related.len(), 2);
+    }
+
+    #[test]
+    fn test_build_transitive_summary_message_formats_correctly() {
+        let tvs = [crate::registries::TransitiveVuln {
+            package_name: "scheduler".to_string(),
+            package_version: "1.2.3".to_string(),
+            vulnerability: crate::registries::Vulnerability {
+                id: "CVE-1".to_string(),
+                severity: crate::registries::VulnerabilitySeverity::High,
+                description: "x".to_string(),
+                url: None,
+            },
+        }];
+        let refs: Vec<&_> = tvs.iter().collect();
+        let msg = build_transitive_summary_message(&refs);
+        assert!(msg.contains("scheduler@1.2.3"));
+        assert!(msg.contains("CVE-1"));
+        assert!(msg.contains("1 transitive"));
+    }
+
+    #[test]
+    fn test_build_transitive_summary_message_truncates_after_three() {
+        let mk = |name: &str, id: &str| crate::registries::TransitiveVuln {
+            package_name: name.to_string(),
+            package_version: "1.0.0".to_string(),
+            vulnerability: crate::registries::Vulnerability {
+                id: id.to_string(),
+                severity: crate::registries::VulnerabilitySeverity::Low,
+                description: "x".to_string(),
+                url: None,
+            },
+        };
+        let tvs = [
+            mk("a", "X1"),
+            mk("b", "X2"),
+            mk("c", "X3"),
+            mk("d", "X4"),
+            mk("e", "X5"),
+        ];
+        let refs: Vec<&_> = tvs.iter().collect();
+        let msg = build_transitive_summary_message(&refs);
+        assert!(msg.contains("+2 more"));
+    }
+
+    #[test]
+    fn test_build_transitive_summary_message_empty() {
+        let msg = build_transitive_summary_message(&[]);
+        assert_eq!(msg, "");
     }
 
     #[test]
@@ -1050,6 +1184,7 @@ mod tests {
             |name| format!("test:{name}"),
             None,
             FileType::Cargo,
+            &hashbrown::HashMap::new(),
         );
 
         let vuln_diags: Vec<_> = diagnostics
@@ -1089,6 +1224,7 @@ mod tests {
             |name| format!("test:{name}"),
             None,
             FileType::Cargo,
+            &hashbrown::HashMap::new(),
         );
 
         let vuln_diags: Vec<_> = diagnostics
@@ -1128,6 +1264,7 @@ mod tests {
             |name| format!("test:{name}"),
             None,
             FileType::Cargo,
+            &hashbrown::HashMap::new(),
         );
 
         let vuln_diags: Vec<_> = diagnostics
@@ -1162,6 +1299,7 @@ mod tests {
             |name| format!("test:{name}"),
             None,
             FileType::Npm,
+            &hashbrown::HashMap::new(),
         );
 
         let yanked_diags: Vec<_> = diagnostics
@@ -1183,6 +1321,150 @@ mod tests {
         assert!(
             !yanked_diags[0].message.contains("crates.io"),
             "Yanked diagnostic should NOT reference 'crates.io' for npm packages"
+        );
+    }
+
+    #[test]
+    fn test_diagnostic_fires_on_transitive_only_vulns() {
+        use crate::registries::{
+            TransitiveVuln, VersionInfo, Vulnerability, VulnerabilitySeverity,
+        };
+
+        let deps = vec![create_test_dependency("my-dep", "1.0.0", 5)];
+        let cache = MemoryCache::new();
+        cache.insert(
+            "test:my-dep".to_string(),
+            VersionInfo {
+                latest: Some("1.0.0".to_string()),
+                ..Default::default()
+            },
+        );
+
+        // Transitive vulns are now stored per-document, not in version_cache.
+        let mut doc_transitives: hashbrown::HashMap<String, Vec<TransitiveVuln>> =
+            hashbrown::HashMap::new();
+        doc_transitives.insert(
+            "my-dep".to_string(),
+            vec![TransitiveVuln {
+                package_name: "scheduler".into(),
+                package_version: "1.2.3".into(),
+                vulnerability: Vulnerability {
+                    id: "CVE-1".into(),
+                    severity: VulnerabilitySeverity::High,
+                    description: "desc".into(),
+                    url: None,
+                },
+            }],
+        );
+
+        let diagnostics = create_diagnostics(
+            &deps,
+            &cache,
+            |name| format!("test:{name}"),
+            None,
+            FileType::Cargo,
+            &doc_transitives,
+        );
+
+        let vuln_diags: Vec<_> = diagnostics
+            .iter()
+            .filter(|d| {
+                d.code
+                    .as_ref()
+                    .is_some_and(|c| matches!(c, NumberOrString::String(s) if s.contains("vulns")))
+            })
+            .collect();
+
+        assert_eq!(
+            vuln_diags.len(),
+            1,
+            "Should emit diagnostic for transitive-only vulns"
+        );
+        assert!(
+            vuln_diags[0].message.contains("transitive"),
+            "Message should contain 'transitive', got: {}",
+            vuln_diags[0].message
+        );
+        assert!(
+            vuln_diags[0].message.contains("scheduler@1.2.3"),
+            "Message should contain 'scheduler@1.2.3', got: {}",
+            vuln_diags[0].message
+        );
+        assert_eq!(vuln_diags[0].severity, Some(DiagnosticSeverity::ERROR));
+    }
+
+    #[test]
+    fn test_transitive_vulns_respect_min_severity() {
+        let deps = vec![create_test_dependency("my-dep", "1.0.0", 5)];
+        let cache = MemoryCache::new();
+        cache.insert(
+            "test:my-dep".to_string(),
+            VersionInfo {
+                latest: Some("1.0.0".to_string()),
+                ..Default::default()
+            },
+        );
+
+        let mut doc_transitives: hashbrown::HashMap<String, Vec<TransitiveVuln>> =
+            hashbrown::HashMap::new();
+        doc_transitives.insert(
+            "my-dep".to_string(),
+            vec![
+                TransitiveVuln {
+                    package_name: "low-pkg".into(),
+                    package_version: "1.0".into(),
+                    vulnerability: Vulnerability {
+                        id: "LOW-1".into(),
+                        severity: VulnerabilitySeverity::Low,
+                        description: "low".into(),
+                        url: None,
+                    },
+                },
+                TransitiveVuln {
+                    package_name: "high-pkg".into(),
+                    package_version: "2.0".into(),
+                    vulnerability: Vulnerability {
+                        id: "HIGH-1".into(),
+                        severity: VulnerabilitySeverity::High,
+                        description: "high".into(),
+                        url: None,
+                    },
+                },
+            ],
+        );
+
+        let diagnostics = create_diagnostics(
+            &deps,
+            &cache,
+            |name| format!("test:{name}"),
+            Some(VulnerabilitySeverity::High),
+            FileType::Cargo,
+            &doc_transitives,
+        );
+
+        let vuln_diags: Vec<_> = diagnostics
+            .iter()
+            .filter(|d| {
+                d.code
+                    .as_ref()
+                    .is_some_and(|c| matches!(c, NumberOrString::String(s) if s.contains("vulns")))
+            })
+            .collect();
+
+        assert_eq!(
+            vuln_diags.len(),
+            1,
+            "Should emit exactly one diagnostic for the high-severity transitive vuln"
+        );
+        assert!(
+            vuln_diags[0].message.contains("HIGH-1"),
+            "Message should contain HIGH-1, got: {}",
+            vuln_diags[0].message
+        );
+        assert!(
+            !vuln_diags[0].message.contains("LOW-1"),
+            "Message should NOT contain LOW-1 when min_severity=High, got: {}",
+            vuln_diags[0].message
         );
     }
 }
