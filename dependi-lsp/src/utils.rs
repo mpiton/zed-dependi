@@ -59,7 +59,12 @@ pub fn fmt_truncate_string(s: &str, max_chars: usize) -> impl fmt::Display + fmt
 /// # Returns
 ///
 /// A new `String` with unsafe characters replaced by their HTML entities.
-#[must_use]
+///
+/// # Allocation
+///
+/// Pre-allocates at least `s.len()` bytes. Grows only if escaping expands the
+/// output (i.e. if any of the five special characters appear).
+#[must_use = "returns the escaped string; the original is not modified"]
 pub fn html_escape(s: &str) -> String {
     let mut out = String::with_capacity(s.len());
     for c in s.chars() {
@@ -152,6 +157,11 @@ mod tests {
             html_escape(r#"<script>alert("x")</script>"#),
             "&lt;script&gt;alert(&quot;x&quot;)&lt;/script&gt;"
         );
+    }
+
+    #[test]
+    fn test_html_escape_all_special_chars() {
+        assert_eq!(html_escape("&<>\"'"), "&amp;&lt;&gt;&quot;&#39;");
     }
 
     #[test]
