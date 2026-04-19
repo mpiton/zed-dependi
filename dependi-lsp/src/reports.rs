@@ -163,16 +163,16 @@ pub fn fmt_markdown_report(
 /// Advisory URLs are emitted inside `<a href>` only when they start with
 /// `http://` or `https://`; other schemes render the id as plain text.
 #[must_use = "returns a type implementing Display and Debug, which does not have any effects unless they are used"]
-pub fn fmt_html_report<'a>(
-    file: &'a str,
-    summary: &'a VulnerabilitySummary,
-    direct: &'a [VulnerabilityReportEntry],
-    transitive: &'a [TransitiveVulnerabilityReportEntry],
-) -> impl fmt::Display + fmt::Debug + 'a {
-    fmt::from_fn(move |f| {
-        let file_e = crate::utils::html_escape(file);
-        let date = chrono::Local::now().format("%Y-%m-%d").to_string();
+pub fn fmt_html_report(
+    file: &str,
+    summary: &VulnerabilitySummary,
+    direct: &[VulnerabilityReportEntry],
+    transitive: &[TransitiveVulnerabilityReportEntry],
+) -> impl fmt::Display + fmt::Debug {
+    let file_e = crate::utils::html_escape(file);
+    let date = chrono::Local::now().format("%Y-%m-%d").to_string();
 
+    fmt::from_fn(move |f| {
         writeln!(f, "<!DOCTYPE html>")?;
         writeln!(f, "<html lang=\"en\">")?;
         writeln!(f, "<head>")?;
