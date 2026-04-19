@@ -44,6 +44,27 @@ pub struct VulnerabilityReportEntry {
     pub url: Option<String>,
 }
 
+/// A transitive vulnerability report entry — same shape as
+/// [`VulnerabilityReportEntry`] plus the direct dependency name that pulls
+/// this vulnerability in via the lockfile graph.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct TransitiveVulnerabilityReportEntry {
+    /// Name of the affected transitive package.
+    pub package: String,
+    /// Resolved version of the affected transitive package.
+    pub version: String,
+    /// Vulnerability identifier (e.g., CVE-2021-1234, GHSA-xxxx).
+    pub id: String,
+    /// Severity level (critical, high, medium, low).
+    pub severity: String,
+    /// Human-readable description of the vulnerability.
+    pub description: String,
+    /// URL for more information about the vulnerability.
+    pub url: Option<String>,
+    /// Direct dependency (in the manifest) that introduces this transitive.
+    pub via_direct: String,
+}
+
 /// Returns an <code>[fmt::Display] + [fmt::Debug]</code> implementation
 /// which produces a Markdown-formatted vulnerability report.
 ///
@@ -130,6 +151,111 @@ pub fn fmt_markdown_report(
         Ok(())
     })
 }
+
+/// Returns an <code>[fmt::Display] + [fmt::Debug]</code> implementation
+/// which produces a self-contained HTML vulnerability report with inline CSS.
+///
+/// The rendering mirrors the CLI markdown format: a summary table, then two
+/// optional sections for Direct and Transitive dependencies. When both are
+/// empty a success block is rendered instead.
+///
+/// All interpolated values are HTML-escaped via [`crate::utils::html_escape`].
+/// Advisory URLs are emitted inside `<a href>` only when they start with
+/// `http://` or `https://`; other schemes render the id as plain text.
+#[must_use = "returns a type implementing Display and Debug, which does not have any effects unless they are used"]
+pub fn fmt_html_report<'a>(
+    file: &'a str,
+    summary: &'a VulnerabilitySummary,
+    direct: &'a [VulnerabilityReportEntry],
+    transitive: &'a [TransitiveVulnerabilityReportEntry],
+) -> impl fmt::Display + fmt::Debug + 'a {
+    fmt::from_fn(move |f| {
+        let file_e = crate::utils::html_escape(file);
+        let date = chrono::Local::now().format("%Y-%m-%d").to_string();
+
+        writeln!(f, "<!DOCTYPE html>")?;
+        writeln!(f, "<html lang=\"en\">")?;
+        writeln!(f, "<head>")?;
+        writeln!(f, "  <meta charset=\"utf-8\">")?;
+        writeln!(f, "  <title>Vulnerability Report — {file_e}</title>")?;
+        writeln!(f, "  <style>{HTML_REPORT_STYLE}</style>")?;
+        writeln!(f, "</head>")?;
+        writeln!(f, "<body>")?;
+        writeln!(f, "  <h1>Vulnerability Report</h1>")?;
+        writeln!(
+            f,
+            "  <p class=\"meta\"><strong>File:</strong> {file_e}<br><strong>Date:</strong> {date}</p>"
+        )?;
+
+        writeln!(f, "  <h2>Summary</h2>")?;
+        writeln!(f, "  <table class=\"summary\">")?;
+        writeln!(
+            f,
+            "    <thead><tr><th>Severity</th><th>Count</th></tr></thead>"
+        )?;
+        writeln!(f, "    <tbody>")?;
+        writeln!(
+            f,
+            "      <tr class=\"critical\"><td>Critical</td><td>{}</td></tr>",
+            summary.critical
+        )?;
+        writeln!(
+            f,
+            "      <tr class=\"high\"><td>High</td><td>{}</td></tr>",
+            summary.high
+        )?;
+        writeln!(
+            f,
+            "      <tr class=\"medium\"><td>Medium</td><td>{}</td></tr>",
+            summary.medium
+        )?;
+        writeln!(
+            f,
+            "      <tr class=\"low\"><td>Low</td><td>{}</td></tr>",
+            summary.low
+        )?;
+        writeln!(
+            f,
+            "      <tr class=\"total\"><td><strong>Total</strong></td><td><strong>{}</strong></td></tr>",
+            summary.total
+        )?;
+        writeln!(f, "    </tbody>")?;
+        writeln!(f, "  </table>")?;
+
+        if direct.is_empty() && transitive.is_empty() {
+            writeln!(f, "  <section class=\"no-vulns\">")?;
+            writeln!(f, "    <h2>No vulnerabilities found</h2>")?;
+            writeln!(
+                f,
+                "    <p>All dependencies are free of known security vulnerabilities.</p>"
+            )?;
+            writeln!(f, "  </section>")?;
+        }
+
+        writeln!(f, "</body>")?;
+        writeln!(f, "</html>")?;
+        Ok(())
+    })
+}
+
+const HTML_REPORT_STYLE: &str = "body{font-family:-apple-system,system-ui,sans-serif;max-width:960px;margin:2rem auto;padding:0 1rem;color:#222}\
+h1,h2,h3{font-weight:600}\
+.meta{color:#555}\
+table.summary{border-collapse:collapse;margin:1rem 0}\
+table.summary th,table.summary td{border:1px solid #ddd;padding:.4rem .8rem;text-align:left}\
+table.summary tr.critical td{background:#ffe0e0}\
+table.summary tr.high td{background:#ffe8cc}\
+table.summary tr.medium td{background:#fff5cc}\
+table.summary tr.low td{background:#e8f0ff}\
+section.vuln{border-left:4px solid #ddd;padding:.5rem 1rem;margin:.5rem 0;background:#fafafa}\
+section.vuln.critical{border-left-color:#d33}\
+section.vuln.high{border-left-color:#e80}\
+section.vuln.medium{border-left-color:#cc0}\
+section.vuln.low{border-left-color:#38c}\
+.sev{font-weight:600;text-transform:uppercase;font-size:.85em}\
+code{background:#eee;padding:.1em .3em;border-radius:3px}\
+a{color:#06c}\
+.no-vulns{background:#e8f7e8;padding:1rem;border-radius:6px}";
 
 #[cfg(test)]
 mod tests {
@@ -232,5 +358,29 @@ mod tests {
         assert!(report.contains("# Vulnerability Report"));
         assert!(report.contains("## No vulnerabilities found"));
         assert!(report.contains("✅ All dependencies are free of known security vulnerabilities."));
+    }
+
+    fn generate_html_report(
+        file: &str,
+        summary: &VulnerabilitySummary,
+        direct: &[VulnerabilityReportEntry],
+        transitive: &[TransitiveVulnerabilityReportEntry],
+    ) -> String {
+        fmt_html_report(file, summary, direct, transitive).to_string()
+    }
+
+    #[test]
+    fn test_fmt_html_report_no_vulnerabilities() {
+        let summary = VulnerabilitySummary::default();
+        let report = generate_html_report("/project/Cargo.toml", &summary, &[], &[]);
+
+        assert!(report.starts_with("<!DOCTYPE html>"));
+        assert!(report.contains("<title>Vulnerability Report"));
+        assert!(report.contains("<h1>Vulnerability Report</h1>"));
+        assert!(report.contains("<strong>File:</strong> /project/Cargo.toml"));
+        assert!(report.contains("No vulnerabilities found"));
+        assert!(!report.contains("<h2>Direct dependencies"));
+        assert!(!report.contains("<h2>Transitive dependencies"));
+        assert!(report.trim_end().ends_with("</html>"));
     }
 }
