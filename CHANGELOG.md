@@ -9,6 +9,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- `--output html` format for `dependi-lsp scan` — self-contained HTML report
+  with summary table and separate Direct/Transitive sections, HTML-escaped
+  against hostile advisory content, suitable for CI/CD artifacts
+  ([#225](https://github.com/mpiton/zed-dependi/issues/225))
 - Lockfile-based vulnerability scanning in the `dependi-lsp scan` CLI and in
   the LSP editor: when a manifest has an adjacent lockfile (`Cargo.lock`,
   `package-lock.json` (v2/v3 flat format; v1 legacy format not supported), `pnpm-lock.yaml` v6/v9, `yarn.lock` v1, `poetry.lock`,
