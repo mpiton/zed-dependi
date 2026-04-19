@@ -1196,16 +1196,16 @@ impl DependiBackend {
                             VulnCacheKey::new(ecosystem, &tpkg.name, &normalized_version);
                         vuln_cache.insert(vuln_key);
 
-                        // Always store vuln data (even empty) so the cached-attribution loop
-                        // below can find a transitive_vuln_data entry for every vuln_cache hit.
                         let vuln_data_key = VulnCacheKey::new(
                             ecosystem,
                             &tpkg.name,
                             &normalize_version_for_osv(&tpkg.version),
                         );
-                        bg_ctx
-                            .transitive_vuln_data
-                            .insert(vuln_data_key, result.vulnerabilities.clone());
+                        if !result.vulnerabilities.is_empty() {
+                            bg_ctx
+                                .transitive_vuln_data
+                                .insert(vuln_data_key, result.vulnerabilities.clone());
+                        }
 
                         if result.vulnerabilities.is_empty() {
                             continue;
@@ -1266,9 +1266,7 @@ impl DependiBackend {
                             VulnCacheKey::new(ecosystem, &tpkg.name, &normalized_version);
                         if let Some(vulns) = bg_ctx.transitive_vuln_data.get(&vuln_data_key) {
                             let vulns: Vec<_> = vulns.clone();
-                            if vulns.is_empty() {
-                                continue;
-                            }
+                            // No else: absence means no vulns, nothing to do.
                             let parents = inverse.get(&tpkg.name).cloned().unwrap_or_default();
                             if parents.is_empty() {
                                 for v in &vulns {
