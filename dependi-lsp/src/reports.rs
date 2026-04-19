@@ -230,12 +230,96 @@ pub fn fmt_html_report(
                 "    <p>All dependencies are free of known security vulnerabilities.</p>"
             )?;
             writeln!(f, "  </section>")?;
+        } else {
+            if !direct.is_empty() {
+                writeln!(f, "  <h2>Direct dependencies ({})</h2>", direct.len())?;
+                for entry in direct {
+                    write_direct_entry(f, entry)?;
+                }
+            }
+            if !transitive.is_empty() {
+                writeln!(
+                    f,
+                    "  <h2>Transitive dependencies ({})</h2>",
+                    transitive.len()
+                )?;
+                for entry in transitive {
+                    write_transitive_entry(f, entry)?;
+                }
+            }
         }
 
         writeln!(f, "</body>")?;
         writeln!(f, "</html>")?;
         Ok(())
     })
+}
+
+fn severity_class(severity: &str) -> &'static str {
+    match severity.to_ascii_lowercase().as_str() {
+        "critical" => "critical",
+        "high" => "high",
+        "medium" => "medium",
+        _ => "low",
+    }
+}
+
+fn write_direct_entry(
+    f: &mut fmt::Formatter<'_>,
+    entry: &VulnerabilityReportEntry,
+) -> fmt::Result {
+    let sev_class = severity_class(&entry.severity);
+    let pkg = crate::utils::html_escape(&entry.package);
+    let ver = crate::utils::html_escape(&entry.version);
+    let id = crate::utils::html_escape(&entry.id);
+    let sev_upper = crate::utils::html_escape(&entry.severity.to_uppercase());
+    let desc = crate::utils::html_escape(&entry.description);
+
+    writeln!(f, "  <section class=\"vuln {sev_class}\">")?;
+    writeln!(f, "    <h3>{pkg}@{ver}</h3>")?;
+    write!(f, "    <p>")?;
+    write_id_with_optional_link(f, entry.url.as_deref(), &id)?;
+    write!(f, " <span class=\"sev\">{sev_upper}</span>: {desc}")?;
+    writeln!(f, "</p>")?;
+    writeln!(f, "  </section>")
+}
+
+fn write_transitive_entry(
+    f: &mut fmt::Formatter<'_>,
+    entry: &TransitiveVulnerabilityReportEntry,
+) -> fmt::Result {
+    let sev_class = severity_class(&entry.severity);
+    let pkg = crate::utils::html_escape(&entry.package);
+    let ver = crate::utils::html_escape(&entry.version);
+    let id = crate::utils::html_escape(&entry.id);
+    let sev_upper = crate::utils::html_escape(&entry.severity.to_uppercase());
+    let desc = crate::utils::html_escape(&entry.description);
+    let via = crate::utils::html_escape(&entry.via_direct);
+
+    writeln!(f, "  <section class=\"vuln {sev_class}\">")?;
+    writeln!(
+        f,
+        "    <h3>{pkg}@{ver} — via <code>{via}</code></h3>"
+    )?;
+    write!(f, "    <p>")?;
+    write_id_with_optional_link(f, entry.url.as_deref(), &id)?;
+    write!(f, " <span class=\"sev\">{sev_upper}</span>: {desc}")?;
+    writeln!(f, "</p>")?;
+    writeln!(f, "  </section>")
+}
+
+fn write_id_with_optional_link(
+    f: &mut fmt::Formatter<'_>,
+    url: Option<&str>,
+    id_escaped: &str,
+) -> fmt::Result {
+    match url {
+        Some(u) if u.starts_with("http://") || u.starts_with("https://") => {
+            let u_esc = crate::utils::html_escape(u);
+            write!(f, "<a href=\"{u_esc}\">{id_escaped}</a>")
+        }
+        _ => write!(f, "{id_escaped}"),
+    }
 }
 
 const HTML_REPORT_STYLE: &str = "body{font-family:-apple-system,system-ui,sans-serif;max-width:960px;margin:2rem auto;padding:0 1rem;color:#222}\
@@ -382,5 +466,53 @@ mod tests {
         assert!(!report.contains("<h2>Direct dependencies"));
         assert!(!report.contains("<h2>Transitive dependencies"));
         assert!(report.trim_end().ends_with("</html>"));
+    }
+
+    #[test]
+    fn test_fmt_html_report_with_vulnerabilities() {
+        let summary = VulnerabilitySummary {
+            total: 2,
+            critical: 1,
+            high: 1,
+            medium: 0,
+            low: 0,
+        };
+        let direct = vec![VulnerabilityReportEntry {
+            package: "serde".to_string(),
+            version: "1.0.0".to_string(),
+            id: "CVE-2021-1234".to_string(),
+            severity: "critical".to_string(),
+            description: "Critical vulnerability".to_string(),
+            url: Some("https://example.com/cve".to_string()),
+        }];
+        let transitive = vec![TransitiveVulnerabilityReportEntry {
+            package: "scheduler".to_string(),
+            version: "0.20.0".to_string(),
+            id: "CVE-2021-5678".to_string(),
+            severity: "high".to_string(),
+            description: "High vulnerability".to_string(),
+            url: None,
+            via_direct: "react".to_string(),
+        }];
+
+        let report = generate_html_report(
+            "/project/package.json",
+            &summary,
+            &direct,
+            &transitive,
+        );
+
+        assert!(report.contains("<h2>Direct dependencies (1)</h2>"));
+        assert!(report.contains("<h2>Transitive dependencies (1)</h2>"));
+        assert!(report.contains("<section class=\"vuln critical\">"));
+        assert!(report.contains("<h3>serde@1.0.0</h3>"));
+        assert!(report.contains("<a href=\"https://example.com/cve\">CVE-2021-1234</a>"));
+        assert!(report.contains("<span class=\"sev\">CRITICAL</span>"));
+        assert!(report.contains("<section class=\"vuln high\">"));
+        assert!(report.contains("<h3>scheduler@0.20.0 — via <code>react</code></h3>"));
+        assert!(report.contains("CVE-2021-5678"));
+        assert!(!report.contains("href=\"CVE-2021-5678"));
+        assert!(report.contains("<tr class=\"critical\"><td>Critical</td><td>1</td></tr>"));
+        assert!(report.contains("<tr class=\"high\"><td>High</td><td>1</td></tr>"));
     }
 }
