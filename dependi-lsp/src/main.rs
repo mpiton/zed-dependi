@@ -560,8 +560,8 @@ async fn run_scan(
         }
         "html" => {
             use dependi_lsp::reports::{
-                TransitiveVulnerabilityReportEntry, VulnerabilityReportEntry,
-                VulnerabilitySummary, fmt_html_report,
+                TransitiveVulnerabilityReportEntry, VulnerabilityReportEntry, VulnerabilitySummary,
+                fmt_html_report,
             };
 
             fn value_to_direct(v: &serde_json::Value) -> VulnerabilityReportEntry {

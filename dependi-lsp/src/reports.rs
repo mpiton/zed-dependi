@@ -264,10 +264,7 @@ fn severity_class(severity: &str) -> &'static str {
     }
 }
 
-fn write_direct_entry(
-    f: &mut fmt::Formatter<'_>,
-    entry: &VulnerabilityReportEntry,
-) -> fmt::Result {
+fn write_direct_entry(f: &mut fmt::Formatter<'_>, entry: &VulnerabilityReportEntry) -> fmt::Result {
     let sev_class = severity_class(&entry.severity);
     let pkg = crate::utils::html_escape(&entry.package);
     let ver = crate::utils::html_escape(&entry.version);
@@ -297,10 +294,7 @@ fn write_transitive_entry(
     let via = crate::utils::html_escape(&entry.via_direct);
 
     writeln!(f, "  <section class=\"vuln {sev_class}\">")?;
-    writeln!(
-        f,
-        "    <h3>{pkg}@{ver} — via <code>{via}</code></h3>"
-    )?;
+    writeln!(f, "    <h3>{pkg}@{ver} — via <code>{via}</code></h3>")?;
     write!(f, "    <p>")?;
     write_id_with_optional_link(f, entry.url.as_deref(), &id)?;
     write!(f, " <span class=\"sev\">{sev_upper}</span>: {desc}")?;
@@ -495,12 +489,7 @@ mod tests {
             via_direct: "react".to_string(),
         }];
 
-        let report = generate_html_report(
-            "/project/package.json",
-            &summary,
-            &direct,
-            &transitive,
-        );
+        let report = generate_html_report("/project/package.json", &summary, &direct, &transitive);
 
         assert!(report.contains("<h2>Direct dependencies (1)</h2>"));
         assert!(report.contains("<h2>Transitive dependencies (1)</h2>"));
@@ -534,12 +523,7 @@ mod tests {
             url: Some("https://example.com/\"onmouseover=\"alert(1)".to_string()),
         }];
 
-        let report = generate_html_report(
-            "/project/<a>.toml",
-            &summary,
-            &direct,
-            &[],
-        );
+        let report = generate_html_report("/project/<a>.toml", &summary, &direct, &[]);
 
         assert!(
             !report.contains("<script>"),
