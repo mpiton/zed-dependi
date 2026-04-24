@@ -53,7 +53,11 @@ use crate::{
 };
 
 /// Walk parents of `file_path` looking for a `.zed/` directory.
-/// Returns the first ancestor that contains it, or the file's parent dir as fallback.
+/// Returns the first ancestor that contains it, or `None` if no ancestor has `.zed/`.
+///
+/// Returning `None` (rather than guessing the file's parent) avoids writing
+/// `.zed/settings.json` to a nested directory when the real workspace lives higher up.
+/// The Ignore code action degrades gracefully when this returns `None`.
 ///
 /// Uses `tokio::fs::metadata` (async) per project rule: no blocking I/O in async tasks.
 async fn find_workspace_root(file_path: &std::path::Path) -> Option<std::path::PathBuf> {
@@ -66,7 +70,7 @@ async fn find_workspace_root(file_path: &std::path::Path) -> Option<std::path::P
             return Some(ancestor.to_path_buf());
         }
     }
-    Some(start.to_path_buf())
+    None
 }
 
 /// Extract the `[package].name` field from a Cargo.toml manifest.
@@ -2023,8 +2027,21 @@ impl LanguageServer for DependiBackend {
     async fn code_action(&self, params: CodeActionParams) -> Result<Option<CodeActionResponse>> {
         let uri = &params.text_document.uri;
 
-        let Some(doc) = self.documents.get(uri) else {
-            return Ok(Some(vec![]));
+        // Snapshot everything we need from the document state, then drop the
+        // DashMap guard before any .await — holding a guard across .await can
+        // deadlock other tasks waiting on the same key.
+        let (file_type, dependencies, cache_key_map) = {
+            let Some(doc) = self.documents.get(uri) else {
+                return Ok(Some(vec![]));
+            };
+            let file_type = doc.file_type;
+            let dependencies = doc.dependencies.clone();
+            let cache_key_map: HashMap<String, String> = doc
+                .dependencies
+                .iter()
+                .map(|dep| (dep.name.clone(), dep_cache_key(dep, file_type)))
+                .collect();
+            (file_type, dependencies, cache_key_map)
         };
 
         let ignored_packages = self
@@ -2032,13 +2049,6 @@ impl LanguageServer for DependiBackend {
             .read()
             .map(|c| c.ignore.clone())
             .unwrap_or_default();
-
-        let file_type = doc.file_type;
-        let cache_key_map: HashMap<String, String> = doc
-            .dependencies
-            .iter()
-            .map(|dep| (dep.name.clone(), dep_cache_key(dep, file_type)))
-            .collect();
 
         // Detect workspace root + read .zed/settings.json (best-effort).
         // If anything fails, the Ignore action will be omitted but Update actions still work.
@@ -2056,7 +2066,7 @@ impl LanguageServer for DependiBackend {
         };
 
         let actions = create_code_actions(
-            &doc.dependencies,
+            &dependencies,
             &self.version_cache,
             uri,
             params.range,
@@ -2256,10 +2266,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn test_find_workspace_root_falls_back_to_parent_dir() {
-        // Use a deeply nested tempdir path that's unlikely to have `.zed/`
-        // in any ancestor, then assert the returned path equals the file's
-        // parent dir (not just `is_some()`).
+    async fn test_find_workspace_root_returns_none_when_no_zed_ancestor() {
         let dir = tempfile::tempdir().expect("tempdir");
         let nested = dir.path().join("a").join("b").join("c").join("d");
         std::fs::create_dir_all(&nested).expect("create nested");
@@ -2267,7 +2274,9 @@ mod tests {
         std::fs::write(&file, "").expect("create file");
 
         let found = super::find_workspace_root(&file).await;
-        // Should fall back to file's parent dir (no .zed in any ancestor).
-        assert_eq!(found.as_deref(), Some(nested.as_path()));
+        assert!(
+            found.is_none(),
+            "expected None when no ancestor has .zed/, got {found:?}"
+        );
     }
 }

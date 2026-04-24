@@ -103,23 +103,39 @@ pub fn create_code_actions(
     workspace_root: Option<&std::path::Path>,
     current_settings: Option<&str>,
 ) -> Vec<CodeActionOrCommand> {
-    // Pre-filter active (non-ignored, non-property, in-range) deps once so
-    // ignored packages are excluded from BOTH per-dep update actions AND
-    // the Update-All tally.
-    let active: Vec<&Dependency> = dependencies
+    // Three slices with distinct scopes:
+    //   - non_ignored:        all non-ignored deps in the file (used for Update-All tally)
+    //   - ignore_candidates:  in-range, non-ignored — eligible for the Ignore action
+    //                         (property refs CAN still be ignored even though they
+    //                         can't safely be Updated)
+    //   - update_candidates:  in-range, non-ignored, NOT property reference —
+    //                         eligible for individual Update actions
+    let non_ignored: Vec<&Dependency> = dependencies
         .iter()
-        .filter(|dep| {
-            (range.start.line..=range.end.line).contains(&dep.version_span.line)
-                && !is_property_reference(dep)
-                && !crate::config::is_package_ignored(&dep.name, ignored)
-        })
+        .filter(|dep| !crate::config::is_package_ignored(&dep.name, ignored))
+        .collect();
+
+    let ignore_candidates: Vec<&Dependency> = non_ignored
+        .iter()
+        .copied()
+        .filter(|dep| (range.start.line..=range.end.line).contains(&dep.version_span.line))
+        .collect();
+
+    let update_candidates: Vec<&Dependency> = ignore_candidates
+        .iter()
+        .copied()
+        .filter(|dep| !is_property_reference(dep))
         .collect();
 
     let mut actions: Vec<CodeActionOrCommand> = Vec::new();
-    for dep in &active {
+
+    for dep in &update_candidates {
         if let Some(update) = create_update_action(dep, cache, uri, file_type, &cache_key_fn) {
             actions.push(update);
         }
+    }
+
+    for dep in &ignore_candidates {
         if let Some(root) = workspace_root
             && let Some(ignore) = create_ignore_action(dep, root, current_settings)
         {
@@ -128,7 +144,7 @@ pub fn create_code_actions(
     }
 
     if let Some(update_all) =
-        create_update_all_action(&active, cache, uri, file_type, &cache_key_fn)
+        create_update_all_action(&non_ignored, cache, uri, file_type, &cache_key_fn)
     {
         actions.insert(0, update_all);
     }
@@ -1351,6 +1367,63 @@ mod tests {
         assert!(
             titles.iter().any(|t| t.contains("Ignore package")),
             "expected Ignore action for up-to-date package"
+        );
+    }
+
+    #[test]
+    fn test_property_reference_gets_ignore_action_but_not_update() {
+        let cache = MemoryCache::new();
+        cache.insert(
+            "test:my-pkg".to_string(),
+            VersionInfo {
+                latest: Some("2.0.0".to_string()),
+                ..Default::default()
+            },
+        );
+        // Create a dep whose version is a Maven-style property reference.
+        let dep = create_test_dependency("my-pkg", "${my.version}", 5);
+        let deps = vec![dep];
+        let uri = Url::parse("file:///test/pom.xml").unwrap();
+        let range = Range {
+            start: Position {
+                line: 0,
+                character: 0,
+            },
+            end: Position {
+                line: 10,
+                character: 0,
+            },
+        };
+        let workspace = std::path::PathBuf::from("/tmp/ws");
+
+        let actions = create_code_actions(
+            &deps,
+            &cache,
+            &uri,
+            range,
+            FileType::Cargo,
+            |name| format!("test:{name}"),
+            &[],
+            Some(&workspace),
+            None,
+        );
+
+        let titles: Vec<String> = actions
+            .iter()
+            .filter_map(|a| match a {
+                CodeActionOrCommand::CodeAction(ca) => Some(ca.title.clone()),
+                _ => None,
+            })
+            .collect();
+
+        // Property reference: NO Update action, but YES Ignore action
+        assert!(
+            !titles.iter().any(|t| t.contains("Update my-pkg")),
+            "property ref must not get Update action"
+        );
+        assert!(
+            titles.iter().any(|t| t.contains("Ignore package")),
+            "property ref MUST get Ignore action"
         );
     }
 

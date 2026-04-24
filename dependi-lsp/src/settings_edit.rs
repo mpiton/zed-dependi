@@ -69,8 +69,8 @@ fn build_create_edit(settings_uri: Url, package_name: &str) -> WorkspaceEdit {
                     character: 0,
                 },
                 end: Position {
-                    line: 0,
-                    character: 0,
+                    line: u32::MAX,
+                    character: u32::MAX,
                 },
             },
             new_text: text,

@@ -63,6 +63,25 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   querying OSV — previously the CLI queried using the specifier string (e.g.
   `^1.0`), which caused false negatives.
 - Respect the `package` field of `Cargo.toml` dependencies
+- `settings_edit::build_create_edit` now uses a full-document replace range
+  instead of a zero-width insert at `(0,0)`. With `ignore_if_exists: true`,
+  if `.zed/settings.json` appeared between read and apply the `CreateFile`
+  would be skipped and the text edit would prepend new JSON to the existing
+  file, corrupting it ([#226](https://github.com/mpiton/zed-dependi/issues/226))
+- `find_workspace_root` now returns `None` when no ancestor contains `.zed/`
+  instead of falling back to the manifest's parent directory. Prevents a
+  stray `.zed/settings.json` being written to a nested directory when the
+  real Zed workspace lives higher up; the Ignore code action degrades
+  gracefully when no workspace root can be resolved
+- `Backend::code_action` no longer holds a `DashMap` guard across `.await`
+  boundaries; it now snapshots document state into owned values and drops
+  the guard before any async I/O to avoid potential deadlocks
+- `Ignore package` quick-fix now emitted for Maven property-reference
+  dependencies (e.g., `${spring.version}`). These deps remain ineligible
+  for the `Update` action (which would break property-driven version
+  management) but can still be silenced. Also restored the pre-refactor
+  behavior that `Update all N dependencies` considers every non-ignored
+  dep in the file rather than only those inside the requested range
 - Bare PEP 440 pre-release versions (e.g., `4.0.0a6`, `1.0b2`, `2.0rc1`,
   `1.0.0.dev1`) no longer trigger spurious downgrade suggestions in
   `compare_versions`. This scenario occurred with Python lockfile resolution
