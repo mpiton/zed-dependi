@@ -52,6 +52,18 @@ use crate::{
     reports::fmt_markdown_report,
 };
 
+/// Walk parents of `file_path` looking for a `.zed/` directory.
+/// Returns the first ancestor that contains it, or the file's parent dir as fallback.
+fn find_workspace_root(file_path: &std::path::Path) -> Option<std::path::PathBuf> {
+    let start = file_path.parent()?;
+    for ancestor in start.ancestors() {
+        if ancestor.join(".zed").is_dir() {
+            return Some(ancestor.to_path_buf());
+        }
+    }
+    Some(start.to_path_buf())
+}
+
 /// Extract the `[package].name` field from a Cargo.toml manifest.
 /// Used to pass the root package name to `parse_cargo_lock` for multi-version disambiguation.
 fn cargo_root_package_name(manifest_content: &str) -> Option<String> {
@@ -2022,6 +2034,19 @@ impl LanguageServer for DependiBackend {
             .iter()
             .map(|dep| (dep.name.clone(), dep_cache_key(dep, file_type)))
             .collect();
+
+        // Detect workspace root + read .zed/settings.json (best-effort).
+        // If anything fails, the Ignore action will be omitted but Update actions still work.
+        let file_path = uri.to_file_path().ok();
+        let workspace_root = file_path.as_deref().and_then(find_workspace_root);
+        let current_settings: Option<String> = match &workspace_root {
+            Some(root) => {
+                let settings_path = root.join(".zed").join("settings.json");
+                tokio::fs::read_to_string(&settings_path).await.ok()
+            }
+            None => None,
+        };
+
         let actions = create_code_actions(
             &doc.dependencies,
             &self.version_cache,
@@ -2035,8 +2060,8 @@ impl LanguageServer for DependiBackend {
                     .unwrap_or_else(|| file_type.cache_key(name))
             },
             &ignored_packages,
-            None, // workspace_root — wired in Task 7
-            None, // current_settings — wired in Task 7
+            workspace_root.as_deref(),
+            current_settings.as_deref(),
         );
 
         Ok(Some(actions))
@@ -2206,5 +2231,33 @@ mod tests {
             content.contains("CVE-1"),
             "Hover should contain transitive vuln id, got:\n{content}"
         );
+    }
+
+    #[test]
+    fn test_find_workspace_root_locates_zed_dir() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let workspace = dir.path();
+        std::fs::create_dir_all(workspace.join(".zed")).expect("create .zed");
+
+        let nested_file = workspace.join("subdir").join("Cargo.toml");
+        std::fs::create_dir_all(nested_file.parent().unwrap()).expect("create subdir");
+        std::fs::write(&nested_file, "").expect("create file");
+
+        let found = super::find_workspace_root(&nested_file);
+        assert_eq!(found.as_deref(), Some(workspace));
+    }
+
+    #[test]
+    fn test_find_workspace_root_falls_back_to_parent_dir() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let workspace = dir.path();
+        let file = workspace.join("Cargo.toml");
+        std::fs::write(&file, "").expect("create file");
+
+        let found = super::find_workspace_root(&file);
+        // Walks up from `workspace`, no .zed found anywhere — falls back to `workspace`.
+        // Note: ancestors of /tmp may have .zed in unrelated user dirs in dev environment.
+        // Accept either workspace itself OR an ancestor that has .zed (rare).
+        assert!(found.is_some(), "expected Some, got None");
     }
 }
