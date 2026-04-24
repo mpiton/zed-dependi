@@ -1886,21 +1886,7 @@ impl LanguageServer for DependiBackend {
                 // Only show hints for dependencies in the visible range
                 (params.range.start.line..=params.range.end.line).contains(&dep.version_span.line)
             })
-            .filter(|dep| {
-                // Skip ignored packages
-                !ignored_packages.iter().any(|pattern| {
-                    if pattern.contains('*') {
-                        let parts: Vec<&str> = pattern.split('*').collect();
-                        if parts.len() == 2 {
-                            dep.name.starts_with(parts[0]) && dep.name.ends_with(parts[1])
-                        } else {
-                            dep.name.starts_with(parts[0])
-                        }
-                    } else {
-                        dep.name == *pattern
-                    }
-                })
-            })
+            .filter(|dep| !crate::config::is_package_ignored(&dep.name, &ignored_packages))
             .filter_map(|dep| {
                 let cache_key = dep_cache_key(dep, file_type);
                 let version_info = self.version_cache.get(&cache_key);
