@@ -241,6 +241,30 @@ impl Config {
     }
 }
 
+/// Returns true if `name` matches any pattern in `patterns`.
+///
+/// Supported pattern syntax:
+/// - exact match: `"lodash"` matches only `"lodash"`
+/// - prefix wildcard: `"@company/*"` matches names starting with `"@company/"`
+/// - suffix wildcard: `"*-test"` matches names ending with `"-test"`
+/// - both wildcards: `"internal-*-lib"` matches names with that prefix AND suffix
+///
+/// Multiple `*` patterns fall back to prefix-only match (matches the first segment).
+pub fn is_package_ignored(name: &str, patterns: &[String]) -> bool {
+    patterns.iter().any(|pattern| {
+        if pattern.contains('*') {
+            let parts: Vec<&str> = pattern.split('*').collect();
+            if parts.len() == 2 {
+                name.starts_with(parts[0]) && name.ends_with(parts[1])
+            } else {
+                name.starts_with(parts[0])
+            }
+        } else {
+            name == *pattern
+        }
+    })
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -629,5 +653,50 @@ mod tests {
             config.registries.maven.url,
             "https://nexus.internal.corp/repository/maven-public"
         );
+    }
+
+    #[test]
+    fn test_is_package_ignored_exact_match() {
+        let patterns = vec!["lodash".to_string(), "react".to_string()];
+        assert!(super::is_package_ignored("lodash", &patterns));
+        assert!(super::is_package_ignored("react", &patterns));
+        assert!(!super::is_package_ignored("vue", &patterns));
+    }
+
+    #[test]
+    fn test_is_package_ignored_prefix_wildcard() {
+        let patterns = vec!["@company/*".to_string()];
+        assert!(super::is_package_ignored("@company/utils", &patterns));
+        assert!(super::is_package_ignored("@company/", &patterns));
+        assert!(!super::is_package_ignored("@other/utils", &patterns));
+    }
+
+    #[test]
+    fn test_is_package_ignored_suffix_wildcard() {
+        let patterns = vec!["*-test".to_string()];
+        assert!(super::is_package_ignored("foo-test", &patterns));
+        assert!(super::is_package_ignored("-test", &patterns));
+        assert!(!super::is_package_ignored("foo-prod", &patterns));
+    }
+
+    #[test]
+    fn test_is_package_ignored_both_wildcards() {
+        let patterns = vec!["internal-*-lib".to_string()];
+        assert!(super::is_package_ignored("internal-foo-lib", &patterns));
+        assert!(super::is_package_ignored("internal--lib", &patterns));
+        assert!(!super::is_package_ignored("external-foo-lib", &patterns));
+    }
+
+    #[test]
+    fn test_is_package_ignored_empty_patterns() {
+        let patterns: Vec<String> = vec![];
+        assert!(!super::is_package_ignored("lodash", &patterns));
+    }
+
+    #[test]
+    fn test_is_package_ignored_multiple_wildcards_falls_back_to_prefix() {
+        let patterns = vec!["a-*-b-*-c".to_string()];
+        assert!(super::is_package_ignored("a-anything", &patterns));
+        assert!(!super::is_package_ignored("b-anything", &patterns));
     }
 }
