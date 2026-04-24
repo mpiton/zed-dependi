@@ -13,5 +13,6 @@ pub mod parsers;
 pub mod providers;
 pub mod registries;
 pub mod reports;
+pub mod settings_edit;
 pub mod utils;
 pub mod vulnerabilities;

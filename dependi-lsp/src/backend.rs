@@ -52,6 +52,27 @@ use crate::{
     reports::fmt_markdown_report,
 };
 
+/// Walk parents of `file_path` looking for a `.zed/` directory.
+/// Returns the first ancestor that contains it, or `None` if no ancestor has `.zed/`.
+///
+/// Returning `None` (rather than guessing the file's parent) avoids writing
+/// `.zed/settings.json` to a nested directory when the real workspace lives higher up.
+/// The Ignore code action degrades gracefully when this returns `None`.
+///
+/// Uses `tokio::fs::metadata` (async) per project rule: no blocking I/O in async tasks.
+async fn find_workspace_root(file_path: &std::path::Path) -> Option<std::path::PathBuf> {
+    let start = file_path.parent()?;
+    for ancestor in start.ancestors() {
+        let candidate = ancestor.join(".zed");
+        if let Ok(meta) = tokio::fs::metadata(&candidate).await
+            && meta.is_dir()
+        {
+            return Some(ancestor.to_path_buf());
+        }
+    }
+    None
+}
+
 /// Extract the `[package].name` field from a Cargo.toml manifest.
 /// Used to pass the root package name to `parse_cargo_lock` for multi-version disambiguation.
 fn cargo_root_package_name(manifest_content: &str) -> Option<String> {
@@ -697,7 +718,13 @@ impl ProcessingContext {
         );
 
         // Publish diagnostics IMMEDIATELY (versions are available, vulnerabilities will update later)
-        let (diagnostics_enabled, security_show_diags, min_severity, security_enabled) = self
+        let (
+            diagnostics_enabled,
+            security_show_diags,
+            min_severity,
+            security_enabled,
+            ignored_packages,
+        ) = self
             .config
             .read()
             .map(|c| {
@@ -710,9 +737,10 @@ impl ProcessingContext {
                         None
                     },
                     c.security.enabled,
+                    c.ignore.clone(),
                 )
             })
-            .unwrap_or((true, true, None, true));
+            .unwrap_or((true, true, None, true, Vec::new()));
 
         if diagnostics_enabled {
             let severity_filter = if security_show_diags {
@@ -744,6 +772,7 @@ impl ProcessingContext {
                 severity_filter,
                 file_type,
                 &empty_transitives,
+                &ignored_packages,
             );
 
             self.client
@@ -1886,21 +1915,7 @@ impl LanguageServer for DependiBackend {
                 // Only show hints for dependencies in the visible range
                 (params.range.start.line..=params.range.end.line).contains(&dep.version_span.line)
             })
-            .filter(|dep| {
-                // Skip ignored packages
-                !ignored_packages.iter().any(|pattern| {
-                    if pattern.contains('*') {
-                        let parts: Vec<&str> = pattern.split('*').collect();
-                        if parts.len() == 2 {
-                            dep.name.starts_with(parts[0]) && dep.name.ends_with(parts[1])
-                        } else {
-                            dep.name.starts_with(parts[0])
-                        }
-                    } else {
-                        dep.name == *pattern
-                    }
-                })
-            })
+            .filter(|dep| !crate::config::is_package_ignored(&dep.name, &ignored_packages))
             .filter_map(|dep| {
                 let cache_key = dep_cache_key(dep, file_type);
                 let version_info = self.version_cache.get(&cache_key);
@@ -2012,18 +2027,46 @@ impl LanguageServer for DependiBackend {
     async fn code_action(&self, params: CodeActionParams) -> Result<Option<CodeActionResponse>> {
         let uri = &params.text_document.uri;
 
-        let Some(doc) = self.documents.get(uri) else {
-            return Ok(Some(vec![]));
+        // Snapshot everything we need from the document state, then drop the
+        // DashMap guard before any .await — holding a guard across .await can
+        // deadlock other tasks waiting on the same key.
+        let (file_type, dependencies, cache_key_map) = {
+            let Some(doc) = self.documents.get(uri) else {
+                return Ok(Some(vec![]));
+            };
+            let file_type = doc.file_type;
+            let dependencies = doc.dependencies.clone();
+            let cache_key_map: HashMap<String, String> = doc
+                .dependencies
+                .iter()
+                .map(|dep| (dep.name.clone(), dep_cache_key(dep, file_type)))
+                .collect();
+            (file_type, dependencies, cache_key_map)
         };
 
-        let file_type = doc.file_type;
-        let cache_key_map: HashMap<String, String> = doc
-            .dependencies
-            .iter()
-            .map(|dep| (dep.name.clone(), dep_cache_key(dep, file_type)))
-            .collect();
+        let ignored_packages = self
+            .config
+            .read()
+            .map(|c| c.ignore.clone())
+            .unwrap_or_default();
+
+        // Detect workspace root + read .zed/settings.json (best-effort).
+        // If anything fails, the Ignore action will be omitted but Update actions still work.
+        let file_path = uri.to_file_path().ok();
+        let workspace_root = match file_path.as_deref() {
+            Some(p) => find_workspace_root(p).await,
+            None => None,
+        };
+        let current_settings: Option<String> = match &workspace_root {
+            Some(root) => {
+                let settings_path = root.join(".zed").join("settings.json");
+                tokio::fs::read_to_string(&settings_path).await.ok()
+            }
+            None => None,
+        };
+
         let actions = create_code_actions(
-            &doc.dependencies,
+            &dependencies,
             &self.version_cache,
             uri,
             params.range,
@@ -2034,6 +2077,9 @@ impl LanguageServer for DependiBackend {
                     .cloned()
                     .unwrap_or_else(|| file_type.cache_key(name))
             },
+            &ignored_packages,
+            workspace_root.as_deref(),
+            current_settings.as_deref(),
         );
 
         Ok(Some(actions))
@@ -2202,6 +2248,35 @@ mod tests {
         assert!(
             content.contains("CVE-1"),
             "Hover should contain transitive vuln id, got:\n{content}"
+        );
+    }
+
+    #[tokio::test]
+    async fn test_find_workspace_root_locates_zed_dir() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let workspace = dir.path();
+        std::fs::create_dir_all(workspace.join(".zed")).expect("create .zed");
+
+        let nested_file = workspace.join("subdir").join("Cargo.toml");
+        std::fs::create_dir_all(nested_file.parent().unwrap()).expect("create subdir");
+        std::fs::write(&nested_file, "").expect("create file");
+
+        let found = super::find_workspace_root(&nested_file).await;
+        assert_eq!(found.as_deref(), Some(workspace));
+    }
+
+    #[tokio::test]
+    async fn test_find_workspace_root_returns_none_when_no_zed_ancestor() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let nested = dir.path().join("a").join("b").join("c").join("d");
+        std::fs::create_dir_all(&nested).expect("create nested");
+        let file = nested.join("Cargo.toml");
+        std::fs::write(&file, "").expect("create file");
+
+        let found = super::find_workspace_root(&file).await;
+        assert!(
+            found.is_none(),
+            "expected None when no ancestor has .zed/, got {found:?}"
         );
     }
 }

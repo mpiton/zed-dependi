@@ -88,6 +88,10 @@ fn normalize_version(version: &str) -> String {
 }
 
 /// Create code actions for dependencies in the given range
+#[expect(
+    clippy::too_many_arguments,
+    reason = "LSP context requires passing doc state, cache, range, ignore list, and workspace metadata together; refactoring into a struct is tracked for a follow-up."
+)]
 pub fn create_code_actions(
     dependencies: &[Dependency],
     cache: &impl ReadCache,
@@ -95,16 +99,52 @@ pub fn create_code_actions(
     range: Range,
     file_type: FileType,
     cache_key_fn: impl Fn(&str) -> String,
+    ignored: &[String],
+    workspace_root: Option<&std::path::Path>,
+    current_settings: Option<&str>,
 ) -> Vec<CodeActionOrCommand> {
-    let mut actions: Vec<CodeActionOrCommand> = dependencies
+    // Three slices with distinct scopes:
+    //   - non_ignored:        all non-ignored deps in the file (used for Update-All tally)
+    //   - ignore_candidates:  in-range, non-ignored — eligible for the Ignore action
+    //                         (property refs CAN still be ignored even though they
+    //                         can't safely be Updated)
+    //   - update_candidates:  in-range, non-ignored, NOT property reference —
+    //                         eligible for individual Update actions
+    let non_ignored: Vec<&Dependency> = dependencies
         .iter()
-        .filter(|dep| (range.start.line..=range.end.line).contains(&dep.version_span.line))
-        .filter(|dep| !is_property_reference(dep))
-        .filter_map(|dep| create_update_action(dep, cache, uri, file_type, &cache_key_fn))
+        .filter(|dep| !crate::config::is_package_ignored(&dep.name, ignored))
         .collect();
 
+    let ignore_candidates: Vec<&Dependency> = non_ignored
+        .iter()
+        .copied()
+        .filter(|dep| (range.start.line..=range.end.line).contains(&dep.version_span.line))
+        .collect();
+
+    let update_candidates: Vec<&Dependency> = ignore_candidates
+        .iter()
+        .copied()
+        .filter(|dep| !is_property_reference(dep))
+        .collect();
+
+    let mut actions: Vec<CodeActionOrCommand> = Vec::new();
+
+    for dep in &update_candidates {
+        if let Some(update) = create_update_action(dep, cache, uri, file_type, &cache_key_fn) {
+            actions.push(update);
+        }
+    }
+
+    for dep in &ignore_candidates {
+        if let Some(root) = workspace_root
+            && let Some(ignore) = create_ignore_action(dep, root, current_settings)
+        {
+            actions.push(ignore);
+        }
+    }
+
     if let Some(update_all) =
-        create_update_all_action(dependencies, cache, uri, file_type, &cache_key_fn)
+        create_update_all_action(&non_ignored, cache, uri, file_type, &cache_key_fn)
     {
         actions.insert(0, update_all);
     }
@@ -191,9 +231,38 @@ fn create_update_action(
     }
 }
 
+/// Create an "Ignore package" code action that appends `dep.name` to the
+/// `lsp.dependi.initialization_options.ignore` list in `.zed/settings.json`.
+///
+/// Returns `None` if `build_ignore_workspace_edit` fails (e.g. malformed
+/// existing settings or invalid path); the caller silently omits the action.
+fn create_ignore_action(
+    dep: &Dependency,
+    workspace_root: &std::path::Path,
+    current_settings: Option<&str>,
+) -> Option<CodeActionOrCommand> {
+    let edit = crate::settings_edit::build_ignore_workspace_edit(
+        workspace_root,
+        &dep.name,
+        current_settings,
+    )
+    .ok()?;
+
+    Some(CodeActionOrCommand::CodeAction(CodeAction {
+        title: format!("Ignore package \"{}\"", dep.name),
+        kind: Some(CodeActionKind::QUICKFIX),
+        diagnostics: None,
+        edit: Some(edit),
+        command: None,
+        is_preferred: Some(false),
+        disabled: None,
+        data: None,
+    }))
+}
+
 /// Create an "Update All Dependencies" code action when 2+ updates are available
 fn create_update_all_action(
-    dependencies: &[Dependency],
+    dependencies: &[&Dependency],
     cache: &impl ReadCache,
     uri: &Url,
     file_type: FileType,
@@ -201,6 +270,7 @@ fn create_update_all_action(
 ) -> Option<CodeActionOrCommand> {
     let outdated_deps: Vec<(&Dependency, String)> = dependencies
         .iter()
+        .copied()
         .filter(|dep| !is_property_reference(dep))
         .filter_map(|dep| {
             let cache_key = cache_key_fn(&dep.name);
@@ -368,9 +438,17 @@ mod tests {
             },
         };
 
-        let actions = create_code_actions(&deps, &cache, &uri, range, FileType::Cargo, |name| {
-            format!("test:{name}")
-        });
+        let actions = create_code_actions(
+            &deps,
+            &cache,
+            &uri,
+            range,
+            FileType::Cargo,
+            |name| format!("test:{name}"),
+            &[],
+            None,
+            None,
+        );
 
         assert_eq!(actions.len(), 1);
         match &actions[0] {
@@ -406,9 +484,17 @@ mod tests {
             },
         };
 
-        let actions = create_code_actions(&deps, &cache, &uri, range, FileType::Cargo, |name| {
-            format!("test:{name}")
-        });
+        let actions = create_code_actions(
+            &deps,
+            &cache,
+            &uri,
+            range,
+            FileType::Cargo,
+            |name| format!("test:{name}"),
+            &[],
+            None,
+            None,
+        );
 
         assert_eq!(actions.len(), 0);
     }
@@ -464,9 +550,17 @@ mod tests {
             },
         };
 
-        let actions = create_code_actions(&deps, &cache, &uri, range, FileType::Cargo, |name| {
-            format!("test:{name}")
-        });
+        let actions = create_code_actions(
+            &deps,
+            &cache,
+            &uri,
+            range,
+            FileType::Cargo,
+            |name| format!("test:{name}"),
+            &[],
+            None,
+            None,
+        );
 
         assert_eq!(actions.len(), 4);
         match &actions[0] {
@@ -524,9 +618,17 @@ mod tests {
             },
         };
 
-        let actions = create_code_actions(&deps, &cache, &uri, range, FileType::Cargo, |name| {
-            format!("test:{name}")
-        });
+        let actions = create_code_actions(
+            &deps,
+            &cache,
+            &uri,
+            range,
+            FileType::Cargo,
+            |name| format!("test:{name}"),
+            &[],
+            None,
+            None,
+        );
 
         assert_eq!(actions.len(), 1);
         match &actions[0] {
@@ -572,9 +674,17 @@ mod tests {
             },
         };
 
-        let actions = create_code_actions(&deps, &cache, &uri, range, FileType::Cargo, |name| {
-            format!("test:{name}")
-        });
+        let actions = create_code_actions(
+            &deps,
+            &cache,
+            &uri,
+            range,
+            FileType::Cargo,
+            |name| format!("test:{name}"),
+            &[],
+            None,
+            None,
+        );
 
         assert_eq!(actions.len(), 0);
     }
@@ -666,9 +776,17 @@ mod tests {
             },
         };
 
-        let actions = create_code_actions(&deps, &cache, &uri, range, FileType::Cargo, |name| {
-            format!("test:{name}")
-        });
+        let actions = create_code_actions(
+            &deps,
+            &cache,
+            &uri,
+            range,
+            FileType::Cargo,
+            |name| format!("test:{name}"),
+            &[],
+            None,
+            None,
+        );
 
         assert_eq!(actions.len(), 1);
         match &actions[0] {
@@ -705,9 +823,17 @@ mod tests {
             },
         };
 
-        let actions = create_code_actions(&deps, &cache, &uri, range, FileType::Cargo, |name| {
-            format!("test:{name}")
-        });
+        let actions = create_code_actions(
+            &deps,
+            &cache,
+            &uri,
+            range,
+            FileType::Cargo,
+            |name| format!("test:{name}"),
+            &[],
+            None,
+            None,
+        );
 
         assert_eq!(actions.len(), 1);
         match &actions[0] {
@@ -744,9 +870,17 @@ mod tests {
             },
         };
 
-        let actions = create_code_actions(&deps, &cache, &uri, range, FileType::Cargo, |name| {
-            format!("test:{name}")
-        });
+        let actions = create_code_actions(
+            &deps,
+            &cache,
+            &uri,
+            range,
+            FileType::Cargo,
+            |name| format!("test:{name}"),
+            &[],
+            None,
+            None,
+        );
 
         assert_eq!(actions.len(), 1);
         match &actions[0] {
@@ -862,9 +996,17 @@ mod tests {
             },
         };
 
-        let actions = create_code_actions(&deps, &cache, &uri, range, FileType::Python, |name| {
-            format!("test:{name}")
-        });
+        let actions = create_code_actions(
+            &deps,
+            &cache,
+            &uri,
+            range,
+            FileType::Python,
+            |name| format!("test:{name}"),
+            &[],
+            None,
+            None,
+        );
 
         assert_eq!(actions.len(), 1);
         match &actions[0] {
@@ -907,9 +1049,17 @@ mod tests {
             },
         };
 
-        let actions = create_code_actions(&deps, &cache, &uri, range, FileType::Python, |name| {
-            format!("test:{name}")
-        });
+        let actions = create_code_actions(
+            &deps,
+            &cache,
+            &uri,
+            range,
+            FileType::Python,
+            |name| format!("test:{name}"),
+            &[],
+            None,
+            None,
+        );
 
         assert_eq!(actions.len(), 0);
     }
@@ -938,9 +1088,17 @@ mod tests {
             },
         };
 
-        let actions = create_code_actions(&deps, &cache, &uri, range, FileType::Cargo, |name| {
-            format!("test:{name}")
-        });
+        let actions = create_code_actions(
+            &deps,
+            &cache,
+            &uri,
+            range,
+            FileType::Cargo,
+            |name| format!("test:{name}"),
+            &[],
+            None,
+            None,
+        );
 
         assert_eq!(actions.len(), 0);
     }
@@ -962,10 +1120,361 @@ mod tests {
             },
         };
 
-        let actions = create_code_actions(&deps, &cache, &uri, range, FileType::Cargo, |name| {
-            format!("test:{name}")
-        });
+        let actions = create_code_actions(
+            &deps,
+            &cache,
+            &uri,
+            range,
+            FileType::Cargo,
+            |name| format!("test:{name}"),
+            &[],
+            None,
+            None,
+        );
 
         assert_eq!(actions.len(), 0);
+    }
+
+    #[test]
+    fn test_update_action_skipped_for_ignored_package() {
+        let cache = MemoryCache::new();
+        cache.insert(
+            "test:lodash".to_string(),
+            VersionInfo {
+                latest: Some("2.0.0".to_string()),
+                ..Default::default()
+            },
+        );
+        let deps = vec![create_test_dependency("lodash", "1.0.0", 5)];
+        let uri = Url::parse("file:///test/Cargo.toml").unwrap();
+        let range = Range {
+            start: Position {
+                line: 0,
+                character: 0,
+            },
+            end: Position {
+                line: 10,
+                character: 0,
+            },
+        };
+        let ignored = vec!["lodash".to_string()];
+
+        let actions = create_code_actions(
+            &deps,
+            &cache,
+            &uri,
+            range,
+            FileType::Cargo,
+            |name| format!("test:{name}"),
+            &ignored,
+            None,
+            None,
+        );
+
+        assert!(
+            actions.is_empty(),
+            "ignored package should produce no actions"
+        );
+    }
+
+    #[test]
+    fn test_update_action_emitted_when_not_ignored() {
+        let cache = MemoryCache::new();
+        cache.insert(
+            "test:react".to_string(),
+            VersionInfo {
+                latest: Some("18.0.0".to_string()),
+                ..Default::default()
+            },
+        );
+        let deps = vec![create_test_dependency("react", "17.0.0", 5)];
+        let uri = Url::parse("file:///test/Cargo.toml").unwrap();
+        let range = Range {
+            start: Position {
+                line: 0,
+                character: 0,
+            },
+            end: Position {
+                line: 10,
+                character: 0,
+            },
+        };
+        let ignored = vec!["lodash".to_string()];
+
+        let actions = create_code_actions(
+            &deps,
+            &cache,
+            &uri,
+            range,
+            FileType::Cargo,
+            |name| format!("test:{name}"),
+            &ignored,
+            None,
+            None,
+        );
+
+        assert!(
+            !actions.is_empty(),
+            "non-ignored outdated package should produce action"
+        );
+    }
+
+    #[test]
+    fn test_ignore_action_emitted_when_workspace_root_provided() {
+        let cache = MemoryCache::new();
+        cache.insert(
+            "test:lodash".to_string(),
+            VersionInfo {
+                latest: Some("2.0.0".to_string()),
+                ..Default::default()
+            },
+        );
+        let deps = vec![create_test_dependency("lodash", "1.0.0", 5)];
+        let uri = Url::parse("file:///test/Cargo.toml").unwrap();
+        let range = Range {
+            start: Position {
+                line: 0,
+                character: 0,
+            },
+            end: Position {
+                line: 10,
+                character: 0,
+            },
+        };
+        let workspace = std::path::PathBuf::from("/tmp/ws");
+
+        let actions = create_code_actions(
+            &deps,
+            &cache,
+            &uri,
+            range,
+            FileType::Cargo,
+            |name| format!("test:{name}"),
+            &[],
+            Some(&workspace),
+            None,
+        );
+
+        // Expect at least 2 actions: Update + Ignore
+        assert!(
+            actions.len() >= 2,
+            "expected Update and Ignore actions, got {}",
+            actions.len()
+        );
+
+        let titles: Vec<String> = actions
+            .iter()
+            .filter_map(|a| match a {
+                CodeActionOrCommand::CodeAction(ca) => Some(ca.title.clone()),
+                _ => None,
+            })
+            .collect();
+        assert!(titles.iter().any(|t| t.contains("Ignore package")));
+        assert!(titles.iter().any(|t| t.contains("\"lodash\"")));
+    }
+
+    #[test]
+    fn test_ignore_action_skipped_when_no_workspace_root() {
+        let cache = MemoryCache::new();
+        cache.insert(
+            "test:lodash".to_string(),
+            VersionInfo {
+                latest: Some("2.0.0".to_string()),
+                ..Default::default()
+            },
+        );
+        let deps = vec![create_test_dependency("lodash", "1.0.0", 5)];
+        let uri = Url::parse("file:///test/Cargo.toml").unwrap();
+        let range = Range {
+            start: Position {
+                line: 0,
+                character: 0,
+            },
+            end: Position {
+                line: 10,
+                character: 0,
+            },
+        };
+
+        let actions = create_code_actions(
+            &deps,
+            &cache,
+            &uri,
+            range,
+            FileType::Cargo,
+            |name| format!("test:{name}"),
+            &[],
+            None,
+            None,
+        );
+
+        let titles: Vec<String> = actions
+            .iter()
+            .filter_map(|a| match a {
+                CodeActionOrCommand::CodeAction(ca) => Some(ca.title.clone()),
+                _ => None,
+            })
+            .collect();
+        assert!(
+            !titles.iter().any(|t| t.contains("Ignore package")),
+            "expected no Ignore action without workspace_root"
+        );
+    }
+
+    #[test]
+    fn test_ignore_action_emitted_even_when_up_to_date() {
+        let cache = MemoryCache::new();
+        cache.insert(
+            "test:lodash".to_string(),
+            VersionInfo {
+                latest: Some("1.0.0".to_string()), // up-to-date
+                ..Default::default()
+            },
+        );
+        let deps = vec![create_test_dependency("lodash", "1.0.0", 5)];
+        let uri = Url::parse("file:///test/Cargo.toml").unwrap();
+        let range = Range {
+            start: Position {
+                line: 0,
+                character: 0,
+            },
+            end: Position {
+                line: 10,
+                character: 0,
+            },
+        };
+        let workspace = std::path::PathBuf::from("/tmp/ws");
+
+        let actions = create_code_actions(
+            &deps,
+            &cache,
+            &uri,
+            range,
+            FileType::Cargo,
+            |name| format!("test:{name}"),
+            &[],
+            Some(&workspace),
+            None,
+        );
+
+        let titles: Vec<String> = actions
+            .iter()
+            .filter_map(|a| match a {
+                CodeActionOrCommand::CodeAction(ca) => Some(ca.title.clone()),
+                _ => None,
+            })
+            .collect();
+        assert!(
+            titles.iter().any(|t| t.contains("Ignore package")),
+            "expected Ignore action for up-to-date package"
+        );
+    }
+
+    #[test]
+    fn test_property_reference_gets_ignore_action_but_not_update() {
+        let cache = MemoryCache::new();
+        cache.insert(
+            "test:my-pkg".to_string(),
+            VersionInfo {
+                latest: Some("2.0.0".to_string()),
+                ..Default::default()
+            },
+        );
+        // Create a dep whose version is a Maven-style property reference.
+        let dep = create_test_dependency("my-pkg", "${my.version}", 5);
+        let deps = vec![dep];
+        let uri = Url::parse("file:///test/pom.xml").unwrap();
+        let range = Range {
+            start: Position {
+                line: 0,
+                character: 0,
+            },
+            end: Position {
+                line: 10,
+                character: 0,
+            },
+        };
+        let workspace = std::path::PathBuf::from("/tmp/ws");
+
+        let actions = create_code_actions(
+            &deps,
+            &cache,
+            &uri,
+            range,
+            FileType::Cargo,
+            |name| format!("test:{name}"),
+            &[],
+            Some(&workspace),
+            None,
+        );
+
+        let titles: Vec<String> = actions
+            .iter()
+            .filter_map(|a| match a {
+                CodeActionOrCommand::CodeAction(ca) => Some(ca.title.clone()),
+                _ => None,
+            })
+            .collect();
+
+        // Property reference: NO Update action, but YES Ignore action
+        assert!(
+            !titles.iter().any(|t| t.contains("Update my-pkg")),
+            "property ref must not get Update action"
+        );
+        assert!(
+            titles.iter().any(|t| t.contains("Ignore package")),
+            "property ref MUST get Ignore action"
+        );
+    }
+
+    #[test]
+    fn test_ignore_action_kind_and_preference() {
+        let cache = MemoryCache::new();
+        cache.insert(
+            "test:lodash".to_string(),
+            VersionInfo {
+                latest: Some("1.0.0".to_string()),
+                ..Default::default()
+            },
+        );
+        let deps = vec![create_test_dependency("lodash", "1.0.0", 5)];
+        let uri = Url::parse("file:///test/Cargo.toml").unwrap();
+        let range = Range {
+            start: Position {
+                line: 0,
+                character: 0,
+            },
+            end: Position {
+                line: 10,
+                character: 0,
+            },
+        };
+        let workspace = std::path::PathBuf::from("/tmp/ws");
+
+        let actions = create_code_actions(
+            &deps,
+            &cache,
+            &uri,
+            range,
+            FileType::Cargo,
+            |name| format!("test:{name}"),
+            &[],
+            Some(&workspace),
+            None,
+        );
+
+        let ignore = actions
+            .iter()
+            .find_map(|a| match a {
+                CodeActionOrCommand::CodeAction(ca) if ca.title.contains("Ignore package") => {
+                    Some(ca)
+                }
+                _ => None,
+            })
+            .expect("expected Ignore action");
+
+        assert_eq!(ignore.kind, Some(CodeActionKind::QUICKFIX));
+        assert_eq!(ignore.is_preferred, Some(false));
+        assert!(ignore.edit.is_some());
     }
 }
