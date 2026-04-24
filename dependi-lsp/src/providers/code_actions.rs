@@ -103,8 +103,6 @@ pub fn create_code_actions(
     workspace_root: Option<&std::path::Path>,
     current_settings: Option<&str>,
 ) -> Vec<CodeActionOrCommand> {
-    let _ = (workspace_root, current_settings); // wired in Task 6
-
     // Pre-filter active (non-ignored, non-property, in-range) deps once so
     // ignored packages are excluded from BOTH per-dep update actions AND
     // the Update-All tally.
@@ -117,10 +115,17 @@ pub fn create_code_actions(
         })
         .collect();
 
-    let mut actions: Vec<CodeActionOrCommand> = active
-        .iter()
-        .filter_map(|dep| create_update_action(dep, cache, uri, file_type, &cache_key_fn))
-        .collect();
+    let mut actions: Vec<CodeActionOrCommand> = Vec::new();
+    for dep in &active {
+        if let Some(update) = create_update_action(dep, cache, uri, file_type, &cache_key_fn) {
+            actions.push(update);
+        }
+        if let Some(root) = workspace_root
+            && let Some(ignore) = create_ignore_action(dep, root, current_settings)
+        {
+            actions.push(ignore);
+        }
+    }
 
     let active_owned: Vec<Dependency> = active.iter().map(|d| (*d).clone()).collect();
     if let Some(update_all) =
@@ -209,6 +214,35 @@ fn create_update_action(
         }
         VersionStatus::UpToDate | VersionStatus::Unknown => None,
     }
+}
+
+/// Create an "Ignore package" code action that appends `dep.name` to the
+/// `lsp.dependi.initialization_options.ignore` list in `.zed/settings.json`.
+///
+/// Returns `None` if `build_ignore_workspace_edit` fails (e.g. malformed
+/// existing settings or invalid path); the caller silently omits the action.
+fn create_ignore_action(
+    dep: &Dependency,
+    workspace_root: &std::path::Path,
+    current_settings: Option<&str>,
+) -> Option<CodeActionOrCommand> {
+    let edit = crate::settings_edit::build_ignore_workspace_edit(
+        workspace_root,
+        &dep.name,
+        current_settings,
+    )
+    .ok()?;
+
+    Some(CodeActionOrCommand::CodeAction(CodeAction {
+        title: format!("Ignore package \"{}\"", dep.name),
+        kind: Some(CodeActionKind::QUICKFIX),
+        diagnostics: None,
+        edit: Some(edit),
+        command: None,
+        is_preferred: Some(false),
+        disabled: None,
+        data: None,
+    }))
 }
 
 /// Create an "Update All Dependencies" code action when 2+ updates are available
@@ -1167,5 +1201,207 @@ mod tests {
             !actions.is_empty(),
             "non-ignored outdated package should produce action"
         );
+    }
+
+    #[test]
+    fn test_ignore_action_emitted_when_workspace_root_provided() {
+        let cache = MemoryCache::new();
+        cache.insert(
+            "test:lodash".to_string(),
+            VersionInfo {
+                latest: Some("2.0.0".to_string()),
+                ..Default::default()
+            },
+        );
+        let deps = vec![create_test_dependency("lodash", "1.0.0", 5)];
+        let uri = Url::parse("file:///test/Cargo.toml").unwrap();
+        let range = Range {
+            start: Position {
+                line: 0,
+                character: 0,
+            },
+            end: Position {
+                line: 10,
+                character: 0,
+            },
+        };
+        let workspace = std::path::PathBuf::from("/tmp/ws");
+
+        let actions = create_code_actions(
+            &deps,
+            &cache,
+            &uri,
+            range,
+            FileType::Cargo,
+            |name| format!("test:{name}"),
+            &[],
+            Some(&workspace),
+            None,
+        );
+
+        // Expect at least 2 actions: Update + Ignore
+        assert!(
+            actions.len() >= 2,
+            "expected Update and Ignore actions, got {}",
+            actions.len()
+        );
+
+        let titles: Vec<String> = actions
+            .iter()
+            .filter_map(|a| match a {
+                CodeActionOrCommand::CodeAction(ca) => Some(ca.title.clone()),
+                _ => None,
+            })
+            .collect();
+        assert!(titles.iter().any(|t| t.contains("Ignore package")));
+        assert!(titles.iter().any(|t| t.contains("\"lodash\"")));
+    }
+
+    #[test]
+    fn test_ignore_action_skipped_when_no_workspace_root() {
+        let cache = MemoryCache::new();
+        cache.insert(
+            "test:lodash".to_string(),
+            VersionInfo {
+                latest: Some("2.0.0".to_string()),
+                ..Default::default()
+            },
+        );
+        let deps = vec![create_test_dependency("lodash", "1.0.0", 5)];
+        let uri = Url::parse("file:///test/Cargo.toml").unwrap();
+        let range = Range {
+            start: Position {
+                line: 0,
+                character: 0,
+            },
+            end: Position {
+                line: 10,
+                character: 0,
+            },
+        };
+
+        let actions = create_code_actions(
+            &deps,
+            &cache,
+            &uri,
+            range,
+            FileType::Cargo,
+            |name| format!("test:{name}"),
+            &[],
+            None,
+            None,
+        );
+
+        let titles: Vec<String> = actions
+            .iter()
+            .filter_map(|a| match a {
+                CodeActionOrCommand::CodeAction(ca) => Some(ca.title.clone()),
+                _ => None,
+            })
+            .collect();
+        assert!(
+            !titles.iter().any(|t| t.contains("Ignore package")),
+            "expected no Ignore action without workspace_root"
+        );
+    }
+
+    #[test]
+    fn test_ignore_action_emitted_even_when_up_to_date() {
+        let cache = MemoryCache::new();
+        cache.insert(
+            "test:lodash".to_string(),
+            VersionInfo {
+                latest: Some("1.0.0".to_string()), // up-to-date
+                ..Default::default()
+            },
+        );
+        let deps = vec![create_test_dependency("lodash", "1.0.0", 5)];
+        let uri = Url::parse("file:///test/Cargo.toml").unwrap();
+        let range = Range {
+            start: Position {
+                line: 0,
+                character: 0,
+            },
+            end: Position {
+                line: 10,
+                character: 0,
+            },
+        };
+        let workspace = std::path::PathBuf::from("/tmp/ws");
+
+        let actions = create_code_actions(
+            &deps,
+            &cache,
+            &uri,
+            range,
+            FileType::Cargo,
+            |name| format!("test:{name}"),
+            &[],
+            Some(&workspace),
+            None,
+        );
+
+        let titles: Vec<String> = actions
+            .iter()
+            .filter_map(|a| match a {
+                CodeActionOrCommand::CodeAction(ca) => Some(ca.title.clone()),
+                _ => None,
+            })
+            .collect();
+        assert!(
+            titles.iter().any(|t| t.contains("Ignore package")),
+            "expected Ignore action for up-to-date package"
+        );
+    }
+
+    #[test]
+    fn test_ignore_action_kind_and_preference() {
+        let cache = MemoryCache::new();
+        cache.insert(
+            "test:lodash".to_string(),
+            VersionInfo {
+                latest: Some("1.0.0".to_string()),
+                ..Default::default()
+            },
+        );
+        let deps = vec![create_test_dependency("lodash", "1.0.0", 5)];
+        let uri = Url::parse("file:///test/Cargo.toml").unwrap();
+        let range = Range {
+            start: Position {
+                line: 0,
+                character: 0,
+            },
+            end: Position {
+                line: 10,
+                character: 0,
+            },
+        };
+        let workspace = std::path::PathBuf::from("/tmp/ws");
+
+        let actions = create_code_actions(
+            &deps,
+            &cache,
+            &uri,
+            range,
+            FileType::Cargo,
+            |name| format!("test:{name}"),
+            &[],
+            Some(&workspace),
+            None,
+        );
+
+        let ignore = actions
+            .iter()
+            .find_map(|a| match a {
+                CodeActionOrCommand::CodeAction(ca) if ca.title.contains("Ignore package") => {
+                    Some(ca)
+                }
+                _ => None,
+            })
+            .expect("expected Ignore action");
+
+        assert_eq!(ignore.kind, Some(CodeActionKind::QUICKFIX));
+        assert_eq!(ignore.is_preferred, Some(false));
+        assert!(ignore.edit.is_some());
     }
 }
