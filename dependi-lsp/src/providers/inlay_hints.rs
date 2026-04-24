@@ -461,26 +461,33 @@ pub fn compare_versions(current: &str, info: &VersionInfo) -> VersionStatus {
     // lockfile resolution or an explicit pin like `==4.0.0a6`), which the first
     // attempt cannot parse and which would otherwise trigger a bogus downgrade
     // suggestion via the string-equality fallback (see issue #154).
-    let current_clean = normalize_version(&truncate_version(
-        &strip_python_prerelease(&current_normalized),
-        3,
-    ));
-    let latest_clean = normalize_version(&truncate_version(
-        &strip_python_prerelease(&latest_normalized),
-        3,
-    ));
+    //
+    // Only truncate to 3 segments when stripping actually changed the input
+    // (a PEP 440 marker like `dev1` can expand to a trailing `.0` that pushes
+    // the result to 4 segments). Leaving genuine 4-segment calendar versions
+    // like `2024.1.1.5` untouched avoids silently collapsing them.
+    let current_clean = clean_for_semver(&current_normalized);
+    let latest_clean = clean_for_semver(&latest_normalized);
 
     match (
         semver::Version::parse(&current_clean),
         semver::Version::parse(&latest_clean),
     ) {
-        (Ok(current_ver), Ok(latest_ver)) => {
-            if current_ver >= latest_ver {
-                VersionStatus::UpToDate
-            } else {
-                VersionStatus::UpdateAvailable(latest.to_owned())
+        (Ok(current_ver), Ok(latest_ver)) => match current_ver.cmp(&latest_ver) {
+            core::cmp::Ordering::Greater => VersionStatus::UpToDate,
+            core::cmp::Ordering::Less => VersionStatus::UpdateAvailable(latest.to_owned()),
+            core::cmp::Ordering::Equal => {
+                // Cleaned versions parsed equal — check whether stripping
+                // collapsed a real difference (e.g., `4.0.0a6` vs `4.0.0a7`
+                // both strip to `4.0.0`). If originals differ, report an
+                // update rather than hiding the change.
+                if current_normalized == latest_normalized {
+                    VersionStatus::UpToDate
+                } else {
+                    VersionStatus::UpdateAvailable(latest.to_owned())
+                }
             }
-        }
+        },
         _ => {
             // Final fallback: string comparison on cleaned versions
             if current_clean == latest_clean {
@@ -489,6 +496,19 @@ pub fn compare_versions(current: &str, info: &VersionInfo) -> VersionStatus {
                 VersionStatus::UpdateAvailable(latest.to_owned())
             }
         }
+    }
+}
+
+/// Normalize a version for the second-attempt semver parse in `compare_versions`.
+/// Strips PEP 440 pre-release markers. Truncates to 3 segments only when the
+/// strip actually modified the input, so genuine 4-segment calendar versions
+/// (e.g., `2024.1.1.5`) are preserved.
+fn clean_for_semver(version: &str) -> String {
+    let stripped = strip_python_prerelease(version);
+    if stripped == version {
+        normalize_version(&stripped)
+    } else {
+        normalize_version(&truncate_version(&stripped, 3))
     }
 }
 
@@ -750,6 +770,48 @@ mod tests {
         // Exact pin with == operator
         let info = make_version_info("3.11.2");
         let result = compare_versions("==4.0.0a6", &info);
+        assert!(matches!(result, VersionStatus::UpToDate), "Got: {result:?}");
+    }
+
+    #[test]
+    fn test_compare_versions_prerelease_older_than_latest_prerelease() {
+        // When latest itself is a pre-release (no stable on PyPI yet), a lower
+        // pre-release on the same base version must still report an update
+        // instead of collapsing to UpToDate via the strip.
+        let info = make_version_info("4.0.0a7");
+        match compare_versions("4.0.0a6", &info) {
+            VersionStatus::UpdateAvailable(v) => assert_eq!(v, "4.0.0a7"),
+            other => panic!("Expected UpdateAvailable, got: {other:?}"),
+        }
+    }
+
+    #[test]
+    fn test_compare_versions_prerelease_vs_same_base_stable() {
+        // Pre-release on the same base as a released stable must report an
+        // update: 4.0.0a6 < 4.0.0.
+        let info = make_version_info("4.0.0");
+        match compare_versions("4.0.0a6", &info) {
+            VersionStatus::UpdateAvailable(v) => assert_eq!(v, "4.0.0"),
+            other => panic!("Expected UpdateAvailable, got: {other:?}"),
+        }
+    }
+
+    #[test]
+    fn test_compare_versions_calver_four_segments_update_available() {
+        // Calendar-versioned packages can legitimately use 4 segments (e.g.,
+        // `2024.1.1.5`). The second-attempt path must not silently truncate
+        // `latest` and report UpToDate when a real update exists.
+        let info = make_version_info("2024.1.1.5");
+        match compare_versions("2024.1.1.3", &info) {
+            VersionStatus::UpdateAvailable(v) => assert_eq!(v, "2024.1.1.5"),
+            other => panic!("Expected UpdateAvailable, got: {other:?}"),
+        }
+    }
+
+    #[test]
+    fn test_compare_versions_calver_four_segments_up_to_date() {
+        let info = make_version_info("2024.1.1.5");
+        let result = compare_versions("2024.1.1.5", &info);
         assert!(matches!(result, VersionStatus::UpToDate), "Got: {result:?}");
     }
 
