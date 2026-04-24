@@ -443,10 +443,36 @@ pub fn compare_versions(current: &str, info: &VersionInfo) -> VersionStatus {
     let current_normalized = normalize_version(current);
     let latest_normalized = normalize_version(latest);
 
-    // Parse as semver for proper comparison
-    match (
+    // First attempt: direct semver parse (handles clean semver and semver pre-release
+    // like Rust's `1.0.0-alpha.1`).
+    if let (Ok(current_ver), Ok(latest_ver)) = (
         semver::Version::parse(&current_normalized),
         semver::Version::parse(&latest_normalized),
+    ) {
+        return if current_ver >= latest_ver {
+            VersionStatus::UpToDate
+        } else {
+            VersionStatus::UpdateAvailable(latest.to_owned())
+        };
+    }
+
+    // Second attempt: strip PEP 440 pre-release markers, then retry semver parse.
+    // Handles Python bare pre-release versions (e.g., `4.0.0a6` coming from a
+    // lockfile resolution or an explicit pin like `==4.0.0a6`), which the first
+    // attempt cannot parse and which would otherwise trigger a bogus downgrade
+    // suggestion via the string-equality fallback (see issue #154).
+    let current_clean = normalize_version(&truncate_version(
+        &strip_python_prerelease(&current_normalized),
+        3,
+    ));
+    let latest_clean = normalize_version(&truncate_version(
+        &strip_python_prerelease(&latest_normalized),
+        3,
+    ));
+
+    match (
+        semver::Version::parse(&current_clean),
+        semver::Version::parse(&latest_clean),
     ) {
         (Ok(current_ver), Ok(latest_ver)) => {
             if current_ver >= latest_ver {
@@ -456,8 +482,8 @@ pub fn compare_versions(current: &str, info: &VersionInfo) -> VersionStatus {
             }
         }
         _ => {
-            // Fallback to string comparison if semver parsing fails
-            if current_normalized == latest_normalized {
+            // Final fallback: string comparison on cleaned versions
+            if current_clean == latest_clean {
                 VersionStatus::UpToDate
             } else {
                 VersionStatus::UpdateAvailable(latest.to_owned())
@@ -679,6 +705,52 @@ mod tests {
             compare_versions("~=4.0a", &info),
             VersionStatus::UpToDate
         ));
+    }
+
+    #[test]
+    fn test_issue_154_compatible_release_matches_real_pypi_latest() {
+        // Reproduces the reported scenario of issue #154: a PyPI package
+        // (apscheduler) with stable latest in a lower major than the pinned
+        // pre-release (`~=4.0a`) — must be UpToDate, not a downgrade suggestion.
+        let info = make_version_info("3.11.2");
+        let result = compare_versions("~=4.0a", &info);
+        assert!(matches!(result, VersionStatus::UpToDate), "Got: {result:?}");
+    }
+
+    #[test]
+    fn test_issue_154_bare_prerelease_from_lockfile() {
+        // If a Python lockfile resolves apscheduler to a pre-release (e.g., "4.0.0a6"),
+        // `effective_version()` returns the bare pre-release, which bypasses the ~= path
+        let info = make_version_info("3.11.2");
+        let result = compare_versions("4.0.0a6", &info);
+        assert!(matches!(result, VersionStatus::UpToDate), "Got: {result:?}");
+    }
+
+    #[test]
+    fn test_issue_154_bare_prerelease_variants() {
+        let info = make_version_info("3.11.2");
+        for v in [
+            "4.0a",
+            "4.0a1",
+            "4.0.0a1",
+            "4.0.0b2",
+            "4.0.0rc1",
+            "4.0.0.dev1",
+        ] {
+            let result = compare_versions(v, &info);
+            assert!(
+                matches!(result, VersionStatus::UpToDate),
+                "Input {v}: Got {result:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn test_issue_154_exact_pin_prerelease() {
+        // Exact pin with == operator
+        let info = make_version_info("3.11.2");
+        let result = compare_versions("==4.0.0a6", &info);
+        assert!(matches!(result, VersionStatus::UpToDate), "Got: {result:?}");
     }
 
     #[test]
