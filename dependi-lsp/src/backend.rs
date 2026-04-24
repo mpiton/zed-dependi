@@ -54,10 +54,15 @@ use crate::{
 
 /// Walk parents of `file_path` looking for a `.zed/` directory.
 /// Returns the first ancestor that contains it, or the file's parent dir as fallback.
-fn find_workspace_root(file_path: &std::path::Path) -> Option<std::path::PathBuf> {
+///
+/// Uses `tokio::fs::metadata` (async) per project rule: no blocking I/O in async tasks.
+async fn find_workspace_root(file_path: &std::path::Path) -> Option<std::path::PathBuf> {
     let start = file_path.parent()?;
     for ancestor in start.ancestors() {
-        if ancestor.join(".zed").is_dir() {
+        let candidate = ancestor.join(".zed");
+        if let Ok(meta) = tokio::fs::metadata(&candidate).await
+            && meta.is_dir()
+        {
             return Some(ancestor.to_path_buf());
         }
     }
@@ -2038,7 +2043,10 @@ impl LanguageServer for DependiBackend {
         // Detect workspace root + read .zed/settings.json (best-effort).
         // If anything fails, the Ignore action will be omitted but Update actions still work.
         let file_path = uri.to_file_path().ok();
-        let workspace_root = file_path.as_deref().and_then(find_workspace_root);
+        let workspace_root = match file_path.as_deref() {
+            Some(p) => find_workspace_root(p).await,
+            None => None,
+        };
         let current_settings: Option<String> = match &workspace_root {
             Some(root) => {
                 let settings_path = root.join(".zed").join("settings.json");
@@ -2233,8 +2241,8 @@ mod tests {
         );
     }
 
-    #[test]
-    fn test_find_workspace_root_locates_zed_dir() {
+    #[tokio::test]
+    async fn test_find_workspace_root_locates_zed_dir() {
         let dir = tempfile::tempdir().expect("tempdir");
         let workspace = dir.path();
         std::fs::create_dir_all(workspace.join(".zed")).expect("create .zed");
@@ -2243,21 +2251,23 @@ mod tests {
         std::fs::create_dir_all(nested_file.parent().unwrap()).expect("create subdir");
         std::fs::write(&nested_file, "").expect("create file");
 
-        let found = super::find_workspace_root(&nested_file);
+        let found = super::find_workspace_root(&nested_file).await;
         assert_eq!(found.as_deref(), Some(workspace));
     }
 
-    #[test]
-    fn test_find_workspace_root_falls_back_to_parent_dir() {
+    #[tokio::test]
+    async fn test_find_workspace_root_falls_back_to_parent_dir() {
+        // Use a deeply nested tempdir path that's unlikely to have `.zed/`
+        // in any ancestor, then assert the returned path equals the file's
+        // parent dir (not just `is_some()`).
         let dir = tempfile::tempdir().expect("tempdir");
-        let workspace = dir.path();
-        let file = workspace.join("Cargo.toml");
+        let nested = dir.path().join("a").join("b").join("c").join("d");
+        std::fs::create_dir_all(&nested).expect("create nested");
+        let file = nested.join("Cargo.toml");
         std::fs::write(&file, "").expect("create file");
 
-        let found = super::find_workspace_root(&file);
-        // Walks up from `workspace`, no .zed found anywhere — falls back to `workspace`.
-        // Note: ancestors of /tmp may have .zed in unrelated user dirs in dev environment.
-        // Accept either workspace itself OR an ancestor that has .zed (rare).
-        assert!(found.is_some(), "expected Some, got None");
+        let found = super::find_workspace_root(&file).await;
+        // Should fall back to file's parent dir (no .zed in any ancestor).
+        assert_eq!(found.as_deref(), Some(nested.as_path()));
     }
 }

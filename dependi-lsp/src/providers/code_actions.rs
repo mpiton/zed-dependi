@@ -127,9 +127,8 @@ pub fn create_code_actions(
         }
     }
 
-    let active_owned: Vec<Dependency> = active.iter().map(|d| (*d).clone()).collect();
     if let Some(update_all) =
-        create_update_all_action(&active_owned, cache, uri, file_type, &cache_key_fn)
+        create_update_all_action(&active, cache, uri, file_type, &cache_key_fn)
     {
         actions.insert(0, update_all);
     }
@@ -247,7 +246,7 @@ fn create_ignore_action(
 
 /// Create an "Update All Dependencies" code action when 2+ updates are available
 fn create_update_all_action(
-    dependencies: &[Dependency],
+    dependencies: &[&Dependency],
     cache: &impl ReadCache,
     uri: &Url,
     file_type: FileType,
@@ -255,6 +254,7 @@ fn create_update_all_action(
 ) -> Option<CodeActionOrCommand> {
     let outdated_deps: Vec<(&Dependency, String)> = dependencies
         .iter()
+        .copied()
         .filter(|dep| !is_property_reference(dep))
         .filter_map(|dep| {
             let cache_key = cache_key_fn(&dep.name);

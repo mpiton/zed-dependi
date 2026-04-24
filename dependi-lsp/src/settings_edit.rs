@@ -6,7 +6,7 @@ use std::path::Path;
 use anyhow::{Context, Result};
 use serde_json::{Value, json};
 use tower_lsp::lsp_types::{
-    CreateFile, DocumentChangeOperation, DocumentChanges, OneOf,
+    CreateFile, CreateFileOptions, DocumentChangeOperation, DocumentChanges, OneOf,
     OptionalVersionedTextDocumentIdentifier, Position, Range, ResourceOp, TextDocumentEdit,
     TextEdit, Url, WorkspaceEdit,
 };
@@ -51,7 +51,10 @@ fn build_create_edit(settings_uri: Url, package_name: &str) -> WorkspaceEdit {
 
     let create = CreateFile {
         uri: settings_uri.clone(),
-        options: None,
+        options: Some(CreateFileOptions {
+            overwrite: Some(false),
+            ignore_if_exists: Some(true),
+        }),
         annotation_id: None,
     };
     let text_edit = TextDocumentEdit {
@@ -128,22 +131,27 @@ fn build_replace_edit(
     }
 
     let new_text = serde_json::to_string_pretty(&root).unwrap_or_default() + "\n";
-    let line_count = current.lines().count() as u32;
 
+    // NOTE: We pass `version: None` because .zed/settings.json is not tracked
+    // as an open LSP document. Concurrent edits between read and apply are
+    // possible but rare in practice; acceptable for a local dev tool.
     let text_edit = TextDocumentEdit {
         text_document: OptionalVersionedTextDocumentIdentifier {
             uri: settings_uri,
             version: None,
         },
         edits: vec![OneOf::Left(TextEdit {
+            // Replace-whole-document: use u32::MAX for line/character to mean
+            // "end of document" per the conventional LSP pattern. Avoids
+            // off-by-one issues with line count vs. exclusive end-line.
             range: Range {
                 start: Position {
                     line: 0,
                     character: 0,
                 },
                 end: Position {
-                    line: line_count,
-                    character: 0,
+                    line: u32::MAX,
+                    character: u32::MAX,
                 },
             },
             new_text,
