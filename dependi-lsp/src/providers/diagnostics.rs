@@ -22,10 +22,16 @@ pub fn create_diagnostics(
     min_severity: Option<VulnerabilitySeverity>,
     file_type: FileType,
     doc_transitive_vulns: &hashbrown::HashMap<String, Vec<TransitiveVuln>>,
+    ignored: &[String],
 ) -> Vec<Diagnostic> {
     let mut diagnostics = Vec::new();
 
     for dep in dependencies {
+        // Skip dependencies matching any `ignore` pattern (matches inlay_hints behavior).
+        if crate::config::is_package_ignored(&dep.name, ignored) {
+            continue;
+        }
+
         // Show informational diagnostic for local/path dependencies
         if is_local_dependency(&dep.version) {
             diagnostics.push(create_local_dependency_diagnostic(dep));
@@ -510,6 +516,7 @@ mod tests {
             None,
             FileType::Cargo,
             &hashbrown::HashMap::new(),
+            &[],
         );
 
         assert_eq!(diagnostics.len(), 1);
@@ -536,6 +543,7 @@ mod tests {
             None,
             FileType::Cargo,
             &hashbrown::HashMap::new(),
+            &[],
         );
 
         assert_eq!(diagnostics.len(), 0);
@@ -552,6 +560,7 @@ mod tests {
             None,
             FileType::Cargo,
             &hashbrown::HashMap::new(),
+            &[],
         );
 
         assert_eq!(diagnostics.len(), 0);
@@ -598,6 +607,7 @@ mod tests {
             None,
             FileType::Cargo,
             &hashbrown::HashMap::new(),
+            &[],
         );
 
         let deprecation_diags: Vec<_> = diagnostics
@@ -642,6 +652,7 @@ mod tests {
             None,
             FileType::Cargo,
             &hashbrown::HashMap::new(),
+            &[],
         );
 
         let deprecation_diags: Vec<_> = diagnostics
@@ -685,6 +696,7 @@ mod tests {
             None,
             FileType::Cargo,
             &hashbrown::HashMap::new(),
+            &[],
         );
 
         let deprecation_diags: Vec<_> = diagnostics
@@ -741,6 +753,7 @@ mod tests {
             None,
             FileType::Cargo,
             &hashbrown::HashMap::new(),
+            &[],
         );
 
         let yanked_diags: Vec<_> = diagnostics
@@ -781,6 +794,7 @@ mod tests {
             None,
             FileType::Cargo,
             &hashbrown::HashMap::new(),
+            &[],
         );
 
         let yanked_diags: Vec<_> = diagnostics
@@ -820,6 +834,7 @@ mod tests {
             None,
             FileType::Cargo,
             &hashbrown::HashMap::new(),
+            &[],
         );
 
         let yanked_diags: Vec<_> = diagnostics
@@ -882,6 +897,7 @@ mod tests {
             None,
             FileType::Cargo,
             &hashbrown::HashMap::new(),
+            &[],
         );
 
         let yanked_diags: Vec<_> = diagnostics
@@ -930,6 +946,7 @@ mod tests {
             None,
             FileType::Cargo,
             &hashbrown::HashMap::new(),
+            &[],
         );
 
         assert_eq!(diagnostics.len(), 1);
@@ -970,6 +987,7 @@ mod tests {
             None,
             FileType::Cargo,
             &hashbrown::HashMap::new(),
+            &[],
         );
 
         let vuln_diags: Vec<_> = diagnostics
@@ -1020,6 +1038,7 @@ mod tests {
             Some(VulnerabilitySeverity::High),
             FileType::Cargo,
             &hashbrown::HashMap::new(),
+            &[],
         );
 
         let vuln_diags: Vec<_> = diagnostics
@@ -1056,6 +1075,7 @@ mod tests {
             None,
             FileType::Cargo,
             &hashbrown::HashMap::new(),
+            &[],
         );
 
         let deprecation_diags: Vec<_> = diagnostics
@@ -1094,6 +1114,7 @@ mod tests {
             None,
             FileType::Cargo,
             &hashbrown::HashMap::new(),
+            &[],
         );
 
         let yanked_diags: Vec<_> = diagnostics
@@ -1185,6 +1206,7 @@ mod tests {
             None,
             FileType::Cargo,
             &hashbrown::HashMap::new(),
+            &[],
         );
 
         let vuln_diags: Vec<_> = diagnostics
@@ -1225,6 +1247,7 @@ mod tests {
             None,
             FileType::Cargo,
             &hashbrown::HashMap::new(),
+            &[],
         );
 
         let vuln_diags: Vec<_> = diagnostics
@@ -1265,6 +1288,7 @@ mod tests {
             None,
             FileType::Cargo,
             &hashbrown::HashMap::new(),
+            &[],
         );
 
         let vuln_diags: Vec<_> = diagnostics
@@ -1300,6 +1324,7 @@ mod tests {
             None,
             FileType::Npm,
             &hashbrown::HashMap::new(),
+            &[],
         );
 
         let yanked_diags: Vec<_> = diagnostics
@@ -1364,6 +1389,7 @@ mod tests {
             None,
             FileType::Cargo,
             &doc_transitives,
+            &[],
         );
 
         let vuln_diags: Vec<_> = diagnostics
@@ -1440,6 +1466,7 @@ mod tests {
             Some(VulnerabilitySeverity::High),
             FileType::Cargo,
             &doc_transitives,
+            &[],
         );
 
         let vuln_diags: Vec<_> = diagnostics
@@ -1465,6 +1492,94 @@ mod tests {
             !vuln_diags[0].message.contains("LOW-1"),
             "Message should NOT contain LOW-1 when min_severity=High, got: {}",
             vuln_diags[0].message
+        );
+    }
+
+    #[test]
+    fn test_diagnostic_skipped_for_ignored_package() {
+        let cache = MemoryCache::new();
+        cache.insert(
+            "test:lodash".to_string(),
+            VersionInfo {
+                latest: Some("2.0.0".to_string()),
+                ..Default::default()
+            },
+        );
+        let deps = vec![create_test_dependency("lodash", "1.0.0", 5)];
+        let ignored = vec!["lodash".to_string()];
+
+        let diagnostics = create_diagnostics(
+            &deps,
+            &cache,
+            |name| format!("test:{name}"),
+            None,
+            FileType::Cargo,
+            &hashbrown::HashMap::new(),
+            &ignored,
+        );
+
+        assert!(
+            diagnostics.is_empty(),
+            "ignored package should not produce diagnostics"
+        );
+    }
+
+    #[test]
+    fn test_diagnostic_skipped_for_wildcard_match() {
+        let cache = MemoryCache::new();
+        cache.insert(
+            "test:@internal/utils".to_string(),
+            VersionInfo {
+                latest: Some("2.0.0".to_string()),
+                ..Default::default()
+            },
+        );
+        let deps = vec![create_test_dependency("@internal/utils", "1.0.0", 5)];
+        let ignored = vec!["@internal/*".to_string()];
+
+        let diagnostics = create_diagnostics(
+            &deps,
+            &cache,
+            |name| format!("test:{name}"),
+            None,
+            FileType::Cargo,
+            &hashbrown::HashMap::new(),
+            &ignored,
+        );
+
+        assert!(
+            diagnostics.is_empty(),
+            "wildcard-matched package should not produce diagnostics"
+        );
+    }
+
+    #[test]
+    fn test_diagnostic_emitted_when_not_ignored() {
+        let cache = MemoryCache::new();
+        cache.insert(
+            "test:react".to_string(),
+            VersionInfo {
+                latest: Some("18.0.0".to_string()),
+                ..Default::default()
+            },
+        );
+        let deps = vec![create_test_dependency("react", "17.0.0", 5)];
+        let ignored = vec!["lodash".to_string()];
+
+        let diagnostics = create_diagnostics(
+            &deps,
+            &cache,
+            |name| format!("test:{name}"),
+            None,
+            FileType::Cargo,
+            &hashbrown::HashMap::new(),
+            &ignored,
+        );
+
+        assert_eq!(
+            diagnostics.len(),
+            1,
+            "non-ignored package should produce diagnostic"
         );
     }
 }

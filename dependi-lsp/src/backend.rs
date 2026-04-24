@@ -697,7 +697,13 @@ impl ProcessingContext {
         );
 
         // Publish diagnostics IMMEDIATELY (versions are available, vulnerabilities will update later)
-        let (diagnostics_enabled, security_show_diags, min_severity, security_enabled) = self
+        let (
+            diagnostics_enabled,
+            security_show_diags,
+            min_severity,
+            security_enabled,
+            ignored_packages,
+        ) = self
             .config
             .read()
             .map(|c| {
@@ -710,9 +716,10 @@ impl ProcessingContext {
                         None
                     },
                     c.security.enabled,
+                    c.ignore.clone(),
                 )
             })
-            .unwrap_or((true, true, None, true));
+            .unwrap_or((true, true, None, true, Vec::new()));
 
         if diagnostics_enabled {
             let severity_filter = if security_show_diags {
@@ -744,6 +751,7 @@ impl ProcessingContext {
                 severity_filter,
                 file_type,
                 &empty_transitives,
+                &ignored_packages,
             );
 
             self.client
