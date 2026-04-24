@@ -2010,6 +2010,12 @@ impl LanguageServer for DependiBackend {
             return Ok(Some(vec![]));
         };
 
+        let ignored_packages = self
+            .config
+            .read()
+            .map(|c| c.ignore.clone())
+            .unwrap_or_default();
+
         let file_type = doc.file_type;
         let cache_key_map: HashMap<String, String> = doc
             .dependencies
@@ -2028,6 +2034,9 @@ impl LanguageServer for DependiBackend {
                     .cloned()
                     .unwrap_or_else(|| file_type.cache_key(name))
             },
+            &ignored_packages,
+            None, // workspace_root — wired in Task 7
+            None, // current_settings — wired in Task 7
         );
 
         Ok(Some(actions))

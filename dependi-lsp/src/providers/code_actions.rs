@@ -88,6 +88,10 @@ fn normalize_version(version: &str) -> String {
 }
 
 /// Create code actions for dependencies in the given range
+#[expect(
+    clippy::too_many_arguments,
+    reason = "LSP context requires passing doc state, cache, range, ignore list, and workspace metadata together; refactoring into a struct is tracked for a follow-up."
+)]
 pub fn create_code_actions(
     dependencies: &[Dependency],
     cache: &impl ReadCache,
@@ -95,16 +99,32 @@ pub fn create_code_actions(
     range: Range,
     file_type: FileType,
     cache_key_fn: impl Fn(&str) -> String,
+    ignored: &[String],
+    workspace_root: Option<&std::path::Path>,
+    current_settings: Option<&str>,
 ) -> Vec<CodeActionOrCommand> {
-    let mut actions: Vec<CodeActionOrCommand> = dependencies
+    let _ = (workspace_root, current_settings); // wired in Task 6
+
+    // Pre-filter active (non-ignored, non-property, in-range) deps once so
+    // ignored packages are excluded from BOTH per-dep update actions AND
+    // the Update-All tally.
+    let active: Vec<&Dependency> = dependencies
         .iter()
-        .filter(|dep| (range.start.line..=range.end.line).contains(&dep.version_span.line))
-        .filter(|dep| !is_property_reference(dep))
+        .filter(|dep| {
+            (range.start.line..=range.end.line).contains(&dep.version_span.line)
+                && !is_property_reference(dep)
+                && !crate::config::is_package_ignored(&dep.name, ignored)
+        })
+        .collect();
+
+    let mut actions: Vec<CodeActionOrCommand> = active
+        .iter()
         .filter_map(|dep| create_update_action(dep, cache, uri, file_type, &cache_key_fn))
         .collect();
 
+    let active_owned: Vec<Dependency> = active.iter().map(|d| (*d).clone()).collect();
     if let Some(update_all) =
-        create_update_all_action(dependencies, cache, uri, file_type, &cache_key_fn)
+        create_update_all_action(&active_owned, cache, uri, file_type, &cache_key_fn)
     {
         actions.insert(0, update_all);
     }
@@ -368,9 +388,17 @@ mod tests {
             },
         };
 
-        let actions = create_code_actions(&deps, &cache, &uri, range, FileType::Cargo, |name| {
-            format!("test:{name}")
-        });
+        let actions = create_code_actions(
+            &deps,
+            &cache,
+            &uri,
+            range,
+            FileType::Cargo,
+            |name| format!("test:{name}"),
+            &[],
+            None,
+            None,
+        );
 
         assert_eq!(actions.len(), 1);
         match &actions[0] {
@@ -406,9 +434,17 @@ mod tests {
             },
         };
 
-        let actions = create_code_actions(&deps, &cache, &uri, range, FileType::Cargo, |name| {
-            format!("test:{name}")
-        });
+        let actions = create_code_actions(
+            &deps,
+            &cache,
+            &uri,
+            range,
+            FileType::Cargo,
+            |name| format!("test:{name}"),
+            &[],
+            None,
+            None,
+        );
 
         assert_eq!(actions.len(), 0);
     }
@@ -464,9 +500,17 @@ mod tests {
             },
         };
 
-        let actions = create_code_actions(&deps, &cache, &uri, range, FileType::Cargo, |name| {
-            format!("test:{name}")
-        });
+        let actions = create_code_actions(
+            &deps,
+            &cache,
+            &uri,
+            range,
+            FileType::Cargo,
+            |name| format!("test:{name}"),
+            &[],
+            None,
+            None,
+        );
 
         assert_eq!(actions.len(), 4);
         match &actions[0] {
@@ -524,9 +568,17 @@ mod tests {
             },
         };
 
-        let actions = create_code_actions(&deps, &cache, &uri, range, FileType::Cargo, |name| {
-            format!("test:{name}")
-        });
+        let actions = create_code_actions(
+            &deps,
+            &cache,
+            &uri,
+            range,
+            FileType::Cargo,
+            |name| format!("test:{name}"),
+            &[],
+            None,
+            None,
+        );
 
         assert_eq!(actions.len(), 1);
         match &actions[0] {
@@ -572,9 +624,17 @@ mod tests {
             },
         };
 
-        let actions = create_code_actions(&deps, &cache, &uri, range, FileType::Cargo, |name| {
-            format!("test:{name}")
-        });
+        let actions = create_code_actions(
+            &deps,
+            &cache,
+            &uri,
+            range,
+            FileType::Cargo,
+            |name| format!("test:{name}"),
+            &[],
+            None,
+            None,
+        );
 
         assert_eq!(actions.len(), 0);
     }
@@ -666,9 +726,17 @@ mod tests {
             },
         };
 
-        let actions = create_code_actions(&deps, &cache, &uri, range, FileType::Cargo, |name| {
-            format!("test:{name}")
-        });
+        let actions = create_code_actions(
+            &deps,
+            &cache,
+            &uri,
+            range,
+            FileType::Cargo,
+            |name| format!("test:{name}"),
+            &[],
+            None,
+            None,
+        );
 
         assert_eq!(actions.len(), 1);
         match &actions[0] {
@@ -705,9 +773,17 @@ mod tests {
             },
         };
 
-        let actions = create_code_actions(&deps, &cache, &uri, range, FileType::Cargo, |name| {
-            format!("test:{name}")
-        });
+        let actions = create_code_actions(
+            &deps,
+            &cache,
+            &uri,
+            range,
+            FileType::Cargo,
+            |name| format!("test:{name}"),
+            &[],
+            None,
+            None,
+        );
 
         assert_eq!(actions.len(), 1);
         match &actions[0] {
@@ -744,9 +820,17 @@ mod tests {
             },
         };
 
-        let actions = create_code_actions(&deps, &cache, &uri, range, FileType::Cargo, |name| {
-            format!("test:{name}")
-        });
+        let actions = create_code_actions(
+            &deps,
+            &cache,
+            &uri,
+            range,
+            FileType::Cargo,
+            |name| format!("test:{name}"),
+            &[],
+            None,
+            None,
+        );
 
         assert_eq!(actions.len(), 1);
         match &actions[0] {
@@ -862,9 +946,17 @@ mod tests {
             },
         };
 
-        let actions = create_code_actions(&deps, &cache, &uri, range, FileType::Python, |name| {
-            format!("test:{name}")
-        });
+        let actions = create_code_actions(
+            &deps,
+            &cache,
+            &uri,
+            range,
+            FileType::Python,
+            |name| format!("test:{name}"),
+            &[],
+            None,
+            None,
+        );
 
         assert_eq!(actions.len(), 1);
         match &actions[0] {
@@ -907,9 +999,17 @@ mod tests {
             },
         };
 
-        let actions = create_code_actions(&deps, &cache, &uri, range, FileType::Python, |name| {
-            format!("test:{name}")
-        });
+        let actions = create_code_actions(
+            &deps,
+            &cache,
+            &uri,
+            range,
+            FileType::Python,
+            |name| format!("test:{name}"),
+            &[],
+            None,
+            None,
+        );
 
         assert_eq!(actions.len(), 0);
     }
@@ -938,9 +1038,17 @@ mod tests {
             },
         };
 
-        let actions = create_code_actions(&deps, &cache, &uri, range, FileType::Cargo, |name| {
-            format!("test:{name}")
-        });
+        let actions = create_code_actions(
+            &deps,
+            &cache,
+            &uri,
+            range,
+            FileType::Cargo,
+            |name| format!("test:{name}"),
+            &[],
+            None,
+            None,
+        );
 
         assert_eq!(actions.len(), 0);
     }
@@ -962,10 +1070,102 @@ mod tests {
             },
         };
 
-        let actions = create_code_actions(&deps, &cache, &uri, range, FileType::Cargo, |name| {
-            format!("test:{name}")
-        });
+        let actions = create_code_actions(
+            &deps,
+            &cache,
+            &uri,
+            range,
+            FileType::Cargo,
+            |name| format!("test:{name}"),
+            &[],
+            None,
+            None,
+        );
 
         assert_eq!(actions.len(), 0);
+    }
+
+    #[test]
+    fn test_update_action_skipped_for_ignored_package() {
+        let cache = MemoryCache::new();
+        cache.insert(
+            "test:lodash".to_string(),
+            VersionInfo {
+                latest: Some("2.0.0".to_string()),
+                ..Default::default()
+            },
+        );
+        let deps = vec![create_test_dependency("lodash", "1.0.0", 5)];
+        let uri = Url::parse("file:///test/Cargo.toml").unwrap();
+        let range = Range {
+            start: Position {
+                line: 0,
+                character: 0,
+            },
+            end: Position {
+                line: 10,
+                character: 0,
+            },
+        };
+        let ignored = vec!["lodash".to_string()];
+
+        let actions = create_code_actions(
+            &deps,
+            &cache,
+            &uri,
+            range,
+            FileType::Cargo,
+            |name| format!("test:{name}"),
+            &ignored,
+            None,
+            None,
+        );
+
+        assert!(
+            actions.is_empty(),
+            "ignored package should produce no actions"
+        );
+    }
+
+    #[test]
+    fn test_update_action_emitted_when_not_ignored() {
+        let cache = MemoryCache::new();
+        cache.insert(
+            "test:react".to_string(),
+            VersionInfo {
+                latest: Some("18.0.0".to_string()),
+                ..Default::default()
+            },
+        );
+        let deps = vec![create_test_dependency("react", "17.0.0", 5)];
+        let uri = Url::parse("file:///test/Cargo.toml").unwrap();
+        let range = Range {
+            start: Position {
+                line: 0,
+                character: 0,
+            },
+            end: Position {
+                line: 10,
+                character: 0,
+            },
+        };
+        let ignored = vec!["lodash".to_string()];
+
+        let actions = create_code_actions(
+            &deps,
+            &cache,
+            &uri,
+            range,
+            FileType::Cargo,
+            |name| format!("test:{name}"),
+            &ignored,
+            None,
+            None,
+        );
+
+        assert!(
+            !actions.is_empty(),
+            "non-ignored outdated package should produce action"
+        );
     }
 }
