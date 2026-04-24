@@ -243,13 +243,18 @@ impl Config {
 
 /// Returns true if `name` matches any pattern in `patterns`.
 ///
-/// Supported pattern syntax:
+/// Supported pattern syntax (preserves the historical inlay-hints filter behavior):
 /// - exact match: `"lodash"` matches only `"lodash"`
 /// - prefix wildcard: `"@company/*"` matches names starting with `"@company/"`
 /// - suffix wildcard: `"*-test"` matches names ending with `"-test"`
 /// - both wildcards: `"internal-*-lib"` matches names with that prefix AND suffix
+///   (the middle may be empty: `"internal--lib"` is matched)
 ///
-/// Multiple `*` patterns fall back to prefix-only match (matches the first segment).
+/// Caveats — known sharp edges of this simple matcher:
+/// - A bare `"*"` pattern matches every package.
+/// - Patterns with more than one `*` (e.g., `"a-*-b-*-c"`) are NOT fully supported;
+///   they fall back to a prefix-only match against the substring before the first `*`.
+///   For richer matching, prefer one or two `*` patterns, or list packages explicitly.
 pub fn is_package_ignored(name: &str, patterns: &[String]) -> bool {
     patterns.iter().any(|pattern| {
         if pattern.contains('*') {
@@ -698,5 +703,28 @@ mod tests {
         let patterns = vec!["a-*-b-*-c".to_string()];
         assert!(super::is_package_ignored("a-anything", &patterns));
         assert!(!super::is_package_ignored("b-anything", &patterns));
+    }
+
+    #[test]
+    fn test_is_package_ignored_bare_wildcard_matches_all() {
+        // Documented sharp edge: bare "*" matches every name.
+        let patterns = vec!["*".to_string()];
+        assert!(super::is_package_ignored("anything", &patterns));
+        assert!(super::is_package_ignored("", &patterns));
+    }
+
+    #[test]
+    fn test_is_package_ignored_prefix_suffix_overlap_with_empty_middle() {
+        // Pattern "prefix*suffix" matches when prefix and suffix overlap to zero middle chars.
+        let patterns = vec!["internal-*-lib".to_string()];
+        assert!(super::is_package_ignored("internal--lib", &patterns));
+    }
+
+    #[test]
+    fn test_is_package_ignored_empty_pattern_string_matches_only_empty_name() {
+        // An empty-string pattern is an exact-match for the empty name.
+        let patterns = vec!["".to_string()];
+        assert!(super::is_package_ignored("", &patterns));
+        assert!(!super::is_package_ignored("anything", &patterns));
     }
 }
