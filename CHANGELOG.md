@@ -9,6 +9,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- `Ignore package "<name>"` quick-fix code action on every dependency. Adds
+  the package to `lsp.dependi.initialization_options.ignore` in the workspace
+  `.zed/settings.json`, creating the file if it does not exist, deduplicating
+  if the package is already listed, and preserving any other settings
+  ([#226](https://github.com/mpiton/zed-dependi/issues/226))
+- Diagnostics and "Update" code actions now respect the `ignore` list
+  (previously only inlay hints did), giving consistent silencing behavior for
+  packages users have chosen to ignore
 - `--output html` format for `dependi-lsp scan` — self-contained HTML report
   with summary table and separate Direct/Transitive sections, HTML-escaped
   against hostile advisory content, suitable for CI/CD artifacts
