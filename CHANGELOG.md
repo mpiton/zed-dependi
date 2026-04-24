@@ -55,6 +55,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   querying OSV — previously the CLI queried using the specifier string (e.g.
   `^1.0`), which caused false negatives.
 - Respect the `package` field of `Cargo.toml` dependencies
+- Bare PEP 440 pre-release versions (e.g., `4.0.0a6`, `1.0b2`, `2.0rc1`,
+  `1.0.0.dev1`) no longer trigger spurious downgrade suggestions in
+  `compare_versions`. This scenario occurred with Python lockfile resolution
+  (poetry/uv/pdm/pipenv) pinning a direct requirement to a 4.x pre-release
+  while PyPI's latest stable was a lower major (e.g., apscheduler 3.11.x).
+  `compare_versions` now retries semver parsing after stripping PEP 440
+  pre-release markers when the initial parse fails
+  ([#154](https://github.com/mpiton/zed-dependi/issues/154)).
 
 ### Security
 
