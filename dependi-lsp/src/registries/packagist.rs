@@ -71,6 +71,7 @@ use reqwest::Client;
 use serde::Deserialize;
 
 use super::http_client::create_shared_client;
+use super::url_sanitizer::sanitize_repo_url;
 use super::version_utils::is_prerelease_php;
 use super::{Registry, VersionInfo};
 
@@ -198,8 +199,8 @@ impl Registry for PackagistRegistry {
             .cloned();
         let repository = latest_entry
             .and_then(|e| e.source.as_ref())
-            .and_then(|s| s.url.clone())
-            .map(|url| normalize_repo_url(&url));
+            .and_then(|s| s.url.as_ref())
+            .and_then(|url| sanitize_repo_url(url));
 
         // Check if deprecated/abandoned (truthy value = abandoned)
         let deprecated = latest_entry
@@ -281,21 +282,6 @@ fn compare_version_strings(a: &str, b: &str) -> std::cmp::Ordering {
     parts_a.len().cmp(&parts_b.len())
 }
 
-/// Normalize repository URL
-fn normalize_repo_url(url: &str) -> String {
-    let url = url
-        .strip_prefix("git+")
-        .unwrap_or(url)
-        .strip_suffix(".git")
-        .unwrap_or(url);
-
-    if url.starts_with("git://") {
-        url.replace("git://", "https://")
-    } else {
-        url.to_string()
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -335,18 +321,31 @@ mod tests {
     }
 
     #[test]
-    fn test_normalize_repo_url() {
+    fn test_sanitize_repo_url_strips_git_plus() {
         assert_eq!(
-            normalize_repo_url("git+https://github.com/user/repo.git"),
-            "https://github.com/user/repo"
+            sanitize_repo_url("git+https://github.com/user/repo.git"),
+            Some("https://github.com/user/repo".to_string())
         );
+    }
+
+    #[test]
+    fn test_sanitize_repo_url_legacy_git_protocol() {
         assert_eq!(
-            normalize_repo_url("git://github.com/user/repo"),
-            "https://github.com/user/repo"
+            sanitize_repo_url("git://github.com/user/repo"),
+            Some("https://github.com/user/repo".to_string())
         );
+    }
+
+    #[test]
+    fn test_sanitize_repo_url_passthrough_https() {
         assert_eq!(
-            normalize_repo_url("https://github.com/user/repo"),
-            "https://github.com/user/repo"
+            sanitize_repo_url("https://github.com/user/repo"),
+            Some("https://github.com/user/repo".to_string())
         );
+    }
+
+    #[test]
+    fn test_sanitize_repo_url_drops_ssh() {
+        assert_eq!(sanitize_repo_url("ssh://git@github.com/user/repo"), None);
     }
 }
