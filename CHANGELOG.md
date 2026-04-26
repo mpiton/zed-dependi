@@ -68,6 +68,29 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- Wire `AdvisoryCacheConfig` through `HybridAdvisoryCache::from_config` so
+  user settings (`enabled`, `ttl_secs`, `negative_ttl_secs`, `db_path`)
+  actually take effect; previously the backend instantiated the cache via
+  `HybridAdvisoryCache::new()` and ignored every config field
+  ([#237](https://github.com/mpiton/zed-dependi/issues/237))
+- Apply `negative_ttl_secs` (default 1 h) to OSV 404 responses; they were
+  previously cached on the same 24 h schedule as positive entries, so a
+  brand-new RUSTSEC ID that OSV had not yet ingested stayed hidden for a
+  full day. 404s now live in a separate memory-only negative cache
+  ([#237](https://github.com/mpiton/zed-dependi/issues/237))
+- Preserve the remaining TTL when backfilling the L1 advisory cache from
+  L2: previously every L2 hit re-stamped the memory entry with
+  `Instant::now()` and the full TTL, doubling the effective lifetime for
+  entries already near SQLite expiry
+  ([#237](https://github.com/mpiton/zed-dependi/issues/237))
+- Validate advisory IDs with an ASCII-alphanumeric/`-` whitelist (≤64 chars)
+  before interpolation into URLs and use as cache keys, blocking malformed
+  values returned in OSV responses
+  ([#237](https://github.com/mpiton/zed-dependi/issues/237))
+- Drop the unusable `idx_advisory_expiry` index from the advisory schema:
+  the cleanup query (`WHERE inserted_at + ttl_secs * ? < ?`) cannot use a
+  composite index because of the arithmetic expression
+  ([#237](https://github.com/mpiton/zed-dependi/issues/237))
 - `dependi-lsp scan` now uses `effective_version()` (the resolved lockfile
   version when available) instead of the declared version specifier when
   querying OSV — previously the CLI queried using the specifier string (e.g.
