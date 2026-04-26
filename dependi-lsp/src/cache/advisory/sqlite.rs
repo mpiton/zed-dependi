@@ -319,4 +319,53 @@ mod tests {
             .expect("query");
         assert_eq!(count, 0);
     }
+
+    #[tokio::test]
+    async fn older_insert_does_not_clobber_newer_one() {
+        let cache = SqliteAdvisoryCache::in_memory().unwrap();
+
+        let newer = CachedAdvisory {
+            id: "RUSTSEC-2020-0036".to_string(),
+            kind: AdvisoryKind::Found {
+                summary: Some("newer".to_string()),
+                unmaintained: true,
+            },
+            fetched_at: SystemTime::UNIX_EPOCH,
+        };
+
+        // Manually craft an older row directly via SQL with a past timestamp.
+        let older_data = serde_json::to_string(&CachedAdvisory {
+            id: "RUSTSEC-2020-0036".to_string(),
+            kind: AdvisoryKind::Found {
+                summary: Some("older".to_string()),
+                unmaintained: false,
+            },
+            fetched_at: SystemTime::UNIX_EPOCH,
+        })
+        .unwrap();
+        cache.insert(newer.clone()).await;
+
+        let conn = cache.pool.get().unwrap();
+        let now = current_timestamp();
+        // Try to upsert using `now - 1s` as inserted_at.
+        let attempt = conn.execute(
+            "INSERT INTO advisories (id, data, inserted_at, ttl_secs) \
+             VALUES (?, ?, ?, ?) \
+             ON CONFLICT(id) DO UPDATE SET \
+               data = excluded.data, \
+               inserted_at = excluded.inserted_at, \
+               ttl_secs = excluded.ttl_secs \
+             WHERE excluded.inserted_at >= advisories.inserted_at",
+            params![
+                "RUSTSEC-2020-0036",
+                older_data,
+                now - NANOS_PER_SEC,
+                DEFAULT_ADVISORY_TTL_SECS,
+            ],
+        );
+        assert!(attempt.is_ok());
+
+        // Newer entry must still be present.
+        assert_eq!(cache.get("RUSTSEC-2020-0036").await, Some(newer));
+    }
 }
