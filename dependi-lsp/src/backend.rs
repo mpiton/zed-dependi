@@ -642,7 +642,7 @@ impl ProcessingContext {
                 let cache = Arc::clone(&cache);
                 async move {
                     // Check cache first
-                    if cache.get(&cache_key).is_some() {
+                    if cache.get(&cache_key).await.is_some() {
                         tracing::debug!("Cache hit for '{name}' (key: {cache_key})");
                         return;
                     }
@@ -676,7 +676,7 @@ impl ProcessingContext {
                     };
                     match result {
                         Ok(info) => {
-                            cache.insert(cache_key, info);
+                            cache.insert(cache_key, info).await;
                         }
                         Err(e) => {
                             tracing::error!(
@@ -773,7 +773,8 @@ impl ProcessingContext {
                 file_type,
                 &empty_transitives,
                 &ignored_packages,
-            );
+            )
+            .await;
 
             self.client
                 .publish_diagnostics(uri.clone(), diagnostics, None)
@@ -1001,7 +1002,7 @@ impl DependiBackend {
         };
 
         // Check cache first
-        if let Some(cached) = self.version_cache.get(&cache_key) {
+        if let Some(cached) = self.version_cache.get(&cache_key).await {
             return Some(cached);
         }
 
@@ -1042,7 +1043,7 @@ impl DependiBackend {
 
         match result {
             Ok(info) => {
-                self.version_cache.insert(cache_key, info.clone());
+                self.version_cache.insert(cache_key, info.clone()).await;
                 Some(info)
             }
             Err(e) => {
@@ -1174,7 +1175,7 @@ impl DependiBackend {
                         .get(&dep.name)
                         .cloned()
                         .unwrap_or_else(|| file_type.cache_key(&dep.name));
-                    if let Some(mut info) = cache.get(&cache_key) {
+                    if let Some(mut info) = cache.get(&cache_key).await {
                         info.vulnerabilities = result.vulnerabilities.clone();
                         info.deprecated = result.deprecated;
                         if result.deprecated {
@@ -1191,7 +1192,7 @@ impl DependiBackend {
                             result.vulnerabilities.len(),
                             result.deprecated
                         );
-                        cache.insert(cache_key, info);
+                        cache.insert(cache_key, info).await;
                         updated_count += 1;
                     } else {
                         tracing::warn!(
@@ -1455,7 +1456,7 @@ impl DependiBackend {
 
         for dep in &dependencies {
             let cache_key = dep_cache_key(dep, file_type);
-            if let Some(info) = self.version_cache.get(&cache_key) {
+            if let Some(info) = self.version_cache.get(&cache_key).await {
                 for vuln in &info.vulnerabilities {
                     summary.total += 1;
                     match vuln.severity {
@@ -1891,35 +1892,61 @@ impl LanguageServer for DependiBackend {
     }
 
     async fn inlay_hint(&self, params: InlayHintParams) -> Result<Option<Vec<InlayHint>>> {
-        let Ok(config) = self.config.read() else {
-            return Ok(Some(vec![]));
+        // Read config values and drop the guard immediately so it doesn't cross await points.
+        let (show_up_to_date, ignored_packages) = {
+            let Ok(config) = self.config.read() else {
+                return Ok(Some(vec![]));
+            };
+            if !config.inlay_hints.enabled {
+                return Ok(Some(vec![]));
+            }
+            (config.inlay_hints.show_up_to_date, config.ignore.clone())
         };
-        if !config.inlay_hints.enabled {
-            return Ok(Some(vec![]));
-        }
-        let show_up_to_date = config.inlay_hints.show_up_to_date;
-        let ignored_packages = config.ignore.clone();
-        drop(config);
 
         let uri = &params.text_document.uri;
 
-        let Some(doc) = self.documents.get(uri) else {
-            return Ok(Some(vec![]));
+        // Clone doc data out of DashMap before any await points to avoid holding
+        // the non-Send DashMap Ref guard across await boundaries.
+        let (file_type, visible_deps) = {
+            let Some(doc) = self.documents.get(uri) else {
+                return Ok(Some(vec![]));
+            };
+            let file_type = doc.file_type;
+            let visible_deps: Vec<_> = doc
+                .dependencies
+                .iter()
+                .filter(|dep| {
+                    // Only show hints for dependencies in the visible range
+                    (params.range.start.line..=params.range.end.line)
+                        .contains(&dep.version_span.line)
+                })
+                .filter(|dep| !crate::config::is_package_ignored(&dep.name, &ignored_packages))
+                .cloned()
+                .collect();
+            (file_type, visible_deps)
         };
 
-        let file_type = doc.file_type;
-        let hints: Vec<InlayHint> = doc
-            .dependencies
-            .iter()
-            .filter(|dep| {
-                // Only show hints for dependencies in the visible range
-                (params.range.start.line..=params.range.end.line).contains(&dep.version_span.line)
-            })
-            .filter(|dep| !crate::config::is_package_ignored(&dep.name, &ignored_packages))
+        // Pre-fetch all cache values asynchronously before the sync iterator chain.
+        let cache_values: HashMap<String, Option<crate::registries::VersionInfo>> = {
+            let futures: Vec<_> = visible_deps
+                .iter()
+                .map(|dep| {
+                    let cache_key = dep_cache_key(dep, file_type);
+                    async move {
+                        let value = self.version_cache.get(&cache_key).await;
+                        (cache_key, value)
+                    }
+                })
+                .collect();
+            futures::future::join_all(futures).await.into_iter().collect()
+        };
+
+        let hints: Vec<InlayHint> = visible_deps
+            .into_iter()
             .filter_map(|dep| {
-                let cache_key = dep_cache_key(dep, file_type);
-                let version_info = self.version_cache.get(&cache_key);
-                let hint = create_inlay_hint(dep, version_info.as_ref(), file_type);
+                let cache_key = dep_cache_key(&dep, file_type);
+                let version_info = cache_values.get(&cache_key).and_then(|v| v.as_ref());
+                let hint = create_inlay_hint(&dep, version_info, file_type);
 
                 // Optionally filter out up-to-date hints
                 if !show_up_to_date {
@@ -2080,7 +2107,8 @@ impl LanguageServer for DependiBackend {
             &ignored_packages,
             workspace_root.as_deref(),
             current_settings.as_deref(),
-        );
+        )
+        .await;
 
         Ok(Some(actions))
     }
@@ -2105,7 +2133,8 @@ impl LanguageServer for DependiBackend {
                     .get(name)
                     .cloned()
                     .unwrap_or_else(|| file_type.cache_key(name))
-            });
+            })
+            .await;
 
         match completions {
             Some(items) => Ok(Some(CompletionResponse::Array(items))),
