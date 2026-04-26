@@ -26,8 +26,14 @@ pub(crate) fn sanitize_repo_url(raw: &str) -> Option<String> {
         return None;
     }
 
-    strip_dot_git_suffix(&mut parsed);
-    Some(parsed.to_string())
+    // Embedded credentials (`https://user:pass@host/...`) in package
+    // metadata are never legitimate and would leak via the IDE surface.
+    if !parsed.username().is_empty() || parsed.password().is_some() {
+        return None;
+    }
+
+    strip_dot_git_suffix(&mut parsed)?;
+    Some(parsed.as_str().to_owned())
 }
 
 /// Strip the `git+` prefix and rewrite legacy `git://` to `https://`.
@@ -41,11 +47,20 @@ fn normalize_compound_scheme(input: &str) -> String {
 }
 
 /// Remove a trailing `.git` from the URL path, in place.
-fn strip_dot_git_suffix(url: &mut url::Url) {
+///
+/// Returns `Some(())` on success, or `None` when stripping `.git` would
+/// collapse the entire path (e.g. `/.git`) — that input is pathological
+/// metadata and should be dropped rather than silently rewritten to a
+/// bare host URL.
+fn strip_dot_git_suffix(url: &mut url::Url) -> Option<()> {
     let path = url.path().to_string();
     if let Some(without_git) = path.strip_suffix(".git") {
+        if without_git.is_empty() || without_git == "/" {
+            return None;
+        }
         url.set_path(without_git);
     }
+    Some(())
 }
 
 #[cfg(test)]
@@ -193,6 +208,30 @@ mod tests {
         assert_eq!(
             sanitize_repo_url("  https://example.com/r  "),
             Some("https://example.com/r".to_string())
+        );
+    }
+
+    #[test]
+    fn rejects_bare_dot_git_path() {
+        // path of `/.git` would otherwise strip to `/` and leak a bogus
+        // root URL — return None instead.
+        assert_eq!(sanitize_repo_url("https://github.com/.git"), None);
+    }
+
+    #[test]
+    fn preserves_non_default_port() {
+        assert_eq!(
+            sanitize_repo_url("https://example.com:8443/user/repo"),
+            Some("https://example.com:8443/user/repo".to_string())
+        );
+    }
+
+    #[test]
+    fn rejects_userinfo_in_url() {
+        // credentials embedded in a metadata URL are never legitimate; drop them.
+        assert_eq!(
+            sanitize_repo_url("https://user:pass@github.com/user/repo"),
+            None
         );
     }
 }

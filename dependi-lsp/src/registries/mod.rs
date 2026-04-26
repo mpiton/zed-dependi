@@ -241,7 +241,7 @@ pub mod packagist;
 pub mod pub_dev;
 pub mod pypi;
 pub mod rubygems;
-pub mod url_sanitizer;
+pub(crate) mod url_sanitizer;
 pub mod version_utils;
 
 #[cfg(test)]
