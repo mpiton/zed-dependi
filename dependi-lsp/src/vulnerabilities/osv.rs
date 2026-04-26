@@ -637,6 +637,49 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn first_call_populates_cache_and_second_call_skips_http() {
+        let server = MockServer::start().await;
+        let counter = Arc::new(AtomicUsize::new(0));
+        {
+            let counter = Arc::clone(&counter);
+            Mock::given(method("GET"))
+                .and(path("/vulns/RUSTSEC-2020-0036"))
+                .respond_with(move |_req: &wiremock::Request| {
+                    counter.fetch_add(1, Ordering::SeqCst);
+                    ResponseTemplate::new(200).set_body_json(sample_response_body())
+                })
+                .mount(&server)
+                .await;
+        }
+
+        let cache: Arc<dyn AdvisoryWriteCache> = Arc::new(MemoryAdvisoryCache::new());
+        let client = OsvClient::with_endpoint_and_cache(server.uri(), Arc::clone(&cache));
+
+        let first = client
+            .check_rustsec_unmaintained(&["RUSTSEC-2020-0036".to_string()])
+            .await;
+        let second = client
+            .check_rustsec_unmaintained(&["RUSTSEC-2020-0036".to_string()])
+            .await;
+
+        assert!(first);
+        assert!(second);
+        assert_eq!(
+            counter.load(Ordering::SeqCst),
+            1,
+            "second call should be cached"
+        );
+        let cached = cache.get("RUSTSEC-2020-0036").await.expect("entry stored");
+        assert!(matches!(
+            cached.kind,
+            AdvisoryKind::Found {
+                unmaintained: true,
+                ..
+            }
+        ));
+    }
+
+    #[tokio::test]
     async fn test_rustsec_advisory_lookup_limits_concurrency() {
         const EXPECTED_LIMIT: usize = RUSTSEC_ADVISORY_LOOKUP_CONCURRENCY;
 
