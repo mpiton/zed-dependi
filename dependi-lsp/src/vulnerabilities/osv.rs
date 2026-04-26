@@ -65,27 +65,41 @@ impl OsvClient {
         })
     }
 
-    /// Constructor used in tests to point the client at a mock server (no cache).
+    /// Build a client pointing at a custom OSV endpoint (no advisory cache).
+    ///
+    /// Used at runtime by the standalone scanner (`OSV_ENDPOINT` env var) and
+    /// by tests to point the client at a mock HTTP server. Falls back to a
+    /// minimally-configured `reqwest::Client` if the builder rejects the
+    /// timeout we request — `reqwest::Client::new()` itself never panics.
     pub fn with_endpoint(endpoint: String) -> Self {
-        Self::with_endpoint_and_cache(
-            endpoint,
-            Arc::new(crate::cache::advisory::NullAdvisoryCache),
-        )
+        let client = Client::builder()
+            .timeout(Duration::from_secs(30))
+            .build()
+            .unwrap_or_else(|_| Client::new());
+        Self {
+            base_url: endpoint,
+            client: Arc::new(client),
+            advisory_cache: Arc::new(crate::cache::advisory::NullAdvisoryCache),
+        }
     }
 
-    /// Test/runtime constructor: explicit endpoint and cache.
+    /// Test-only constructor: explicit endpoint **and** advisory cache.
+    ///
+    /// Gated to `#[cfg(test)]` so production code paths cannot accidentally
+    /// inject a `NullAdvisoryCache` here. Runtime callers that need cache
+    /// injection should use [`OsvClient::new_with_cache`] instead.
+    #[cfg(test)]
     pub fn with_endpoint_and_cache(
         endpoint: String,
         advisory_cache: Arc<dyn crate::cache::advisory::AdvisoryWriteCache>,
     ) -> Self {
+        let client = Client::builder()
+            .timeout(Duration::from_secs(30))
+            .build()
+            .unwrap_or_else(|_| Client::new());
         Self {
             base_url: endpoint,
-            client: Arc::new(
-                Client::builder()
-                    .timeout(Duration::from_secs(30))
-                    .build()
-                    .expect("reqwest client should build"),
-            ),
+            client: Arc::new(client),
             advisory_cache,
         }
     }
