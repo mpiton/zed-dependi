@@ -575,4 +575,25 @@ mod tests {
         assert_eq!(config.cache_size_kb, 64000);
         assert_eq!(config.ttl_secs, DEFAULT_TTL_SECS);
     }
+
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn test_get_does_not_block_runtime() {
+        use std::sync::Arc;
+        use std::time::Duration;
+
+        let cache = Arc::new(SqliteCache::in_memory().unwrap());
+        cache.insert("k".to_string(), create_test_version_info()).await;
+
+        let cache_clone = Arc::clone(&cache);
+        let read_task = tokio::spawn(async move { cache_clone.get("k").await });
+
+        let timer_ok = tokio::time::timeout(
+            Duration::from_millis(500),
+            tokio::time::sleep(Duration::from_millis(20)),
+        )
+        .await;
+
+        assert!(timer_ok.is_ok(), "tokio runtime appears blocked while SQLite read in flight");
+        assert!(read_task.await.unwrap().is_some(), "expected cache hit on key 'k'");
+    }
 }
