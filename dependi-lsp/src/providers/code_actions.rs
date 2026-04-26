@@ -92,7 +92,7 @@ fn normalize_version(version: &str) -> String {
     clippy::too_many_arguments,
     reason = "LSP context requires passing doc state, cache, range, ignore list, and workspace metadata together; refactoring into a struct is tracked for a follow-up."
 )]
-pub fn create_code_actions(
+pub async fn create_code_actions(
     dependencies: &[Dependency],
     cache: &impl ReadCache,
     uri: &Url,
@@ -130,7 +130,8 @@ pub fn create_code_actions(
     let mut actions: Vec<CodeActionOrCommand> = Vec::new();
 
     for dep in &update_candidates {
-        if let Some(update) = create_update_action(dep, cache, uri, file_type, &cache_key_fn) {
+        if let Some(update) = create_update_action(dep, cache, uri, file_type, &cache_key_fn).await
+        {
             actions.push(update);
         }
     }
@@ -144,7 +145,7 @@ pub fn create_code_actions(
     }
 
     if let Some(update_all) =
-        create_update_all_action(&non_ignored, cache, uri, file_type, &cache_key_fn)
+        create_update_all_action(&non_ignored, cache, uri, file_type, &cache_key_fn).await
     {
         actions.insert(0, update_all);
     }
@@ -170,7 +171,7 @@ fn extract_python_operator(version: &str) -> Option<&str> {
 }
 
 /// Create an "Update to X.Y.Z" code action for a dependency
-fn create_update_action(
+async fn create_update_action(
     dep: &Dependency,
     cache: &impl ReadCache,
     uri: &Url,
@@ -179,7 +180,7 @@ fn create_update_action(
 ) -> Option<CodeActionOrCommand> {
     let dep_name = &*dep.name;
     let cache_key = cache_key_fn(dep_name);
-    let version_info = cache.get(&cache_key)?;
+    let version_info = cache.get(&cache_key).await?;
 
     match compare_versions(dep.effective_version(), &version_info) {
         VersionStatus::UpdateAvailable(new_version) => {
@@ -261,27 +262,24 @@ fn create_ignore_action(
 }
 
 /// Create an "Update All Dependencies" code action when 2+ updates are available
-fn create_update_all_action(
+async fn create_update_all_action(
     dependencies: &[&Dependency],
     cache: &impl ReadCache,
     uri: &Url,
     file_type: FileType,
     cache_key_fn: impl Fn(&str) -> String,
 ) -> Option<CodeActionOrCommand> {
-    let outdated_deps: Vec<(&Dependency, String)> = dependencies
-        .iter()
-        .copied()
-        .filter(|dep| !is_property_reference(dep))
-        .filter_map(|dep| {
-            let cache_key = cache_key_fn(&dep.name);
-            let version_info = cache.get(&cache_key)?;
-
-            match compare_versions(dep.effective_version(), &version_info) {
-                VersionStatus::UpdateAvailable(new_version) => Some((dep, new_version)),
-                _ => None,
+    let mut outdated_deps: Vec<(&Dependency, String)> = Vec::new();
+    for dep in dependencies.iter().copied().filter(|dep| !is_property_reference(dep)) {
+        let cache_key = cache_key_fn(&dep.name);
+        if let Some(version_info) = cache.get(&cache_key).await {
+            if let VersionStatus::UpdateAvailable(new_version) =
+                compare_versions(dep.effective_version(), &version_info)
+            {
+                outdated_deps.push((dep, new_version));
             }
-        })
-        .collect();
+        }
+    }
 
     if outdated_deps.len() < 2 {
         return None;
@@ -414,8 +412,8 @@ mod tests {
         }
     }
 
-    #[test]
-    fn test_create_update_action() {
+    #[tokio::test]
+    async fn test_create_update_action() {
         let cache = MemoryCache::new();
         cache.insert(
             "test:serde".to_string(),
@@ -423,7 +421,7 @@ mod tests {
                 latest: Some("2.0.0".to_string()),
                 ..Default::default()
             },
-        );
+        ).await;
 
         let deps = vec![create_test_dependency("serde", "1.0.0", 5)];
         let uri = Url::parse("file:///test/Cargo.toml").unwrap();
@@ -448,7 +446,7 @@ mod tests {
             &[],
             None,
             None,
-        );
+        ).await;
 
         assert_eq!(actions.len(), 1);
         match &actions[0] {
@@ -460,8 +458,8 @@ mod tests {
         }
     }
 
-    #[test]
-    fn test_no_action_when_up_to_date() {
+    #[tokio::test]
+    async fn test_no_action_when_up_to_date() {
         let cache = MemoryCache::new();
         cache.insert(
             "test:serde".to_string(),
@@ -469,7 +467,7 @@ mod tests {
                 latest: Some("1.0.0".to_string()),
                 ..Default::default()
             },
-        );
+        ).await;
 
         let deps = vec![create_test_dependency("serde", "1.0.0", 5)];
         let uri = Url::parse("file:///test/Cargo.toml").unwrap();
@@ -494,7 +492,7 @@ mod tests {
             &[],
             None,
             None,
-        );
+        ).await;
 
         assert_eq!(actions.len(), 0);
     }
@@ -508,8 +506,8 @@ mod tests {
         assert_eq!(format_version("v1.0.0", FileType::Go), "v1.0.0");
     }
 
-    #[test]
-    fn test_update_all_action_with_multiple_outdated() {
+    #[tokio::test]
+    async fn test_update_all_action_with_multiple_outdated() {
         let cache = MemoryCache::new();
         cache.insert(
             "test:serde".to_string(),
@@ -517,21 +515,21 @@ mod tests {
                 latest: Some("2.0.0".to_string()),
                 ..Default::default()
             },
-        );
+        ).await;
         cache.insert(
             "test:tokio".to_string(),
             VersionInfo {
                 latest: Some("1.36.0".to_string()),
                 ..Default::default()
             },
-        );
+        ).await;
         cache.insert(
             "test:reqwest".to_string(),
             VersionInfo {
                 latest: Some("0.12.0".to_string()),
                 ..Default::default()
             },
-        );
+        ).await;
 
         let deps = vec![
             create_test_dependency("serde", "1.0.0", 5),
@@ -560,7 +558,7 @@ mod tests {
             &[],
             None,
             None,
-        );
+        ).await;
 
         assert_eq!(actions.len(), 4);
         match &actions[0] {
@@ -584,8 +582,8 @@ mod tests {
         }
     }
 
-    #[test]
-    fn test_update_all_action_not_shown_for_single_outdated() {
+    #[tokio::test]
+    async fn test_update_all_action_not_shown_for_single_outdated() {
         let cache = MemoryCache::new();
         cache.insert(
             "test:serde".to_string(),
@@ -593,14 +591,14 @@ mod tests {
                 latest: Some("2.0.0".to_string()),
                 ..Default::default()
             },
-        );
+        ).await;
         cache.insert(
             "test:tokio".to_string(),
             VersionInfo {
                 latest: Some("1.35.0".to_string()),
                 ..Default::default()
             },
-        );
+        ).await;
 
         let deps = vec![
             create_test_dependency("serde", "1.0.0", 5),
@@ -628,7 +626,7 @@ mod tests {
             &[],
             None,
             None,
-        );
+        ).await;
 
         assert_eq!(actions.len(), 1);
         match &actions[0] {
@@ -640,8 +638,8 @@ mod tests {
         }
     }
 
-    #[test]
-    fn test_update_all_action_not_shown_when_all_up_to_date() {
+    #[tokio::test]
+    async fn test_update_all_action_not_shown_when_all_up_to_date() {
         let cache = MemoryCache::new();
         cache.insert(
             "test:serde".to_string(),
@@ -649,14 +647,14 @@ mod tests {
                 latest: Some("1.0.0".to_string()),
                 ..Default::default()
             },
-        );
+        ).await;
         cache.insert(
             "test:tokio".to_string(),
             VersionInfo {
                 latest: Some("1.35.0".to_string()),
                 ..Default::default()
             },
-        );
+        ).await;
 
         let deps = vec![
             create_test_dependency("serde", "1.0.0", 5),
@@ -684,7 +682,7 @@ mod tests {
             &[],
             None,
             None,
-        );
+        ).await;
 
         assert_eq!(actions.len(), 0);
     }
@@ -752,8 +750,8 @@ mod tests {
         assert_eq!(update_type, VersionUpdateType::Patch);
     }
 
-    #[test]
-    fn test_code_action_title_with_major_update() {
+    #[tokio::test]
+    async fn test_code_action_title_with_major_update() {
         let cache = MemoryCache::new();
         cache.insert(
             "test:serde".to_string(),
@@ -761,7 +759,7 @@ mod tests {
                 latest: Some("2.0.0".to_string()),
                 ..Default::default()
             },
-        );
+        ).await;
 
         let deps = vec![create_test_dependency("serde", "1.0.0", 5)];
         let uri = Url::parse("file:///test/Cargo.toml").unwrap();
@@ -786,7 +784,7 @@ mod tests {
             &[],
             None,
             None,
-        );
+        ).await;
 
         assert_eq!(actions.len(), 1);
         match &actions[0] {
@@ -799,8 +797,8 @@ mod tests {
         }
     }
 
-    #[test]
-    fn test_code_action_title_with_minor_update() {
+    #[tokio::test]
+    async fn test_code_action_title_with_minor_update() {
         let cache = MemoryCache::new();
         cache.insert(
             "test:tokio".to_string(),
@@ -808,7 +806,7 @@ mod tests {
                 latest: Some("1.36.0".to_string()),
                 ..Default::default()
             },
-        );
+        ).await;
 
         let deps = vec![create_test_dependency("tokio", "1.35.0", 5)];
         let uri = Url::parse("file:///test/Cargo.toml").unwrap();
@@ -833,7 +831,7 @@ mod tests {
             &[],
             None,
             None,
-        );
+        ).await;
 
         assert_eq!(actions.len(), 1);
         match &actions[0] {
@@ -846,8 +844,8 @@ mod tests {
         }
     }
 
-    #[test]
-    fn test_code_action_title_with_patch_update() {
+    #[tokio::test]
+    async fn test_code_action_title_with_patch_update() {
         let cache = MemoryCache::new();
         cache.insert(
             "test:reqwest".to_string(),
@@ -855,7 +853,7 @@ mod tests {
                 latest: Some("0.12.1".to_string()),
                 ..Default::default()
             },
-        );
+        ).await;
 
         let deps = vec![create_test_dependency("reqwest", "0.12.0", 5)];
         let uri = Url::parse("file:///test/Cargo.toml").unwrap();
@@ -880,7 +878,7 @@ mod tests {
             &[],
             None,
             None,
-        );
+        ).await;
 
         assert_eq!(actions.len(), 1);
         match &actions[0] {
@@ -971,8 +969,8 @@ mod tests {
         );
     }
 
-    #[test]
-    fn test_python_compatible_release_code_action() {
+    #[tokio::test]
+    async fn test_python_compatible_release_code_action() {
         let cache = MemoryCache::new();
         cache.insert(
             "test:rich".to_string(),
@@ -980,7 +978,7 @@ mod tests {
                 latest: Some("14.3.3".to_string()),
                 ..Default::default()
             },
-        );
+        ).await;
 
         // ~=14.2 with latest 14.3.3: compare_versions returns UpdateAvailable("14.3")
         let deps = vec![create_test_dependency("rich", "~=14.2", 5)];
@@ -1006,7 +1004,7 @@ mod tests {
             &[],
             None,
             None,
-        );
+        ).await;
 
         assert_eq!(actions.len(), 1);
         match &actions[0] {
@@ -1024,8 +1022,8 @@ mod tests {
         }
     }
 
-    #[test]
-    fn test_python_compatible_release_up_to_date_no_action() {
+    #[tokio::test]
+    async fn test_python_compatible_release_up_to_date_no_action() {
         let cache = MemoryCache::new();
         cache.insert(
             "test:rich".to_string(),
@@ -1033,7 +1031,7 @@ mod tests {
                 latest: Some("14.3.3".to_string()),
                 ..Default::default()
             },
-        );
+        ).await;
 
         // ~=14.3 with latest 14.3.3: should be UpToDate, no code action
         let deps = vec![create_test_dependency("rich", "~=14.3", 5)];
@@ -1059,13 +1057,13 @@ mod tests {
             &[],
             None,
             None,
-        );
+        ).await;
 
         assert_eq!(actions.len(), 0);
     }
 
-    #[test]
-    fn test_filter_deps_outside_range() {
+    #[tokio::test]
+    async fn test_filter_deps_outside_range() {
         let cache = MemoryCache::new();
         cache.insert(
             "test:serde".to_string(),
@@ -1073,7 +1071,7 @@ mod tests {
                 latest: Some("2.0.0".to_string()),
                 ..Default::default()
             },
-        );
+        ).await;
 
         let deps = vec![create_test_dependency("serde", "1.0.0", 50)];
         let uri = Url::parse("file:///test/Cargo.toml").unwrap();
@@ -1098,13 +1096,13 @@ mod tests {
             &[],
             None,
             None,
-        );
+        ).await;
 
         assert_eq!(actions.len(), 0);
     }
 
-    #[test]
-    fn test_no_action_when_cache_empty() {
+    #[tokio::test]
+    async fn test_no_action_when_cache_empty() {
         let cache = MemoryCache::new();
 
         let deps = vec![create_test_dependency("serde", "1.0.0", 5)];
@@ -1130,13 +1128,13 @@ mod tests {
             &[],
             None,
             None,
-        );
+        ).await;
 
         assert_eq!(actions.len(), 0);
     }
 
-    #[test]
-    fn test_update_action_skipped_for_ignored_package() {
+    #[tokio::test]
+    async fn test_update_action_skipped_for_ignored_package() {
         let cache = MemoryCache::new();
         cache.insert(
             "test:lodash".to_string(),
@@ -1144,7 +1142,7 @@ mod tests {
                 latest: Some("2.0.0".to_string()),
                 ..Default::default()
             },
-        );
+        ).await;
         let deps = vec![create_test_dependency("lodash", "1.0.0", 5)];
         let uri = Url::parse("file:///test/Cargo.toml").unwrap();
         let range = Range {
@@ -1169,7 +1167,7 @@ mod tests {
             &ignored,
             None,
             None,
-        );
+        ).await;
 
         assert!(
             actions.is_empty(),
@@ -1177,8 +1175,8 @@ mod tests {
         );
     }
 
-    #[test]
-    fn test_update_action_emitted_when_not_ignored() {
+    #[tokio::test]
+    async fn test_update_action_emitted_when_not_ignored() {
         let cache = MemoryCache::new();
         cache.insert(
             "test:react".to_string(),
@@ -1186,7 +1184,7 @@ mod tests {
                 latest: Some("18.0.0".to_string()),
                 ..Default::default()
             },
-        );
+        ).await;
         let deps = vec![create_test_dependency("react", "17.0.0", 5)];
         let uri = Url::parse("file:///test/Cargo.toml").unwrap();
         let range = Range {
@@ -1211,7 +1209,7 @@ mod tests {
             &ignored,
             None,
             None,
-        );
+        ).await;
 
         assert!(
             !actions.is_empty(),
@@ -1219,8 +1217,8 @@ mod tests {
         );
     }
 
-    #[test]
-    fn test_ignore_action_emitted_when_workspace_root_provided() {
+    #[tokio::test]
+    async fn test_ignore_action_emitted_when_workspace_root_provided() {
         let cache = MemoryCache::new();
         cache.insert(
             "test:lodash".to_string(),
@@ -1228,7 +1226,7 @@ mod tests {
                 latest: Some("2.0.0".to_string()),
                 ..Default::default()
             },
-        );
+        ).await;
         let deps = vec![create_test_dependency("lodash", "1.0.0", 5)];
         let uri = Url::parse("file:///test/Cargo.toml").unwrap();
         let range = Range {
@@ -1253,7 +1251,7 @@ mod tests {
             &[],
             Some(&workspace),
             None,
-        );
+        ).await;
 
         // Expect at least 2 actions: Update + Ignore
         assert!(
@@ -1273,8 +1271,8 @@ mod tests {
         assert!(titles.iter().any(|t| t.contains("\"lodash\"")));
     }
 
-    #[test]
-    fn test_ignore_action_skipped_when_no_workspace_root() {
+    #[tokio::test]
+    async fn test_ignore_action_skipped_when_no_workspace_root() {
         let cache = MemoryCache::new();
         cache.insert(
             "test:lodash".to_string(),
@@ -1282,7 +1280,7 @@ mod tests {
                 latest: Some("2.0.0".to_string()),
                 ..Default::default()
             },
-        );
+        ).await;
         let deps = vec![create_test_dependency("lodash", "1.0.0", 5)];
         let uri = Url::parse("file:///test/Cargo.toml").unwrap();
         let range = Range {
@@ -1306,7 +1304,7 @@ mod tests {
             &[],
             None,
             None,
-        );
+        ).await;
 
         let titles: Vec<String> = actions
             .iter()
@@ -1321,8 +1319,8 @@ mod tests {
         );
     }
 
-    #[test]
-    fn test_ignore_action_emitted_even_when_up_to_date() {
+    #[tokio::test]
+    async fn test_ignore_action_emitted_even_when_up_to_date() {
         let cache = MemoryCache::new();
         cache.insert(
             "test:lodash".to_string(),
@@ -1330,7 +1328,7 @@ mod tests {
                 latest: Some("1.0.0".to_string()), // up-to-date
                 ..Default::default()
             },
-        );
+        ).await;
         let deps = vec![create_test_dependency("lodash", "1.0.0", 5)];
         let uri = Url::parse("file:///test/Cargo.toml").unwrap();
         let range = Range {
@@ -1355,7 +1353,7 @@ mod tests {
             &[],
             Some(&workspace),
             None,
-        );
+        ).await;
 
         let titles: Vec<String> = actions
             .iter()
@@ -1370,8 +1368,8 @@ mod tests {
         );
     }
 
-    #[test]
-    fn test_property_reference_gets_ignore_action_but_not_update() {
+    #[tokio::test]
+    async fn test_property_reference_gets_ignore_action_but_not_update() {
         let cache = MemoryCache::new();
         cache.insert(
             "test:my-pkg".to_string(),
@@ -1379,7 +1377,7 @@ mod tests {
                 latest: Some("2.0.0".to_string()),
                 ..Default::default()
             },
-        );
+        ).await;
         // Create a dep whose version is a Maven-style property reference.
         let dep = create_test_dependency("my-pkg", "${my.version}", 5);
         let deps = vec![dep];
@@ -1406,7 +1404,7 @@ mod tests {
             &[],
             Some(&workspace),
             None,
-        );
+        ).await;
 
         let titles: Vec<String> = actions
             .iter()
@@ -1427,8 +1425,8 @@ mod tests {
         );
     }
 
-    #[test]
-    fn test_ignore_action_kind_and_preference() {
+    #[tokio::test]
+    async fn test_ignore_action_kind_and_preference() {
         let cache = MemoryCache::new();
         cache.insert(
             "test:lodash".to_string(),
@@ -1436,7 +1434,7 @@ mod tests {
                 latest: Some("1.0.0".to_string()),
                 ..Default::default()
             },
-        );
+        ).await;
         let deps = vec![create_test_dependency("lodash", "1.0.0", 5)];
         let uri = Url::parse("file:///test/Cargo.toml").unwrap();
         let range = Range {
@@ -1461,7 +1459,7 @@ mod tests {
             &[],
             Some(&workspace),
             None,
-        );
+        ).await;
 
         let ignore = actions
             .iter()
