@@ -537,4 +537,140 @@ mod tests {
         assert!(timer_ok.is_ok(), "tokio runtime appears blocked while SQLite read in flight");
         assert!(read_task.await.unwrap().is_some(), "expected cache hit on key 'k'");
     }
+
+    #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+    async fn test_concurrent_reads_async() {
+        let cache = Arc::new(SqliteCache::in_memory().unwrap());
+
+        for i in 0..20 {
+            let mut info = create_test_version_info();
+            info.latest = Some(format!("{i}.0.0"));
+            cache.insert(format!("pkg{i}"), info).await;
+        }
+
+        let mut handles = Vec::new();
+        for thread_id in 0..10 {
+            let cache = Arc::clone(&cache);
+            handles.push(tokio::spawn(async move {
+                for i in 0..20 {
+                    let key = format!("pkg{i}");
+                    let result = cache.get(&key).await;
+                    assert!(result.is_some(), "Task {thread_id} failed to read {key}");
+                }
+            }));
+        }
+
+        for h in handles {
+            h.await.expect("task panicked");
+        }
+    }
+
+    #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+    async fn test_concurrent_writes_async() {
+        let cache = Arc::new(SqliteCache::in_memory().unwrap());
+
+        let mut handles = Vec::new();
+        for thread_id in 0..5 {
+            let cache = Arc::clone(&cache);
+            handles.push(tokio::spawn(async move {
+                for i in 0..10 {
+                    let key = format!("thread{thread_id}:pkg{i}");
+                    let mut info = create_test_version_info();
+                    info.latest = Some(format!("{thread_id}.{i}.0"));
+                    cache.insert(key, info).await;
+                }
+            }));
+        }
+
+        for h in handles {
+            h.await.expect("task panicked");
+        }
+
+        for thread_id in 0..5 {
+            for i in 0..10 {
+                let key = format!("thread{thread_id}:pkg{i}");
+                let result = cache.get(&key).await;
+                assert!(result.is_some(), "Missing key: {key}");
+            }
+        }
+    }
+
+    #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+    async fn test_concurrent_mixed_async() {
+        let cache = Arc::new(SqliteCache::in_memory().unwrap());
+
+        for i in 0..50 {
+            let mut info = create_test_version_info();
+            info.latest = Some(format!("{i}.0.0"));
+            cache.insert(format!("pkg{i}"), info).await;
+        }
+
+        let mut handles = Vec::new();
+        for thread_id in 0..10 {
+            let cache = Arc::clone(&cache);
+            handles.push(tokio::spawn(async move {
+                for i in 0..50 {
+                    match thread_id % 3 {
+                        0 => {
+                            let _ = cache.get(&format!("pkg{i}")).await;
+                        }
+                        1 => {
+                            let mut info = create_test_version_info();
+                            info.latest = Some(format!("updated-{thread_id}-{i}"));
+                            cache.insert(format!("pkg{i}"), info).await;
+                        }
+                        _ => {
+                            let mut info = create_test_version_info();
+                            info.latest = Some(format!("new-{thread_id}-{i}"));
+                            cache.insert(format!("new-pkg-{thread_id}-{i}"), info).await;
+                        }
+                    }
+                }
+            }));
+        }
+
+        for h in handles {
+            h.await.expect("task panicked");
+        }
+    }
+
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn test_dropped_future_does_not_corrupt_cache() {
+        use std::time::Duration;
+
+        let cache = Arc::new(SqliteCache::in_memory().unwrap());
+
+        {
+            let cache = Arc::clone(&cache);
+            let info = create_test_version_info();
+            let fut = cache.insert("dropme".to_string(), info);
+            // Drop the future before awaiting. spawn_blocking task may still complete
+            // because the closure was already submitted.
+            drop(fut);
+        }
+
+        // Allow any in-flight blocking task to settle.
+        tokio::time::sleep(Duration::from_millis(50)).await;
+
+        // Cache must remain consistent (key may or may not be present, but no panic).
+        let _ = cache.get("dropme").await;
+
+        // A subsequent insert + get must work normally.
+        cache.insert("k".to_string(), create_test_version_info()).await;
+        assert!(cache.get("k").await.is_some());
+    }
+
+    #[tokio::test]
+    async fn test_spawn_blocking_panic_yields_join_error() {
+        // Documents the pattern used by SqliteCache: a panic inside the closure
+        // surfaces as JoinError, which is downgraded to None via .ok().flatten().
+        let result: Option<i32> = tokio::task::spawn_blocking(|| -> Option<i32> {
+            panic!("simulated rusqlite failure");
+        })
+        .await
+        .ok()
+        .flatten();
+
+        assert!(result.is_none(), "panic must downgrade to None via fail-soft pattern");
+    }
 }
