@@ -371,12 +371,12 @@ mod tests {
         }
     }
 
-    #[test]
-    fn test_memory_cache_cleanup_expired() {
+    #[tokio::test]
+    async fn test_memory_cache_cleanup_expired() {
         let cache = MemoryCache::with_ttl(Duration::from_millis(10));
 
-        cache.insert("key1".to_string(), create_test_version_info());
-        cache.insert("key2".to_string(), create_test_version_info());
+        cache.insert("key1".to_string(), create_test_version_info()).await;
+        cache.insert("key2".to_string(), create_test_version_info()).await;
 
         assert_eq!(cache.len(), 2);
 
@@ -388,17 +388,17 @@ mod tests {
         assert_eq!(cache.len(), 0);
     }
 
-    #[test]
-    fn test_memory_cache_cleanup_partial() {
+    #[tokio::test]
+    async fn test_memory_cache_cleanup_partial() {
         let cache = MemoryCache::with_ttl(Duration::from_millis(200));
 
-        cache.insert("key1".to_string(), create_test_version_info());
+        cache.insert("key1".to_string(), create_test_version_info()).await;
 
         // Wait for first entry to almost expire
         std::thread::sleep(Duration::from_millis(150));
 
         // Insert second entry
-        cache.insert("key2".to_string(), create_test_version_info());
+        cache.insert("key2".to_string(), create_test_version_info()).await;
 
         // Wait for first to expire but not second
         std::thread::sleep(Duration::from_millis(100));
@@ -406,15 +406,15 @@ mod tests {
         let removed = cache.cleanup_expired();
         assert_eq!(removed, 1);
         assert_eq!(cache.len(), 1);
-        assert!(cache.get("key2").is_some());
+        assert!(cache.get("key2").await.is_some());
     }
 
-    #[test]
-    fn test_memory_cache_stats() {
+    #[tokio::test]
+    async fn test_memory_cache_stats() {
         let cache = MemoryCache::with_ttl(Duration::from_millis(100));
 
-        cache.insert("key1".to_string(), create_test_version_info());
-        cache.insert("key2".to_string(), create_test_version_info());
+        cache.insert("key1".to_string(), create_test_version_info()).await;
+        cache.insert("key2".to_string(), create_test_version_info()).await;
 
         let stats = cache.stats();
         assert_eq!(stats.total_entries, 2);
@@ -443,46 +443,56 @@ mod tests {
         assert!(display.contains("valid: 7"));
     }
 
-    #[test]
-    fn test_memory_cache_is_empty() {
+    #[tokio::test]
+    async fn test_memory_cache_is_empty() {
         let cache = MemoryCache::with_ttl(Duration::from_secs(60));
         assert!(cache.is_empty());
-        cache.insert("key".to_string(), create_test_version_info());
+        cache.insert("key".to_string(), create_test_version_info()).await;
         assert!(!cache.is_empty());
     }
 
-    #[test]
-    fn test_read_cache_contains() {
-        let cache = MemoryCache::new();
-        let cache_ref: &dyn ReadCache = &cache;
+    #[tokio::test]
+    async fn test_read_cache_contains() {
+        async fn assert_contains_via_trait<C: ReadCache>(cache: &C, key: &str) -> bool {
+            cache.contains(key).await
+        }
 
-        assert!(!cache_ref.contains("key"));
-        cache.insert("key".to_string(), create_test_version_info());
-        assert!(cache_ref.contains("key"));
+        let cache = MemoryCache::new();
+        assert!(!assert_contains_via_trait(&cache, "key").await);
+
+        cache.insert("key".to_string(), create_test_version_info()).await;
+        assert!(assert_contains_via_trait(&cache, "key").await);
     }
 
-    #[test]
-    fn test_write_cache_remove() {
+    #[tokio::test]
+    async fn test_write_cache_remove() {
+        async fn insert_via_trait<C: WriteCache>(cache: &C, key: String, v: VersionInfo) {
+            cache.insert(key, v).await;
+        }
+        async fn remove_via_trait<C: WriteCache>(cache: &C, key: &str) {
+            cache.remove(key).await;
+        }
+
         let cache = MemoryCache::new();
-        let cache_ref: &dyn WriteCache = &cache;
+        insert_via_trait(&cache, "key".to_string(), create_test_version_info()).await;
+        assert!(cache.get("key").await.is_some());
 
-        cache_ref.insert("key".to_string(), create_test_version_info());
-        assert!(cache.get("key").is_some());
-
-        cache_ref.remove("key");
-        assert!(cache.get("key").is_none());
+        remove_via_trait(&cache, "key").await;
+        assert!(cache.get("key").await.is_none());
     }
 
-    #[test]
-    fn test_write_cache_clear() {
-        let cache = MemoryCache::new();
-        let cache_ref: &dyn WriteCache = &cache;
+    #[tokio::test]
+    async fn test_write_cache_clear() {
+        async fn clear_via_trait<C: WriteCache>(cache: &C) {
+            cache.clear().await;
+        }
 
-        cache_ref.insert("key1".to_string(), create_test_version_info());
-        cache_ref.insert("key2".to_string(), create_test_version_info());
+        let cache = MemoryCache::new();
+        cache.insert("key1".to_string(), create_test_version_info()).await;
+        cache.insert("key2".to_string(), create_test_version_info()).await;
         assert_eq!(cache.len(), 2);
 
-        cache_ref.clear();
+        clear_via_trait(&cache).await;
         assert!(cache.is_empty());
     }
 }
