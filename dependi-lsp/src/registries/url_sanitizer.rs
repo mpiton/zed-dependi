@@ -125,4 +125,19 @@ mod tests {
     fn rejects_mailto() {
         assert_eq!(sanitize_repo_url("mailto:foo@bar.com"), None);
     }
+
+    #[test]
+    fn rejects_empty_string() {
+        assert_eq!(sanitize_repo_url(""), None);
+    }
+
+    #[test]
+    fn rejects_whitespace_only() {
+        assert_eq!(sanitize_repo_url("   "), None);
+    }
+
+    #[test]
+    fn rejects_garbage() {
+        assert_eq!(sanitize_repo_url("not a url"), None);
+    }
 }
