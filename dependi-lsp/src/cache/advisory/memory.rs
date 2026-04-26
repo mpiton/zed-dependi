@@ -156,4 +156,23 @@ mod tests {
         assert!(cache.get("RUSTSEC-2020-0036").await.is_none());
         assert!(cache.get("RUSTSEC-9999-0001").await.is_none());
     }
+
+    #[tokio::test]
+    async fn expired_entry_is_treated_as_missing() {
+        let cache = MemoryAdvisoryCache::with_ttl(Duration::from_millis(5));
+        cache.insert(sample_found()).await;
+        tokio::time::sleep(Duration::from_millis(15)).await;
+        assert!(cache.get("RUSTSEC-2020-0036").await.is_none());
+    }
+
+    #[tokio::test]
+    async fn fresh_entry_is_returned_before_expiry() {
+        let cache = MemoryAdvisoryCache::with_ttl(Duration::from_millis(200));
+        cache.insert(sample_found()).await;
+        let value = cache.get("RUSTSEC-2020-0036").await;
+        assert!(matches!(value, Some(c) if c.kind == AdvisoryKind::Found {
+            summary: Some("unmaintained".to_string()),
+            unmaintained: true,
+        }));
+    }
 }
