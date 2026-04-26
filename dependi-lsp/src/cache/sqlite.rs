@@ -91,7 +91,16 @@ impl SqliteCache {
         };
 
         cache.init_schema()?;
-        cache.cleanup_expired()?;
+        // cleanup_expired is async; perform the initial cleanup synchronously
+        // here since we are still in a sync constructor (no tokio executor yet).
+        {
+            let conn = cache.pool.get()?;
+            let now = current_timestamp();
+            let _ = conn.execute(
+                "DELETE FROM packages WHERE inserted_at + ttl_secs < ?",
+                [now],
+            );
+        }
 
         let state = cache.pool_state();
         tracing::debug!(
@@ -188,116 +197,164 @@ impl SqliteCache {
 }
 
 impl ReadCache for SqliteCache {
-    fn get(&self, key: &str) -> Option<VersionInfo> {
-        let conn = self.get_conn()?;
-        let now = current_timestamp();
-
-        let result: Result<(String, i64, i64), _> = conn.query_row(
-            "SELECT data, inserted_at, ttl_secs FROM packages WHERE key = ?",
-            [key],
-            |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
-        );
-
-        match result {
-            Ok((data, inserted_at, ttl_secs)) => {
-                if now > inserted_at + ttl_secs {
-                    let _ = conn.execute("DELETE FROM packages WHERE key = ?", [key]);
-                    None
-                } else {
-                    serde_json::from_str(&data).ok()
+    async fn get(&self, key: &str) -> Option<VersionInfo> {
+        let pool = Arc::clone(&self.pool);
+        let key = key.to_string();
+        // spawn_blocking offloads the blocking rusqlite work to the dedicated
+        // blocking thread pool, keeping the tokio event loop responsive.
+        // Note: spawn_blocking tasks are not cancelable; if the future is
+        // dropped, the closure still runs to completion. Acceptable here:
+        // DB ops are short and worst-case is a stale entry being deleted.
+        tokio::task::spawn_blocking(move || {
+            let conn = pool.get().ok()?;
+            let now = current_timestamp();
+            let result: Result<(String, i64, i64), _> = conn.query_row(
+                "SELECT data, inserted_at, ttl_secs FROM packages WHERE key = ?",
+                [key.as_str()],
+                |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
+            );
+            match result {
+                Ok((data, inserted_at, ttl_secs)) => {
+                    if now > inserted_at + ttl_secs {
+                        let _ = conn.execute(
+                            "DELETE FROM packages WHERE key = ?",
+                            [key.as_str()],
+                        );
+                        None
+                    } else {
+                        serde_json::from_str(&data).ok()
+                    }
                 }
+                Err(_) => None,
             }
-            Err(_) => None,
-        }
+        })
+        .await
+        .ok()
+        .flatten()
     }
 }
 
 impl WriteCache for SqliteCache {
-    fn insert(&self, key: String, value: VersionInfo) {
-        let Some(conn) = self.get_conn() else {
-            return;
-        };
-        let now = current_timestamp();
-        let data = match serde_json::to_string(&value) {
-            Ok(d) => d,
-            Err(_) => return,
-        };
-
-        let _ = conn.execute(
-            "INSERT OR REPLACE INTO packages (key, data, inserted_at, ttl_secs) VALUES (?, ?, ?, ?)",
-            params![key, data, now, self.ttl_secs],
-        );
+    async fn insert(&self, key: String, value: VersionInfo) {
+        let pool = Arc::clone(&self.pool);
+        let ttl_secs = self.ttl_secs;
+        let _ = tokio::task::spawn_blocking(move || {
+            let Some(conn) = pool.get().ok() else {
+                return;
+            };
+            let now = current_timestamp();
+            let data = match serde_json::to_string(&value) {
+                Ok(d) => d,
+                Err(_) => return,
+            };
+            let _ = conn.execute(
+                "INSERT OR REPLACE INTO packages (key, data, inserted_at, ttl_secs) VALUES (?, ?, ?, ?)",
+                params![key, data, now, ttl_secs],
+            );
+        })
+        .await;
     }
 
-    fn remove(&self, key: &str) {
-        let Some(conn) = self.get_conn() else {
-            return;
-        };
-        let _ = conn.execute("DELETE FROM packages WHERE key = ?", [key]);
+    async fn remove(&self, key: &str) {
+        let pool = Arc::clone(&self.pool);
+        let key = key.to_string();
+        let _ = tokio::task::spawn_blocking(move || {
+            let Some(conn) = pool.get().ok() else {
+                return;
+            };
+            let _ = conn.execute("DELETE FROM packages WHERE key = ?", [key.as_str()]);
+        })
+        .await;
     }
 
-    fn clear(&self) {
-        let Some(conn) = self.get_conn() else {
-            return;
-        };
-        let _ = conn.execute("DELETE FROM packages", []);
+    async fn clear(&self) {
+        let pool = Arc::clone(&self.pool);
+        let _ = tokio::task::spawn_blocking(move || {
+            let Some(conn) = pool.get().ok() else {
+                return;
+            };
+            let _ = conn.execute("DELETE FROM packages", []);
+        })
+        .await;
     }
 }
 
 impl SqliteCache {
     /// Insert multiple values in a single transaction
     #[cfg(test)]
-    pub fn insert_batch(&self, entries: Vec<(String, VersionInfo)>) -> anyhow::Result<usize> {
+    pub async fn insert_batch(&self, entries: Vec<(String, VersionInfo)>) -> anyhow::Result<usize> {
         if entries.is_empty() {
             return Ok(0);
         }
 
-        let mut conn = self.pool.get()?;
-        let tx = conn.transaction()?;
-        let now = current_timestamp();
-        let mut count = 0;
+        let pool = Arc::clone(&self.pool);
+        let ttl_secs = self.ttl_secs;
+        tokio::task::spawn_blocking(move || -> anyhow::Result<usize> {
+            let mut conn = pool.get()?;
+            let tx = conn.transaction()?;
+            let now = current_timestamp();
+            let mut count = 0;
 
-        for (key, value) in entries {
-            let data = serde_json::to_string(&value)?;
-            tx.execute(
-                "INSERT OR REPLACE INTO packages (key, data, inserted_at, ttl_secs) VALUES (?, ?, ?, ?)",
-                params![key, data, now, self.ttl_secs],
-            )?;
-            count += 1;
-        }
+            for (key, value) in entries {
+                let data = serde_json::to_string(&value)?;
+                tx.execute(
+                    "INSERT OR REPLACE INTO packages (key, data, inserted_at, ttl_secs) VALUES (?, ?, ?, ?)",
+                    params![key, data, now, ttl_secs],
+                )?;
+                count += 1;
+            }
 
-        tx.commit()?;
-        Ok(count)
+            tx.commit()?;
+            Ok(count)
+        })
+        .await
+        .map_err(|e| anyhow::anyhow!("spawn_blocking join error: {e}"))?
     }
 
     /// Remove a value from the cache, returning whether it existed
     #[cfg(test)]
-    pub fn remove_with_result(&self, key: &str) -> bool {
-        let Some(conn) = self.get_conn() else {
-            return false;
-        };
-        conn.execute("DELETE FROM packages WHERE key = ?", [key])
-            .map(|rows| rows > 0)
-            .unwrap_or(false)
+    pub async fn remove_with_result(&self, key: &str) -> bool {
+        let pool = Arc::clone(&self.pool);
+        let key = key.to_string();
+        tokio::task::spawn_blocking(move || -> bool {
+            let Some(conn) = pool.get().ok() else {
+                return false;
+            };
+            conn.execute("DELETE FROM packages WHERE key = ?", [key.as_str()])
+                .map(|rows| rows > 0)
+                .unwrap_or(false)
+        })
+        .await
+        .unwrap_or(false)
     }
 
     /// Clear all entries from the cache, returning the count
     #[cfg(test)]
-    pub fn clear_with_count(&self) -> anyhow::Result<usize> {
-        let conn = self.pool.get()?;
-        let rows = conn.execute("DELETE FROM packages", [])?;
-        Ok(rows)
+    pub async fn clear_with_count(&self) -> anyhow::Result<usize> {
+        let pool = Arc::clone(&self.pool);
+        tokio::task::spawn_blocking(move || -> anyhow::Result<usize> {
+            let conn = pool.get()?;
+            let rows = conn.execute("DELETE FROM packages", [])?;
+            Ok(rows)
+        })
+        .await
+        .map_err(|e| anyhow::anyhow!("spawn_blocking join error: {e}"))?
     }
 
     /// Remove expired entries from the cache
-    pub fn cleanup_expired(&self) -> anyhow::Result<usize> {
-        let conn = self.pool.get()?;
-        let now = current_timestamp();
-        let rows = conn.execute(
-            "DELETE FROM packages WHERE inserted_at + ttl_secs < ?",
-            [now],
-        )?;
-        Ok(rows)
+    pub async fn cleanup_expired(&self) -> anyhow::Result<usize> {
+        let pool = Arc::clone(&self.pool);
+        tokio::task::spawn_blocking(move || -> anyhow::Result<usize> {
+            let conn = pool.get()?;
+            let now = current_timestamp();
+            let rows = conn.execute(
+                "DELETE FROM packages WHERE inserted_at + ttl_secs < ?",
+                [now],
+            )?;
+            Ok(rows)
+        })
+        .await
+        .map_err(|e| anyhow::anyhow!("spawn_blocking join error: {e}"))?
     }
 
     /// Get pool statistics for monitoring
