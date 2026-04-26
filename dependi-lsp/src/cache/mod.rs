@@ -29,15 +29,19 @@ pub use sqlite::SqliteCache;
 /// This trait defines the minimal interface for reading cached values.
 /// Implementations can provide additional write operations via the
 /// [`WriteCache`] trait.
+///
+/// Note: `async_fn_in_trait` is allowed because this trait is internal and
+/// already bounds `Send + Sync`. Pattern matches `crate::registries::Registry`.
+#[allow(async_fn_in_trait)]
 pub trait ReadCache: Send + Sync {
-    /// Get a value from the cache
+    /// Get a value from the cache.
     ///
     /// Returns `None` if the key doesn't exist or the entry is expired.
-    fn get(&self, key: &str) -> Option<VersionInfo>;
+    async fn get(&self, key: &str) -> Option<VersionInfo>;
 
-    /// Check if a key exists in the cache (without fetching the value)
-    fn contains(&self, key: &str) -> bool {
-        self.get(key).is_some()
+    /// Check if a key exists in the cache (without fetching the value).
+    async fn contains(&self, key: &str) -> bool {
+        self.get(key).await.is_some()
     }
 }
 
@@ -46,40 +50,41 @@ pub trait ReadCache: Send + Sync {
 /// This trait extends [`ReadCache`] with the ability to insert and update
 /// cache entries. Caches that support both read and write operations should
 /// implement this trait.
+#[allow(async_fn_in_trait)]
 pub trait WriteCache: ReadCache {
-    /// Insert a value into the cache
+    /// Insert a value into the cache.
     ///
     /// If a value with the same key already exists, it will be overwritten.
-    fn insert(&self, key: String, value: VersionInfo);
+    async fn insert(&self, key: String, value: VersionInfo);
 
-    /// Remove a value from the cache
-    fn remove(&self, key: &str);
+    /// Remove a value from the cache.
+    async fn remove(&self, key: &str);
 
-    /// Clear all entries from the cache
-    fn clear(&self);
+    /// Clear all entries from the cache.
+    async fn clear(&self);
 }
 
 impl<T: ReadCache> ReadCache for Arc<T> {
-    fn get(&self, key: &str) -> Option<VersionInfo> {
-        (**self).get(key)
+    async fn get(&self, key: &str) -> Option<VersionInfo> {
+        (**self).get(key).await
     }
 
-    fn contains(&self, key: &str) -> bool {
-        (**self).contains(key)
+    async fn contains(&self, key: &str) -> bool {
+        (**self).contains(key).await
     }
 }
 
 impl<T: WriteCache> WriteCache for Arc<T> {
-    fn insert(&self, key: String, value: VersionInfo) {
-        (**self).insert(key, value)
+    async fn insert(&self, key: String, value: VersionInfo) {
+        (**self).insert(key, value).await
     }
 
-    fn remove(&self, key: &str) {
-        (**self).remove(key)
+    async fn remove(&self, key: &str) {
+        (**self).remove(key).await
     }
 
-    fn clear(&self) {
-        (**self).clear()
+    async fn clear(&self) {
+        (**self).clear().await
     }
 }
 
