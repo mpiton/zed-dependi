@@ -50,6 +50,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- Cache traits (`ReadCache`, `WriteCache`) are now async (AFIT). The SQLite cache offloads blocking `rusqlite` work to `tokio::task::spawn_blocking`, keeping the LSP event loop responsive under load. Reduces tail latency on operations that hit the persistent cache. (#235)
 - Bump `hashbrown` from 0.16.1 to 0.17.0 (purely additive release, hashbrown MSRV 1.85 ≤ project MSRV 1.94)
 - Bump `tokio` constraint from 1.50 to 1.52 in `dependi-lsp/Cargo.toml` (lockfile resolves 1.52.1; patch + minor, backwards compatible)
 - Bump `actions/github-script` from v8 to v9 in `contributor-experience.yml` workflow (Octokit v7; inline scripts unaffected — no `require()` or `getOctokit` shadowing)
