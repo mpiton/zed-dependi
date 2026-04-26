@@ -140,4 +140,44 @@ mod tests {
     fn rejects_garbage() {
         assert_eq!(sanitize_repo_url("not a url"), None);
     }
+
+    #[test]
+    fn strips_dot_git_suffix() {
+        assert_eq!(
+            sanitize_repo_url("https://github.com/user/repo.git"),
+            Some("https://github.com/user/repo".to_string())
+        );
+    }
+
+    #[test]
+    fn preserves_path_without_dot_git() {
+        assert_eq!(
+            sanitize_repo_url("https://gitlab.com/user/repo/subgroup"),
+            Some("https://gitlab.com/user/repo/subgroup".to_string())
+        );
+    }
+
+    #[test]
+    fn preserves_query_and_fragment() {
+        assert_eq!(
+            sanitize_repo_url("https://example.com/r?ref=v1#section"),
+            Some("https://example.com/r?ref=v1#section".to_string())
+        );
+    }
+
+    #[test]
+    fn case_insensitive_scheme() {
+        assert_eq!(
+            sanitize_repo_url("HTTPS://github.com/user/repo"),
+            Some("https://github.com/user/repo".to_string())
+        );
+    }
+
+    #[test]
+    fn trims_surrounding_whitespace() {
+        assert_eq!(
+            sanitize_repo_url("  https://example.com/r  "),
+            Some("https://example.com/r".to_string())
+        );
+    }
 }
