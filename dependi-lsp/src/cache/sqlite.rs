@@ -96,10 +96,10 @@ impl SqliteCache {
         {
             let conn = cache.pool.get()?;
             let now = current_timestamp();
-            let _ = conn.execute(
+            conn.execute(
                 "DELETE FROM packages WHERE inserted_at + ttl_secs < ?",
                 [now],
-            );
+            )?;
         }
 
         let state = cache.pool_state();
@@ -649,8 +649,10 @@ mod tests {
             let cache = Arc::clone(&cache);
             let info = create_test_version_info();
             let fut = cache.insert("dropme".to_string(), info);
-            // Drop the future before awaiting. spawn_blocking task may still complete
-            // because the closure was already submitted.
+            // Drop the future without ever polling it. Because spawn_blocking is only
+            // called when the future is first polled, no blocking task is submitted in
+            // this scenario. This test verifies that a never-started insert leaves the
+            // cache in a clean state and that subsequent operations work normally.
             drop(fut);
         }
 

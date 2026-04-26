@@ -1,5 +1,6 @@
 //! Code actions provider for updating dependencies
 
+use futures::future::join_all;
 use tower_lsp::lsp_types::*;
 
 use crate::cache::ReadCache;
@@ -269,16 +270,30 @@ async fn create_update_all_action(
     file_type: FileType,
     cache_key_fn: impl Fn(&str) -> String,
 ) -> Option<CodeActionOrCommand> {
-    let mut outdated_deps: Vec<(&Dependency, String)> = Vec::new();
-    for dep in dependencies
+    // Fan out all cache reads concurrently, then process results in order.
+    let filtered: Vec<&Dependency> = dependencies
         .iter()
         .copied()
         .filter(|dep| !is_property_reference(dep))
-    {
-        let cache_key = cache_key_fn(&dep.name);
-        if let Some(version_info) = cache.get(&cache_key).await
-            && let VersionStatus::UpdateAvailable(new_version) =
-                compare_versions(dep.effective_version(), &version_info)
+        .collect();
+
+    let cache_lookups: Vec<_> = filtered
+        .iter()
+        .map(|dep| {
+            let key = cache_key_fn(&dep.name);
+            async move { cache.get(&key).await }
+        })
+        .collect();
+
+    let cache_results = join_all(cache_lookups).await;
+
+    let mut outdated_deps: Vec<(&Dependency, String)> = Vec::new();
+    for (dep, version_info) in filtered.iter().zip(cache_results) {
+        let Some(version_info) = version_info else {
+            continue;
+        };
+        if let VersionStatus::UpdateAvailable(new_version) =
+            compare_versions(dep.effective_version(), &version_info)
         {
             outdated_deps.push((dep, new_version));
         }

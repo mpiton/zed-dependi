@@ -2120,24 +2120,30 @@ impl LanguageServer for DependiBackend {
         let uri = &params.text_document_position.text_document.uri;
         let position = params.text_document_position.position;
 
-        let Some(doc) = self.documents.get(uri) else {
-            return Ok(Some(CompletionResponse::Array(vec![])));
+        // Snapshot everything we need from the document state, then drop the
+        // DashMap guard before any .await — holding a guard across .await can
+        // block other tasks waiting on the same key.
+        let (file_type, dependencies, cache_key_map) = {
+            let Some(doc) = self.documents.get(uri) else {
+                return Ok(Some(CompletionResponse::Array(vec![])));
+            };
+            let file_type = doc.file_type;
+            let dependencies = doc.dependencies.clone();
+            let cache_key_map: HashMap<String, String> = doc
+                .dependencies
+                .iter()
+                .map(|dep| (dep.name.clone(), dep_cache_key(dep, file_type)))
+                .collect();
+            (file_type, dependencies, cache_key_map)
         };
 
-        let file_type = doc.file_type;
-        let cache_key_map: HashMap<String, String> = doc
-            .dependencies
-            .iter()
-            .map(|dep| (dep.name.clone(), dep_cache_key(dep, file_type)))
-            .collect();
-        let completions =
-            get_completions(&doc.dependencies, position, &self.version_cache, |name| {
-                cache_key_map
-                    .get(name)
-                    .cloned()
-                    .unwrap_or_else(|| file_type.cache_key(name))
-            })
-            .await;
+        let completions = get_completions(&dependencies, position, &self.version_cache, |name| {
+            cache_key_map
+                .get(name)
+                .cloned()
+                .unwrap_or_else(|| file_type.cache_key(name))
+        })
+        .await;
 
         match completions {
             Some(items) => Ok(Some(CompletionResponse::Array(items))),
