@@ -6,6 +6,7 @@
 pub mod memory;
 pub mod sqlite;
 
+use std::sync::Arc;
 use std::time::SystemTime;
 
 use serde::{Deserialize, Serialize};
@@ -28,6 +29,57 @@ pub struct CachedAdvisory {
     pub id: String,
     pub kind: AdvisoryKind,
     pub fetched_at: SystemTime,
+}
+
+/// Read-only access to the advisory cache.
+///
+/// Mirrors [`crate::cache::ReadCache`] but specialised for advisory entries.
+#[allow(async_fn_in_trait)]
+pub trait AdvisoryReadCache: Send + Sync {
+    /// Fetch a cached advisory. Returns `None` on miss or expiry.
+    async fn get(&self, advisory_id: &str) -> Option<CachedAdvisory>;
+
+    /// Convenience wrapper around `get` for existence checks.
+    async fn contains(&self, advisory_id: &str) -> bool {
+        self.get(advisory_id).await.is_some()
+    }
+}
+
+/// Write access to the advisory cache.
+#[allow(async_fn_in_trait)]
+pub trait AdvisoryWriteCache: AdvisoryReadCache {
+    /// Insert (or replace) an advisory entry.
+    async fn insert(&self, advisory: CachedAdvisory);
+
+    /// Remove a single advisory entry.
+    async fn remove(&self, advisory_id: &str);
+
+    /// Remove every entry from the cache.
+    async fn clear(&self);
+}
+
+impl<T: AdvisoryReadCache> AdvisoryReadCache for Arc<T> {
+    async fn get(&self, advisory_id: &str) -> Option<CachedAdvisory> {
+        (**self).get(advisory_id).await
+    }
+
+    async fn contains(&self, advisory_id: &str) -> bool {
+        (**self).contains(advisory_id).await
+    }
+}
+
+impl<T: AdvisoryWriteCache> AdvisoryWriteCache for Arc<T> {
+    async fn insert(&self, advisory: CachedAdvisory) {
+        (**self).insert(advisory).await
+    }
+
+    async fn remove(&self, advisory_id: &str) {
+        (**self).remove(advisory_id).await
+    }
+
+    async fn clear(&self) {
+        (**self).clear().await
+    }
 }
 
 #[cfg(test)]
@@ -59,5 +111,29 @@ mod tests {
         let json = serde_json::to_string(&advisory).expect("serialize");
         let back: CachedAdvisory = serde_json::from_str(&json).expect("deserialize");
         assert_eq!(advisory, back);
+    }
+
+    #[tokio::test]
+    async fn arc_blanket_impl_forwards_reads() {
+        struct DummyCache {
+            value: Option<CachedAdvisory>,
+        }
+
+        impl AdvisoryReadCache for DummyCache {
+            async fn get(&self, _id: &str) -> Option<CachedAdvisory> {
+                self.value.clone()
+            }
+        }
+
+        let advisory = CachedAdvisory {
+            id: "RUSTSEC-2020-0036".to_string(),
+            kind: AdvisoryKind::NotFound,
+            fetched_at: SystemTime::UNIX_EPOCH,
+        };
+        let cache: Arc<DummyCache> = Arc::new(DummyCache {
+            value: Some(advisory.clone()),
+        });
+        assert_eq!(cache.get("anything").await, Some(advisory.clone()));
+        assert!(cache.contains("anything").await);
     }
 }
