@@ -114,4 +114,46 @@ mod tests {
         let cache = MemoryAdvisoryCache::new();
         assert!(cache.get("RUSTSEC-9999-9999").await.is_none());
     }
+
+    fn sample_not_found(id: &str) -> CachedAdvisory {
+        CachedAdvisory {
+            id: id.to_string(),
+            kind: AdvisoryKind::NotFound,
+            fetched_at: SystemTime::UNIX_EPOCH,
+        }
+    }
+
+    #[tokio::test]
+    async fn second_insert_overwrites_first() {
+        let cache = MemoryAdvisoryCache::new();
+        cache.insert(sample_found()).await;
+        let replacement = CachedAdvisory {
+            id: "RUSTSEC-2020-0036".to_string(),
+            kind: AdvisoryKind::Found {
+                summary: None,
+                unmaintained: false,
+            },
+            fetched_at: SystemTime::UNIX_EPOCH,
+        };
+        cache.insert(replacement.clone()).await;
+        assert_eq!(cache.get(&replacement.id).await, Some(replacement));
+    }
+
+    #[tokio::test]
+    async fn remove_deletes_entry() {
+        let cache = MemoryAdvisoryCache::new();
+        cache.insert(sample_found()).await;
+        cache.remove("RUSTSEC-2020-0036").await;
+        assert!(cache.get("RUSTSEC-2020-0036").await.is_none());
+    }
+
+    #[tokio::test]
+    async fn clear_empties_cache() {
+        let cache = MemoryAdvisoryCache::new();
+        cache.insert(sample_found()).await;
+        cache.insert(sample_not_found("RUSTSEC-9999-0001")).await;
+        cache.clear().await;
+        assert!(cache.get("RUSTSEC-2020-0036").await.is_none());
+        assert!(cache.get("RUSTSEC-9999-0001").await.is_none());
+    }
 }
