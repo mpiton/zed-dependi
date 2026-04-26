@@ -716,6 +716,36 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn http_500_is_not_cached_and_retries() {
+        let server = MockServer::start().await;
+        let counter = Arc::new(AtomicUsize::new(0));
+        {
+            let counter = Arc::clone(&counter);
+            Mock::given(method("GET"))
+                .and(path("/vulns/RUSTSEC-2020-0036"))
+                .respond_with(move |_req: &wiremock::Request| {
+                    counter.fetch_add(1, Ordering::SeqCst);
+                    ResponseTemplate::new(500)
+                })
+                .mount(&server)
+                .await;
+        }
+
+        let cache: Arc<dyn AdvisoryWriteCache> = Arc::new(MemoryAdvisoryCache::new());
+        let client = OsvClient::with_endpoint_and_cache(server.uri(), Arc::clone(&cache));
+
+        let _ = client
+            .check_rustsec_unmaintained(&["RUSTSEC-2020-0036".to_string()])
+            .await;
+        let _ = client
+            .check_rustsec_unmaintained(&["RUSTSEC-2020-0036".to_string()])
+            .await;
+
+        assert_eq!(counter.load(Ordering::SeqCst), 2, "no caching on 5xx");
+        assert!(cache.get("RUSTSEC-2020-0036").await.is_none());
+    }
+
+    #[tokio::test]
     async fn test_rustsec_advisory_lookup_limits_concurrency() {
         const EXPECTED_LIMIT: usize = RUSTSEC_ADVISORY_LOOKUP_CONCURRENCY;
 
