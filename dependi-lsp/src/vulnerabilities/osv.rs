@@ -247,7 +247,7 @@ impl OsvClient {
             .collect()
             .await;
 
-        results.into_iter().any(|is_unmaintained| is_unmaintained)
+        results.into_iter().any(std::convert::identity)
     }
 }
 
@@ -501,7 +501,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_rustsec_advisory_lookup_limits_concurrency() {
-        const EXPECTED_LIMIT: usize = 5;
+        const EXPECTED_LIMIT: usize = RUSTSEC_ADVISORY_LOOKUP_CONCURRENCY;
 
         let active_requests = Arc::new(AtomicUsize::new(0));
         let max_seen = Arc::new(AtomicUsize::new(0));
