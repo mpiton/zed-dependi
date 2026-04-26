@@ -100,6 +100,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   or corrupted inputs (both in CLI and LSP backend).
 - Bump transitive `rand` from 0.9.2 to 0.9.4 via `cargo update` to address [RUSTSEC-2026-0097](https://rustsec.org/advisories/RUSTSEC-2026-0097.html) / [GHSA-cq8v-f236-94qc](https://github.com/rust-random/rand/security/advisories/GHSA-cq8v-f236-94qc) — unsoundness when the `log` and `thread_rng` features are combined with a custom logger that calls `rand::rng()` during a reseed cycle
 - Bump transitive `rustls-webpki` from 0.103.10 to 0.103.12 via `cargo update` to address [RUSTSEC-2026-0098](https://rustsec.org/advisories/RUSTSEC-2026-0098.html) / [GHSA-965h-392x-2mh5](https://github.com/rustls/webpki/security/advisories/GHSA-965h-392x-2mh5) (URI name constraints ignored) and [RUSTSEC-2026-0099](https://rustsec.org/advisories/RUSTSEC-2026-0099.html) / [GHSA-xgp8-3hg3-c2mh](https://github.com/rustls/webpki/security/advisories/GHSA-xgp8-3hg3-c2mh) (wildcard DNS name constraints bypass)
+- Reject non-`http(s)` repository URLs from npm and Packagist package
+  metadata. The previous substring-based `normalize_repo_url` allowed
+  `ssh`, `git+ssh`, `ftp`, `file`, `javascript`, `data`, `mailto`, and
+  other schemes to pass through to the IDE. The new shared
+  `sanitize_repo_url` (backed by the `url` crate) returns `None` for any
+  scheme outside the `{http, https}` allowlist
+  ([#230](https://github.com/mpiton/zed-dependi/issues/230), CWE-20).
 
 ## [1.7.0] - 2026-04-07
 
