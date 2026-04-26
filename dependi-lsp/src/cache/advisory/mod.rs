@@ -285,6 +285,16 @@ mod tests {
         assert!(sqlite.get("RUSTSEC-2021-0001").await.is_none());
     }
 
+    #[tokio::test]
+    async fn hybrid_with_no_sqlite_falls_back_to_memory_only() {
+        let memory = MemoryAdvisoryCache::new();
+        let hybrid = HybridAdvisoryCache::from_parts(memory.clone(), None);
+        let advisory = sample_found("RUSTSEC-2020-0036");
+
+        hybrid.insert(advisory.clone()).await;
+        assert_eq!(hybrid.get(&advisory.id).await, Some(advisory));
+    }
+
     #[test]
     fn cached_advisory_round_trips_through_json() {
         let advisory = CachedAdvisory {
