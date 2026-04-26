@@ -15,7 +15,7 @@ use crate::utils::fmt_truncate_string;
 ///
 /// The `min_severity` parameter filters vulnerabilities to only show those
 /// at or above the specified severity level.
-pub fn create_diagnostics(
+pub async fn create_diagnostics(
     dependencies: &[Dependency],
     cache: &impl ReadCache,
     cache_key_fn: impl Fn(&str) -> String,
@@ -39,12 +39,12 @@ pub fn create_diagnostics(
         }
 
         // Add outdated version diagnostic
-        if let Some(diag) = create_outdated_diagnostic(dep, cache, &cache_key_fn) {
+        if let Some(diag) = create_outdated_diagnostic(dep, cache, &cache_key_fn).await {
             diagnostics.push(diag);
         }
 
         let cache_key = cache_key_fn(&dep.name);
-        if let Some(version_info) = cache.get(&cache_key) {
+        if let Some(version_info) = cache.get(&cache_key).await {
             // Add yanked version diagnostic (highest priority)
             if version_info.is_version_yanked(dep.effective_version()) {
                 tracing::debug!(
@@ -112,13 +112,13 @@ fn meets_severity_threshold(severity: &VulnerabilitySeverity, min: &Vulnerabilit
 }
 
 /// Create a diagnostic for an outdated dependency
-fn create_outdated_diagnostic(
+async fn create_outdated_diagnostic(
     dep: &Dependency,
     cache: &impl ReadCache,
     cache_key_fn: impl Fn(&str) -> String,
 ) -> Option<Diagnostic> {
     let cache_key = cache_key_fn(&dep.name);
-    let version_info = cache.get(&cache_key)?;
+    let version_info = cache.get(&cache_key).await?;
 
     match compare_versions(dep.effective_version(), &version_info) {
         VersionStatus::UpdateAvailable(new_version) => Some(Diagnostic {
@@ -497,8 +497,8 @@ mod tests {
         }
     }
 
-    #[test]
-    fn test_create_diagnostic_outdated() {
+    #[tokio::test]
+    async fn test_create_diagnostic_outdated() {
         let cache = MemoryCache::new();
         cache.insert(
             "test:serde".to_string(),
@@ -506,7 +506,7 @@ mod tests {
                 latest: Some("2.0.0".to_string()),
                 ..Default::default()
             },
-        );
+        ).await;
 
         let deps = vec![create_test_dependency("serde", "1.0.0", 5)];
         let diagnostics = create_diagnostics(
@@ -517,15 +517,15 @@ mod tests {
             FileType::Cargo,
             &hashbrown::HashMap::new(),
             &[],
-        );
+        ).await;
 
         assert_eq!(diagnostics.len(), 1);
         assert!(diagnostics[0].message.contains("2.0.0"));
         assert_eq!(diagnostics[0].severity, Some(DiagnosticSeverity::HINT));
     }
 
-    #[test]
-    fn test_no_diagnostic_up_to_date() {
+    #[tokio::test]
+    async fn test_no_diagnostic_up_to_date() {
         let cache = MemoryCache::new();
         cache.insert(
             "test:serde".to_string(),
@@ -533,7 +533,7 @@ mod tests {
                 latest: Some("1.0.0".to_string()),
                 ..Default::default()
             },
-        );
+        ).await;
 
         let deps = vec![create_test_dependency("serde", "1.0.0", 5)];
         let diagnostics = create_diagnostics(
@@ -544,13 +544,13 @@ mod tests {
             FileType::Cargo,
             &hashbrown::HashMap::new(),
             &[],
-        );
+        ).await;
 
         assert_eq!(diagnostics.len(), 0);
     }
 
-    #[test]
-    fn test_no_diagnostic_no_cache() {
+    #[tokio::test]
+    async fn test_no_diagnostic_no_cache() {
         let cache = MemoryCache::new();
         let deps = vec![create_test_dependency("unknown", "1.0.0", 5)];
         let diagnostics = create_diagnostics(
@@ -561,7 +561,7 @@ mod tests {
             FileType::Cargo,
             &hashbrown::HashMap::new(),
             &[],
-        );
+        ).await;
 
         assert_eq!(diagnostics.len(), 0);
     }
@@ -586,8 +586,8 @@ mod tests {
         ));
     }
 
-    #[test]
-    fn test_deprecated_diagnostic() {
+    #[tokio::test]
+    async fn test_deprecated_diagnostic() {
         let deps = vec![create_test_dependency("old-dep", "1.0.0", 5)];
         let cache = MemoryCache::new();
         cache.insert(
@@ -598,7 +598,7 @@ mod tests {
                 homepage: Some("https://example.com".to_string()),
                 ..Default::default()
             },
-        );
+        ).await;
 
         let diagnostics = create_diagnostics(
             &deps,
@@ -608,7 +608,7 @@ mod tests {
             FileType::Cargo,
             &hashbrown::HashMap::new(),
             &[],
-        );
+        ).await;
 
         let deprecation_diags: Vec<_> = diagnostics
             .iter()
@@ -632,8 +632,8 @@ mod tests {
         assert!(deprecation_diags[0].related_information.is_some());
     }
 
-    #[test]
-    fn test_no_deprecated_diagnostic_for_active() {
+    #[tokio::test]
+    async fn test_no_deprecated_diagnostic_for_active() {
         let deps = vec![create_test_dependency("serde", "1.0.0", 5)];
         let cache = MemoryCache::new();
         cache.insert(
@@ -643,7 +643,7 @@ mod tests {
                 latest: Some("1.0.0".to_string()),
                 ..Default::default()
             },
-        );
+        ).await;
 
         let diagnostics = create_diagnostics(
             &deps,
@@ -653,7 +653,7 @@ mod tests {
             FileType::Cargo,
             &hashbrown::HashMap::new(),
             &[],
-        );
+        ).await;
 
         let deprecation_diags: Vec<_> = diagnostics
             .iter()
@@ -671,8 +671,8 @@ mod tests {
         assert_eq!(deprecation_diags.len(), 0);
     }
 
-    #[test]
-    fn test_deprecated_with_vulnerabilities() {
+    #[tokio::test]
+    async fn test_deprecated_with_vulnerabilities() {
         let deps = vec![create_test_dependency("vuln-dep", "1.0.0", 5)];
         let cache = MemoryCache::new();
         cache.insert(
@@ -687,7 +687,7 @@ mod tests {
                 }],
                 ..Default::default()
             },
-        );
+        ).await;
 
         let diagnostics = create_diagnostics(
             &deps,
@@ -697,7 +697,7 @@ mod tests {
             FileType::Cargo,
             &hashbrown::HashMap::new(),
             &[],
-        );
+        ).await;
 
         let deprecation_diags: Vec<_> = diagnostics
             .iter()
@@ -733,8 +733,8 @@ mod tests {
         );
     }
 
-    #[test]
-    fn test_yanked_diagnostic() {
+    #[tokio::test]
+    async fn test_yanked_diagnostic() {
         let deps = vec![create_test_dependency("serde", "1.0.0", 5)];
         let cache = MemoryCache::new();
         cache.insert(
@@ -744,7 +744,7 @@ mod tests {
                 latest: Some("2.0.0".to_string()),
                 ..Default::default()
             },
-        );
+        ).await;
 
         let diagnostics = create_diagnostics(
             &deps,
@@ -754,7 +754,7 @@ mod tests {
             FileType::Cargo,
             &hashbrown::HashMap::new(),
             &[],
-        );
+        ).await;
 
         let yanked_diags: Vec<_> = diagnostics
             .iter()
@@ -774,8 +774,8 @@ mod tests {
         assert_eq!(yanked_diags[0].severity, Some(DiagnosticSeverity::WARNING));
     }
 
-    #[test]
-    fn test_no_yanked_diagnostic_for_non_yanked() {
+    #[tokio::test]
+    async fn test_no_yanked_diagnostic_for_non_yanked() {
         let deps = vec![create_test_dependency("serde", "1.0.0", 5)];
         let cache = MemoryCache::new();
         cache.insert(
@@ -785,7 +785,7 @@ mod tests {
                 latest: Some("1.0.0".to_string()),
                 ..Default::default()
             },
-        );
+        ).await;
 
         let diagnostics = create_diagnostics(
             &deps,
@@ -795,7 +795,7 @@ mod tests {
             FileType::Cargo,
             &hashbrown::HashMap::new(),
             &[],
-        );
+        ).await;
 
         let yanked_diags: Vec<_> = diagnostics
             .iter()
@@ -813,8 +813,8 @@ mod tests {
         assert_eq!(yanked_diags.len(), 0);
     }
 
-    #[test]
-    fn test_yanked_priority_over_deprecated_diagnostic() {
+    #[tokio::test]
+    async fn test_yanked_priority_over_deprecated_diagnostic() {
         let deps = vec![create_test_dependency("serde", "1.0.0", 5)];
         let cache = MemoryCache::new();
         cache.insert(
@@ -825,7 +825,7 @@ mod tests {
                 latest: Some("2.0.0".to_string()),
                 ..Default::default()
             },
-        );
+        ).await;
 
         let diagnostics = create_diagnostics(
             &deps,
@@ -835,7 +835,7 @@ mod tests {
             FileType::Cargo,
             &hashbrown::HashMap::new(),
             &[],
-        );
+        ).await;
 
         let yanked_diags: Vec<_> = diagnostics
             .iter()
@@ -871,8 +871,8 @@ mod tests {
         );
     }
 
-    #[test]
-    fn test_yanked_priority_over_vulnerabilities_diagnostic() {
+    #[tokio::test]
+    async fn test_yanked_priority_over_vulnerabilities_diagnostic() {
         let deps = vec![create_test_dependency("serde", "1.0.0", 5)];
         let cache = MemoryCache::new();
         cache.insert(
@@ -888,7 +888,7 @@ mod tests {
                 latest: Some("2.0.0".to_string()),
                 ..Default::default()
             },
-        );
+        ).await;
 
         let diagnostics = create_diagnostics(
             &deps,
@@ -898,7 +898,7 @@ mod tests {
             FileType::Cargo,
             &hashbrown::HashMap::new(),
             &[],
-        );
+        ).await;
 
         let yanked_diags: Vec<_> = diagnostics
             .iter()
@@ -934,8 +934,8 @@ mod tests {
         );
     }
 
-    #[test]
-    fn test_local_dependency_diagnostic() {
+    #[tokio::test]
+    async fn test_local_dependency_diagnostic() {
         let deps = vec![create_test_dependency("local-crate", "../local", 5)];
         let cache = MemoryCache::new();
 
@@ -947,15 +947,15 @@ mod tests {
             FileType::Cargo,
             &hashbrown::HashMap::new(),
             &[],
-        );
+        ).await;
 
         assert_eq!(diagnostics.len(), 1);
         assert!(diagnostics[0].message.contains("Local"));
         assert_eq!(diagnostics[0].severity, Some(DiagnosticSeverity::HINT));
     }
 
-    #[test]
-    fn test_vulnerability_summary_diagnostic() {
+    #[tokio::test]
+    async fn test_vulnerability_summary_diagnostic() {
         let deps = vec![create_test_dependency("vuln-dep", "1.0.0", 5)];
         let cache = MemoryCache::new();
         cache.insert(
@@ -978,7 +978,7 @@ mod tests {
                 ],
                 ..Default::default()
             },
-        );
+        ).await;
 
         let diagnostics = create_diagnostics(
             &deps,
@@ -988,7 +988,7 @@ mod tests {
             FileType::Cargo,
             &hashbrown::HashMap::new(),
             &[],
-        );
+        ).await;
 
         let vuln_diags: Vec<_> = diagnostics
             .iter()
@@ -1005,8 +1005,8 @@ mod tests {
         assert!(vuln_diags[0].related_information.is_some());
     }
 
-    #[test]
-    fn test_vulnerability_severity_filtering() {
+    #[tokio::test]
+    async fn test_vulnerability_severity_filtering() {
         let deps = vec![create_test_dependency("vuln-dep", "1.0.0", 5)];
         let cache = MemoryCache::new();
         cache.insert(
@@ -1029,7 +1029,7 @@ mod tests {
                 ],
                 ..Default::default()
             },
-        );
+        ).await;
 
         let diagnostics = create_diagnostics(
             &deps,
@@ -1039,7 +1039,7 @@ mod tests {
             FileType::Cargo,
             &hashbrown::HashMap::new(),
             &[],
-        );
+        ).await;
 
         let vuln_diags: Vec<_> = diagnostics
             .iter()
@@ -1054,8 +1054,8 @@ mod tests {
         assert!(vuln_diags[0].message.contains("1 vuln"));
     }
 
-    #[test]
-    fn test_deprecation_diagnostic_with_repository() {
+    #[tokio::test]
+    async fn test_deprecation_diagnostic_with_repository() {
         let deps = vec![create_test_dependency("old-dep", "1.0.0", 5)];
         let cache = MemoryCache::new();
         cache.insert(
@@ -1066,7 +1066,7 @@ mod tests {
                 repository: Some("https://github.com/user/old-dep".to_string()),
                 ..Default::default()
             },
-        );
+        ).await;
 
         let diagnostics = create_diagnostics(
             &deps,
@@ -1076,7 +1076,7 @@ mod tests {
             FileType::Cargo,
             &hashbrown::HashMap::new(),
             &[],
-        );
+        ).await;
 
         let deprecation_diags: Vec<_> = diagnostics
             .iter()
@@ -1093,8 +1093,8 @@ mod tests {
         assert!(!related.is_empty());
     }
 
-    #[test]
-    fn test_yanked_diagnostic_with_repository() {
+    #[tokio::test]
+    async fn test_yanked_diagnostic_with_repository() {
         let deps = vec![create_test_dependency("serde", "1.0.0", 5)];
         let cache = MemoryCache::new();
         cache.insert(
@@ -1105,7 +1105,7 @@ mod tests {
                 repository: Some("https://github.com/serde-rs/serde".to_string()),
                 ..Default::default()
             },
-        );
+        ).await;
 
         let diagnostics = create_diagnostics(
             &deps,
@@ -1115,7 +1115,7 @@ mod tests {
             FileType::Cargo,
             &hashbrown::HashMap::new(),
             &[],
-        );
+        ).await;
 
         let yanked_diags: Vec<_> = diagnostics
             .iter()
@@ -1181,8 +1181,8 @@ mod tests {
         assert_eq!(msg, "");
     }
 
-    #[test]
-    fn test_vulnerability_low_severity_hint() {
+    #[tokio::test]
+    async fn test_vulnerability_low_severity_hint() {
         let deps = vec![create_test_dependency("vuln-dep", "1.0.0", 5)];
         let cache = MemoryCache::new();
         cache.insert(
@@ -1197,7 +1197,7 @@ mod tests {
                 }],
                 ..Default::default()
             },
-        );
+        ).await;
 
         let diagnostics = create_diagnostics(
             &deps,
@@ -1207,7 +1207,7 @@ mod tests {
             FileType::Cargo,
             &hashbrown::HashMap::new(),
             &[],
-        );
+        ).await;
 
         let vuln_diags: Vec<_> = diagnostics
             .iter()
@@ -1222,8 +1222,8 @@ mod tests {
         assert_eq!(vuln_diags[0].severity, Some(DiagnosticSeverity::HINT));
     }
 
-    #[test]
-    fn test_vulnerability_medium_severity_warning() {
+    #[tokio::test]
+    async fn test_vulnerability_medium_severity_warning() {
         let deps = vec![create_test_dependency("vuln-dep", "1.0.0", 5)];
         let cache = MemoryCache::new();
         cache.insert(
@@ -1238,7 +1238,7 @@ mod tests {
                 }],
                 ..Default::default()
             },
-        );
+        ).await;
 
         let diagnostics = create_diagnostics(
             &deps,
@@ -1248,7 +1248,7 @@ mod tests {
             FileType::Cargo,
             &hashbrown::HashMap::new(),
             &[],
-        );
+        ).await;
 
         let vuln_diags: Vec<_> = diagnostics
             .iter()
@@ -1263,8 +1263,8 @@ mod tests {
         assert_eq!(vuln_diags[0].severity, Some(DiagnosticSeverity::WARNING));
     }
 
-    #[test]
-    fn test_vulnerability_critical_severity_error() {
+    #[tokio::test]
+    async fn test_vulnerability_critical_severity_error() {
         let deps = vec![create_test_dependency("vuln-dep", "1.0.0", 5)];
         let cache = MemoryCache::new();
         cache.insert(
@@ -1279,7 +1279,7 @@ mod tests {
                 }],
                 ..Default::default()
             },
-        );
+        ).await;
 
         let diagnostics = create_diagnostics(
             &deps,
@@ -1289,7 +1289,7 @@ mod tests {
             FileType::Cargo,
             &hashbrown::HashMap::new(),
             &[],
-        );
+        ).await;
 
         let vuln_diags: Vec<_> = diagnostics
             .iter()
@@ -1304,8 +1304,8 @@ mod tests {
         assert_eq!(vuln_diags[0].severity, Some(DiagnosticSeverity::ERROR));
     }
 
-    #[test]
-    fn test_yanked_diagnostic_uses_registry_name_npm() {
+    #[tokio::test]
+    async fn test_yanked_diagnostic_uses_registry_name_npm() {
         let deps = vec![create_test_dependency("lodash", "1.0.0", 5)];
         let cache = MemoryCache::new();
         cache.insert(
@@ -1315,7 +1315,7 @@ mod tests {
                 latest: Some("4.17.21".to_string()),
                 ..Default::default()
             },
-        );
+        ).await;
 
         let diagnostics = create_diagnostics(
             &deps,
@@ -1325,7 +1325,7 @@ mod tests {
             FileType::Npm,
             &hashbrown::HashMap::new(),
             &[],
-        );
+        ).await;
 
         let yanked_diags: Vec<_> = diagnostics
             .iter()
@@ -1349,8 +1349,8 @@ mod tests {
         );
     }
 
-    #[test]
-    fn test_diagnostic_fires_on_transitive_only_vulns() {
+    #[tokio::test]
+    async fn test_diagnostic_fires_on_transitive_only_vulns() {
         use crate::registries::{
             TransitiveVuln, VersionInfo, Vulnerability, VulnerabilitySeverity,
         };
@@ -1363,7 +1363,7 @@ mod tests {
                 latest: Some("1.0.0".to_string()),
                 ..Default::default()
             },
-        );
+        ).await;
 
         // Transitive vulns are now stored per-document, not in version_cache.
         let mut doc_transitives: hashbrown::HashMap<String, Vec<TransitiveVuln>> =
@@ -1390,7 +1390,7 @@ mod tests {
             FileType::Cargo,
             &doc_transitives,
             &[],
-        );
+        ).await;
 
         let vuln_diags: Vec<_> = diagnostics
             .iter()
@@ -1419,8 +1419,8 @@ mod tests {
         assert_eq!(vuln_diags[0].severity, Some(DiagnosticSeverity::ERROR));
     }
 
-    #[test]
-    fn test_transitive_vulns_respect_min_severity() {
+    #[tokio::test]
+    async fn test_transitive_vulns_respect_min_severity() {
         let deps = vec![create_test_dependency("my-dep", "1.0.0", 5)];
         let cache = MemoryCache::new();
         cache.insert(
@@ -1429,7 +1429,7 @@ mod tests {
                 latest: Some("1.0.0".to_string()),
                 ..Default::default()
             },
-        );
+        ).await;
 
         let mut doc_transitives: hashbrown::HashMap<String, Vec<TransitiveVuln>> =
             hashbrown::HashMap::new();
@@ -1467,7 +1467,7 @@ mod tests {
             FileType::Cargo,
             &doc_transitives,
             &[],
-        );
+        ).await;
 
         let vuln_diags: Vec<_> = diagnostics
             .iter()
@@ -1495,8 +1495,8 @@ mod tests {
         );
     }
 
-    #[test]
-    fn test_diagnostic_skipped_for_ignored_package() {
+    #[tokio::test]
+    async fn test_diagnostic_skipped_for_ignored_package() {
         let cache = MemoryCache::new();
         cache.insert(
             "test:lodash".to_string(),
@@ -1504,7 +1504,7 @@ mod tests {
                 latest: Some("2.0.0".to_string()),
                 ..Default::default()
             },
-        );
+        ).await;
         let deps = vec![create_test_dependency("lodash", "1.0.0", 5)];
         let ignored = vec!["lodash".to_string()];
 
@@ -1516,7 +1516,7 @@ mod tests {
             FileType::Cargo,
             &hashbrown::HashMap::new(),
             &ignored,
-        );
+        ).await;
 
         assert!(
             diagnostics.is_empty(),
@@ -1524,8 +1524,8 @@ mod tests {
         );
     }
 
-    #[test]
-    fn test_diagnostic_skipped_for_wildcard_match() {
+    #[tokio::test]
+    async fn test_diagnostic_skipped_for_wildcard_match() {
         let cache = MemoryCache::new();
         cache.insert(
             "test:@internal/utils".to_string(),
@@ -1533,7 +1533,7 @@ mod tests {
                 latest: Some("2.0.0".to_string()),
                 ..Default::default()
             },
-        );
+        ).await;
         let deps = vec![create_test_dependency("@internal/utils", "1.0.0", 5)];
         let ignored = vec!["@internal/*".to_string()];
 
@@ -1545,7 +1545,7 @@ mod tests {
             FileType::Cargo,
             &hashbrown::HashMap::new(),
             &ignored,
-        );
+        ).await;
 
         assert!(
             diagnostics.is_empty(),
@@ -1553,8 +1553,8 @@ mod tests {
         );
     }
 
-    #[test]
-    fn test_diagnostic_emitted_when_not_ignored() {
+    #[tokio::test]
+    async fn test_diagnostic_emitted_when_not_ignored() {
         let cache = MemoryCache::new();
         cache.insert(
             "test:react".to_string(),
@@ -1562,7 +1562,7 @@ mod tests {
                 latest: Some("18.0.0".to_string()),
                 ..Default::default()
             },
-        );
+        ).await;
         let deps = vec![create_test_dependency("react", "17.0.0", 5)];
         let ignored = vec!["lodash".to_string()];
 
@@ -1574,7 +1574,7 @@ mod tests {
             FileType::Cargo,
             &hashbrown::HashMap::new(),
             &ignored,
-        );
+        ).await;
 
         assert_eq!(
             diagnostics.len(),
