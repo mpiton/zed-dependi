@@ -108,11 +108,12 @@ impl SqliteAdvisoryCache {
             )",
             [],
         )?;
-        conn.execute(
-            "CREATE INDEX IF NOT EXISTS idx_advisory_expiry \
-             ON advisories(inserted_at, ttl_secs)",
-            [],
-        )?;
+        // Intentionally no expiry index. The cleanup query
+        // (`WHERE inserted_at + ttl_secs * ? < ?`) wraps `inserted_at` in an
+        // arithmetic expression, so SQLite cannot use a `(inserted_at,
+        // ttl_secs)` index for it. Advisory rows are bounded by the small
+        // number of distinct RUSTSEC IDs encountered, so a periodic full
+        // scan is cheap.
         Ok(())
     }
 
@@ -128,11 +129,8 @@ impl SqliteAdvisoryCache {
             )",
             [],
         )?;
-        conn.execute(
-            "CREATE INDEX IF NOT EXISTS idx_advisory_expiry \
-             ON advisories(inserted_at, ttl_secs)",
-            [],
-        )?;
+        // See `init_schema` — the expiry index is intentionally omitted
+        // because it cannot be used by the cleanup query.
         Ok(())
     }
 }
@@ -245,7 +243,7 @@ mod tests {
     use super::*;
 
     #[tokio::test]
-    async fn in_memory_constructor_creates_table_and_index() {
+    async fn in_memory_constructor_creates_table() {
         let cache = SqliteAdvisoryCache::in_memory().expect("open in-memory cache");
         let conn = cache.pool.get().expect("get conn");
         let count: i64 = conn
@@ -256,7 +254,17 @@ mod tests {
             )
             .expect("query table");
         assert_eq!(count, 1);
+    }
 
+    /// Regression: the expiry index was removed because the cleanup query
+    /// `WHERE inserted_at + ttl_secs * ? < ?` cannot use a
+    /// `(inserted_at, ttl_secs)` index — the arithmetic forces a full scan
+    /// regardless. Re-introducing the index without revising the query
+    /// would just bloat the schema without benefit.
+    #[tokio::test]
+    async fn schema_does_not_create_unused_expiry_index() {
+        let cache = SqliteAdvisoryCache::in_memory().expect("open in-memory cache");
+        let conn = cache.pool.get().expect("get conn");
         let idx: i64 = conn
             .query_row(
                 "SELECT count(*) FROM sqlite_master \
@@ -265,7 +273,7 @@ mod tests {
                 |row| row.get(0),
             )
             .expect("query index");
-        assert_eq!(idx, 1);
+        assert_eq!(idx, 0, "idx_advisory_expiry must not be created");
     }
 
     #[tokio::test]
