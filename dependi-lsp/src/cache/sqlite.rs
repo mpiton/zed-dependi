@@ -97,8 +97,8 @@ impl SqliteCache {
             let conn = cache.pool.get()?;
             let now = current_timestamp();
             conn.execute(
-                "DELETE FROM packages WHERE inserted_at + ttl_secs < ?",
-                [now],
+                "DELETE FROM packages WHERE inserted_at + ttl_secs * ? < ?",
+                params![NANOS_PER_SEC, now],
             )?;
         }
 
@@ -210,7 +210,7 @@ impl ReadCache for SqliteCache {
             );
             match result {
                 Ok((data, inserted_at, ttl_secs)) => {
-                    if now > inserted_at + ttl_secs {
+                    if now > inserted_at + ttl_secs * NANOS_PER_SEC {
                         let _ = conn.execute("DELETE FROM packages WHERE key = ?", [key.as_str()]);
                         None
                     } else {
@@ -241,7 +241,7 @@ impl ReadCache for SqliteCache {
                 |row| Ok((row.get(0)?, row.get(1)?)),
             );
             match result {
-                Ok((inserted_at, ttl_secs)) => now <= inserted_at + ttl_secs,
+                Ok((inserted_at, ttl_secs)) => now <= inserted_at + ttl_secs * NANOS_PER_SEC,
                 Err(_) => false,
             }
         })
@@ -258,7 +258,9 @@ impl WriteCache for SqliteCache {
         // so concurrent inserts carry their actual submission time. The UPSERT
         // below only overwrites when the new timestamp is at least as recent as
         // the stored one, preventing late/older writes from clobbering newer
-        // values that completed first.
+        // values that completed first. `current_timestamp()` is nanosecond
+        // resolution, so same-instant ties between writes for the same key
+        // are extremely unlikely in practice.
         let now = current_timestamp();
         let _ = tokio::task::spawn_blocking(move || {
             let Some(conn) = pool.get().ok() else {
@@ -374,8 +376,8 @@ impl SqliteCache {
             let conn = pool.get()?;
             let now = current_timestamp();
             let rows = conn.execute(
-                "DELETE FROM packages WHERE inserted_at + ttl_secs < ?",
-                [now],
+                "DELETE FROM packages WHERE inserted_at + ttl_secs * ? < ?",
+                params![NANOS_PER_SEC, now],
             )?;
             Ok(rows)
         })
@@ -402,12 +404,23 @@ pub struct PoolState {
     pub idle_connections: u32,
 }
 
-/// Get current Unix timestamp
+/// Nanoseconds in one second — used to convert `ttl_secs` to the same unit as
+/// `inserted_at` when computing expiration in SQL queries.
+const NANOS_PER_SEC: i64 = 1_000_000_000;
+
+/// Current Unix time in nanoseconds.
+///
+/// Nanosecond resolution makes same-instant collisions on the `inserted_at`
+/// column effectively impossible in practice, which keeps the conditional
+/// UPSERT in `insert()` (`excluded.inserted_at >= packages.inserted_at`) from
+/// allowing a late-finishing older write to clobber a newer value that landed
+/// first. i64 nanoseconds since UNIX_EPOCH overflow at year 2262.
 fn current_timestamp() -> i64 {
-    SystemTime::now()
+    let nanos = SystemTime::now()
         .duration_since(UNIX_EPOCH)
-        .unwrap_or_default()
-        .as_secs() as i64
+        .map(|d| d.as_nanos())
+        .unwrap_or(0);
+    nanos.min(i64::MAX as u128) as i64
 }
 
 #[cfg(test)]
