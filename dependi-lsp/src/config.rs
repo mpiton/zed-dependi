@@ -19,6 +19,8 @@ pub struct Config {
     pub diagnostics: DiagnosticsConfig,
     /// Cache configuration
     pub cache: CacheConfig,
+    /// RustSec advisory cache configuration (issue #237)
+    pub advisory_cache: AdvisoryCacheConfig,
     /// Security/vulnerability configuration
     pub security: SecurityConfig,
     /// Packages to ignore (glob patterns)
@@ -80,6 +82,31 @@ impl Default for CacheConfig {
         Self {
             ttl_secs: DEFAULT_CACHE_TTL_SECS,
             debounce_ms: DEFAULT_DEBOUNCE_MS,
+        }
+    }
+}
+
+/// Configuration for the RustSec advisory cache (issue #237).
+#[derive(Debug, Clone, Deserialize)]
+#[serde(default)]
+pub struct AdvisoryCacheConfig {
+    /// Enable the cache. Disabled => NullAdvisoryCache (every call hits HTTP).
+    pub enabled: bool,
+    /// Positive cache TTL in seconds.
+    pub ttl_secs: u64,
+    /// Negative cache TTL in seconds (used for OSV 404 responses).
+    pub negative_ttl_secs: u64,
+    /// Optional override for the SQLite database path.
+    pub db_path: Option<std::path::PathBuf>,
+}
+
+impl Default for AdvisoryCacheConfig {
+    fn default() -> Self {
+        Self {
+            enabled: true,
+            ttl_secs: 86_400,
+            negative_ttl_secs: 3_600,
+            db_path: None,
         }
     }
 }
@@ -726,5 +753,28 @@ mod tests {
         let patterns = vec!["".to_string()];
         assert!(super::is_package_ignored("", &patterns));
         assert!(!super::is_package_ignored("anything", &patterns));
+    }
+}
+
+#[cfg(test)]
+mod advisory_config_tests {
+    use super::AdvisoryCacheConfig;
+
+    #[test]
+    fn defaults_match_design_spec() {
+        let cfg = AdvisoryCacheConfig::default();
+        assert!(cfg.enabled);
+        assert_eq!(cfg.ttl_secs, 86_400);
+        assert_eq!(cfg.negative_ttl_secs, 3_600);
+        assert!(cfg.db_path.is_none());
+    }
+
+    #[test]
+    fn deserialise_partial_json_uses_defaults_for_missing_fields() {
+        let cfg: AdvisoryCacheConfig =
+            serde_json::from_str(r#"{"enabled":false}"#).expect("partial deserialise");
+        assert!(!cfg.enabled);
+        assert_eq!(cfg.ttl_secs, 86_400);
+        assert_eq!(cfg.negative_ttl_secs, 3_600);
     }
 }
