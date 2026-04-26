@@ -27,10 +27,6 @@ pub struct QueryResult {
 pub struct OsvClient {
     client: Arc<Client>,
     base_url: String,
-    // Wired into `check_rustsec_unmaintained` in Task 22; until then the field
-    // is only consumed via the test-only `advisory_cache()` accessor, so the
-    // lib-only build legitimately sees no read.
-    #[allow(dead_code)]
     advisory_cache: Arc<dyn crate::cache::advisory::AdvisoryWriteCache>,
 }
 
@@ -206,7 +202,7 @@ impl OsvClient {
         Ok(results)
     }
 
-    async fn check_rustsec_unmaintained(&self, ids: &[String]) -> bool {
+    pub(crate) async fn check_rustsec_unmaintained(&self, ids: &[String]) -> bool {
         if ids.is_empty() {
             return false;
         }
@@ -216,12 +212,23 @@ impl OsvClient {
             ids.len()
         );
 
+        let cache = Arc::clone(&self.advisory_cache);
         let results: Vec<bool> = stream::iter(ids.iter().cloned())
             .map(|id| {
                 let url = format!("{}/vulns/{id}", self.base_url);
                 let client = Arc::clone(&self.client);
+                let cache = Arc::clone(&cache);
 
                 async move {
+                    if let Some(cached) = cache.get(&id).await {
+                        return match cached.kind {
+                            crate::cache::advisory::AdvisoryKind::Found {
+                                unmaintained, ..
+                            } => unmaintained,
+                            crate::cache::advisory::AdvisoryKind::NotFound => false,
+                        };
+                    }
+
                     let response = match client.get(&url).send().await {
                         Ok(r) => r,
                         Err(e) => {
@@ -229,6 +236,26 @@ impl OsvClient {
                             return false;
                         }
                     };
+
+                    if response.status().as_u16() == 404 {
+                        cache
+                            .insert(crate::cache::advisory::CachedAdvisory {
+                                id: id.clone(),
+                                kind: crate::cache::advisory::AdvisoryKind::NotFound,
+                                fetched_at: std::time::SystemTime::now(),
+                            })
+                            .await;
+                        return false;
+                    }
+
+                    if !response.status().is_success() {
+                        tracing::warn!(
+                            "OSV /vulns/{} returned {}, not caching",
+                            id,
+                            response.status()
+                        );
+                        return false;
+                    }
 
                     let details: Option<OsvVulnerabilityDetails> = match response.json().await {
                         Ok(d) => d,
@@ -238,14 +265,13 @@ impl OsvClient {
                         }
                     };
 
+                    let summary = details.as_ref().and_then(|v| v.summary.clone());
+
                     let is_unmaintained = details.as_ref().is_some_and(|v| {
-                        // Check summary for "maintained" or "deprecated" keywords
                         let summary_match = v.summary.as_ref().is_some_and(|s| {
                             let lower = s.to_lowercase();
                             lower.contains("maintained") || lower.contains("deprecated")
                         });
-
-                        // Check database_specific.informational for "unmaintained"
                         let informational_match = v.affected.as_ref().is_some_and(|affected| {
                             affected.iter().any(|a| {
                                 a.database_specific.as_ref().is_some_and(|db| {
@@ -255,19 +281,22 @@ impl OsvClient {
                                 })
                             })
                         });
-
                         summary_match || informational_match
                     });
 
+                    cache
+                        .insert(crate::cache::advisory::CachedAdvisory {
+                            id: id.clone(),
+                            kind: crate::cache::advisory::AdvisoryKind::Found {
+                                summary,
+                                unmaintained: is_unmaintained,
+                            },
+                            fetched_at: std::time::SystemTime::now(),
+                        })
+                        .await;
+
                     if is_unmaintained {
-                        tracing::info!(
-                            "Advisory {} indicates unmaintained package: {}",
-                            id,
-                            details
-                                .as_ref()
-                                .and_then(|v| v.summary.as_ref())
-                                .unwrap_or(&String::new())
-                        );
+                        tracing::info!("Advisory {} indicates unmaintained package", id,);
                     }
 
                     is_unmaintained
@@ -544,6 +573,67 @@ mod tests {
                 .await
                 .is_none()
         );
+    }
+
+    use std::time::SystemTime;
+
+    use wiremock::{
+        Mock, MockServer, ResponseTemplate,
+        matchers::{method, path},
+    };
+
+    use crate::cache::advisory::{AdvisoryKind, CachedAdvisory, MemoryAdvisoryCache};
+
+    fn sample_response_body() -> serde_json::Value {
+        serde_json::json!({
+            "summary": "test crate is unmaintained",
+            "affected": [{
+                "database_specific": {
+                    "informational": "unmaintained"
+                }
+            }]
+        })
+    }
+
+    #[tokio::test]
+    async fn cache_hit_skips_http_for_known_advisory() {
+        let server = MockServer::start().await;
+        let counter = Arc::new(AtomicUsize::new(0));
+        {
+            let counter = Arc::clone(&counter);
+            Mock::given(method("GET"))
+                .and(path("/vulns/RUSTSEC-2020-0036"))
+                .respond_with(move |_req: &wiremock::Request| {
+                    counter.fetch_add(1, Ordering::SeqCst);
+                    ResponseTemplate::new(200).set_body_json(sample_response_body())
+                })
+                .mount(&server)
+                .await;
+        }
+
+        let cache: Arc<dyn AdvisoryWriteCache> = Arc::new(MemoryAdvisoryCache::new());
+        // Pre-populate the cache so the first call hits the L1 layer.
+        cache
+            .insert(CachedAdvisory {
+                id: "RUSTSEC-2020-0036".to_string(),
+                kind: AdvisoryKind::Found {
+                    summary: Some("cached".to_string()),
+                    unmaintained: true,
+                },
+                fetched_at: SystemTime::now(),
+            })
+            .await;
+
+        let client = OsvClient::with_endpoint_and_cache(server.uri(), Arc::clone(&cache));
+        let result = client
+            .check_rustsec_unmaintained(&["RUSTSEC-2020-0036".to_string()])
+            .await;
+
+        assert!(
+            result,
+            "cached advisory marked unmaintained must short-circuit"
+        );
+        assert_eq!(counter.load(Ordering::SeqCst), 0, "no HTTP call expected");
     }
 
     #[tokio::test]
