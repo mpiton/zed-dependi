@@ -293,7 +293,7 @@ impl HybridCache {
                 }
 
                 if let Some(ref sqlite) = sqlite
-                    && let Ok(rows) = sqlite.cleanup_expired()
+                    && let Ok(rows) = sqlite.cleanup_expired().await
                     && rows > 0
                 {
                     tracing::info!(
@@ -307,18 +307,18 @@ impl HybridCache {
 }
 
 impl ReadCache for HybridCache {
-    fn get(&self, key: &str) -> Option<VersionInfo> {
+    async fn get(&self, key: &str) -> Option<VersionInfo> {
         // Fast path: check memory cache first
-        if let Some(value) = self.memory.get(key) {
+        if let Some(value) = self.memory.get(key).await {
             return Some(value);
         }
 
         // Slow path: check SQLite cache
         if let Some(ref sqlite) = self.sqlite
-            && let Some(value) = sqlite.get(key)
+            && let Some(value) = sqlite.get(key).await
         {
             // Populate memory cache for future fast access
-            self.memory.insert(key.to_string(), value.clone());
+            self.memory.insert(key.to_string(), value.clone()).await;
             return Some(value);
         }
 
@@ -327,24 +327,24 @@ impl ReadCache for HybridCache {
 }
 
 impl WriteCache for HybridCache {
-    fn insert(&self, key: String, value: VersionInfo) {
-        self.memory.insert(key.clone(), value.clone());
+    async fn insert(&self, key: String, value: VersionInfo) {
+        self.memory.insert(key.clone(), value.clone()).await;
         if let Some(ref sqlite) = self.sqlite {
-            sqlite.insert(key, value);
+            sqlite.insert(key, value).await;
         }
     }
 
-    fn remove(&self, key: &str) {
-        self.memory.remove(key);
+    async fn remove(&self, key: &str) {
+        self.memory.remove(key).await;
         if let Some(ref sqlite) = self.sqlite {
-            sqlite.remove(key);
+            sqlite.remove(key).await;
         }
     }
 
-    fn clear(&self) {
-        self.memory.clear();
+    async fn clear(&self) {
+        self.memory.clear().await;
         if let Some(ref sqlite) = self.sqlite {
-            sqlite.clear();
+            sqlite.clear().await;
         }
     }
 }
