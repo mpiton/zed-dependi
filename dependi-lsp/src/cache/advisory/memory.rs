@@ -53,6 +53,27 @@ impl MemoryAdvisoryCache {
             ttl,
         }
     }
+
+    /// The configured TTL applied to fresh inserts.
+    pub fn ttl(&self) -> Duration {
+        self.ttl
+    }
+
+    /// Insert with an explicit TTL instead of the cache-wide default.
+    ///
+    /// Used by [`super::HybridAdvisoryCache`] when backfilling the L1 layer
+    /// from an L2 hit so that an entry near SQLite expiry does not gain a
+    /// fresh full-length TTL by being read.
+    pub async fn insert_with_remaining_ttl(&self, advisory: CachedAdvisory, remaining: Duration) {
+        self.entries.insert(
+            advisory.id.clone(),
+            MemoryAdvisoryEntry {
+                advisory,
+                inserted_at: Instant::now(),
+                ttl: remaining,
+            },
+        );
+    }
 }
 
 #[async_trait]
@@ -230,6 +251,27 @@ mod tests {
         assert_eq!(removed, 1);
         assert!(cache.get("RUSTSEC-2020-0036").await.is_none());
         assert!(cache.get("RUSTSEC-9999-0001").await.is_some());
+    }
+
+    #[tokio::test]
+    async fn ttl_getter_returns_configured_ttl() {
+        let cache = MemoryAdvisoryCache::with_ttl(Duration::from_secs(1234));
+        assert_eq!(cache.ttl(), Duration::from_secs(1234));
+        let default_cache = MemoryAdvisoryCache::new();
+        assert_eq!(default_cache.ttl(), DEFAULT_ADVISORY_TTL);
+    }
+
+    #[tokio::test]
+    async fn insert_with_remaining_ttl_uses_explicit_value_not_default() {
+        let cache = MemoryAdvisoryCache::with_ttl(Duration::from_secs(60));
+        cache
+            .insert_with_remaining_ttl(sample_found(), Duration::from_millis(20))
+            .await;
+        // The entry must respect the *short* explicit TTL, not the 60-second
+        // default, otherwise backfill would silently extend SQLite TTLs.
+        assert!(cache.get("RUSTSEC-2020-0036").await.is_some());
+        tokio::time::sleep(Duration::from_millis(40)).await;
+        assert!(cache.get("RUSTSEC-2020-0036").await.is_none());
     }
 
     #[tokio::test]

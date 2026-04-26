@@ -205,7 +205,19 @@ impl AdvisoryReadCache for HybridAdvisoryCache {
         if let Some(ref sqlite) = self.sqlite
             && let Some(value) = sqlite.get(advisory_id).await
         {
-            self.memory.insert(value.clone()).await;
+            // Backfill L1 with the *remaining* TTL relative to the original
+            // fetch time, not a fresh full memory-TTL window. Otherwise an
+            // entry that is about to expire in SQLite would gain a brand-new
+            // memory-TTL on every L2 read, doubling the effective TTL.
+            let remaining = match value.fetched_at.elapsed() {
+                Ok(elapsed) => self.memory.ttl().saturating_sub(elapsed),
+                Err(_) => Duration::from_secs(0),
+            };
+            if !remaining.is_zero() {
+                self.memory
+                    .insert_with_remaining_ttl(value.clone(), remaining)
+                    .await;
+            }
             return Some(value);
         }
 
@@ -269,13 +281,76 @@ mod tests {
     async fn hybrid_l2_hit_backfills_l1() {
         let memory = MemoryAdvisoryCache::new();
         let sqlite = Arc::new(SqliteAdvisoryCache::in_memory().expect("in-memory sqlite"));
-        let advisory = sample_found("RUSTSEC-2020-0036");
+        let advisory = CachedAdvisory {
+            id: "RUSTSEC-2020-0036".to_string(),
+            kind: AdvisoryKind::Found {
+                summary: Some("unmaintained".to_string()),
+                unmaintained: true,
+            },
+            // `SystemTime::now()` so `elapsed()` succeeds and `remaining` is
+            // close to the configured memory TTL.
+            fetched_at: SystemTime::now(),
+        };
         sqlite.insert(advisory.clone()).await;
         let hybrid = HybridAdvisoryCache::from_parts(memory.clone(), Some(sqlite));
 
         assert_eq!(hybrid.get(&advisory.id).await, Some(advisory.clone()));
         // After the first read, the memory layer should hold it directly.
         assert_eq!(memory.get(&advisory.id).await, Some(advisory));
+    }
+
+    /// Regression: an L2 hit must NOT extend the effective TTL past the
+    /// original SQLite fetch time + memory TTL by re-stamping the L1 entry
+    /// with `Instant::now()`. The L1 backfill should respect the remaining
+    /// TTL relative to `fetched_at`.
+    #[tokio::test]
+    async fn hybrid_l2_backfill_preserves_remaining_ttl() {
+        // Memory TTL of 50 ms.
+        let memory = MemoryAdvisoryCache::with_ttl(Duration::from_millis(50));
+        let sqlite = Arc::new(SqliteAdvisoryCache::in_memory().expect("in-memory sqlite"));
+        // Advisory fetched 40 ms ago — only ~10 ms of memory TTL should remain.
+        let advisory = CachedAdvisory {
+            id: "RUSTSEC-2020-0036".to_string(),
+            kind: AdvisoryKind::Found {
+                summary: None,
+                unmaintained: false,
+            },
+            fetched_at: SystemTime::now() - Duration::from_millis(40),
+        };
+        sqlite.insert(advisory.clone()).await;
+        let hybrid = HybridAdvisoryCache::from_parts(memory.clone(), Some(sqlite));
+
+        // First read: backfills L1.
+        assert_eq!(hybrid.get(&advisory.id).await, Some(advisory.clone()));
+        assert!(memory.get(&advisory.id).await.is_some());
+
+        // Wait long enough that the *remaining* TTL has elapsed but a fresh
+        // 50 ms window would still be alive. If backfill used the full TTL,
+        // the entry would still be present.
+        tokio::time::sleep(Duration::from_millis(30)).await;
+        assert!(
+            memory.get(&advisory.id).await.is_none(),
+            "L1 backfill must not extend effective TTL past fetched_at + memory_ttl"
+        );
+    }
+
+    /// If `fetched_at` is somehow already past `memory_ttl`, the backfill
+    /// should be skipped entirely (zero remaining ⇒ never write a 0-TTL row).
+    #[tokio::test]
+    async fn hybrid_l2_backfill_skips_when_remaining_ttl_is_zero() {
+        let memory = MemoryAdvisoryCache::with_ttl(Duration::from_millis(10));
+        let sqlite = Arc::new(SqliteAdvisoryCache::in_memory().expect("in-memory sqlite"));
+        let advisory = CachedAdvisory {
+            id: "RUSTSEC-2020-0036".to_string(),
+            kind: AdvisoryKind::NotFound,
+            fetched_at: SystemTime::now() - Duration::from_secs(60),
+        };
+        sqlite.insert(advisory.clone()).await;
+        let hybrid = HybridAdvisoryCache::from_parts(memory.clone(), Some(sqlite));
+
+        // The hybrid still returns the L2 value, but does not backfill L1.
+        assert_eq!(hybrid.get(&advisory.id).await, Some(advisory.clone()));
+        assert!(memory.get(&advisory.id).await.is_none());
     }
 
     #[tokio::test]
