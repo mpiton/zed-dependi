@@ -46,9 +46,16 @@ pub trait AdvisoryReadCache: Send + Sync {
 }
 
 /// Write access to the advisory cache.
+///
+/// Mirrors [`crate::cache::WriteCache`] but specialised for advisory entries.
+/// Unlike `WriteCache`, the key is not passed separately — `CachedAdvisory`
+/// carries its own `id`.
 #[allow(async_fn_in_trait)]
 pub trait AdvisoryWriteCache: AdvisoryReadCache {
     /// Insert (or replace) an advisory entry.
+    ///
+    /// The `advisory.id` field acts as the cache key; unlike
+    /// [`crate::cache::WriteCache::insert`] the key is not passed separately.
     async fn insert(&self, advisory: CachedAdvisory);
 
     /// Remove a single advisory entry.
