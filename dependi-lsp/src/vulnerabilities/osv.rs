@@ -39,19 +39,41 @@ pub struct QueryResult {
 }
 
 /// OSV.dev API client
+///
+/// Holds two caches because positive and negative OSV results have different
+/// freshness needs: a real RUSTSEC entry is stable for a long time (hours),
+/// but a 404 might just mean OSV has not yet ingested a brand-new advisory,
+/// so we cache it for a much shorter window controlled by
+/// `AdvisoryCacheConfig::negative_ttl_secs`.
 pub struct OsvClient {
     client: Arc<Client>,
     base_url: String,
+    /// Cache used for `Found` advisory entries (long TTL).
     advisory_cache: Arc<dyn crate::cache::advisory::AdvisoryWriteCache>,
+    /// Cache used for `NotFound` advisory entries (short TTL).
+    negative_cache: Arc<dyn crate::cache::advisory::AdvisoryWriteCache>,
 }
 
 impl OsvClient {
     pub fn new() -> anyhow::Result<Self> {
-        Self::new_with_cache(Arc::new(crate::cache::advisory::NullAdvisoryCache))
+        let null: Arc<dyn crate::cache::advisory::AdvisoryWriteCache> =
+            Arc::new(crate::cache::advisory::NullAdvisoryCache);
+        Self::new_with_caches(Arc::clone(&null), null)
     }
 
+    /// Backwards-compatible constructor: uses the same cache for positive
+    /// and negative entries. Prefer [`OsvClient::new_with_caches`] when the
+    /// caller has separate positive/negative caches with different TTLs.
     pub fn new_with_cache(
         advisory_cache: Arc<dyn crate::cache::advisory::AdvisoryWriteCache>,
+    ) -> anyhow::Result<Self> {
+        Self::new_with_caches(Arc::clone(&advisory_cache), advisory_cache)
+    }
+
+    /// Build a client with explicit positive and negative caches.
+    pub fn new_with_caches(
+        positive_cache: Arc<dyn crate::cache::advisory::AdvisoryWriteCache>,
+        negative_cache: Arc<dyn crate::cache::advisory::AdvisoryWriteCache>,
     ) -> anyhow::Result<Self> {
         let client = Client::builder()
             .user_agent("dependi-lsp (https://github.com/mathieu/zed-dependi)")
@@ -61,7 +83,8 @@ impl OsvClient {
         Ok(Self {
             client: Arc::new(client),
             base_url: OSV_API_BASE.to_string(),
-            advisory_cache,
+            advisory_cache: positive_cache,
+            negative_cache,
         })
     }
 
@@ -76,10 +99,13 @@ impl OsvClient {
             .timeout(Duration::from_secs(30))
             .build()
             .unwrap_or_else(|_| Client::new());
+        let null: Arc<dyn crate::cache::advisory::AdvisoryWriteCache> =
+            Arc::new(crate::cache::advisory::NullAdvisoryCache);
         Self {
             base_url: endpoint,
             client: Arc::new(client),
-            advisory_cache: Arc::new(crate::cache::advisory::NullAdvisoryCache),
+            advisory_cache: Arc::clone(&null),
+            negative_cache: null,
         }
     }
 
@@ -88,10 +114,26 @@ impl OsvClient {
     /// Gated to `#[cfg(test)]` so production code paths cannot accidentally
     /// inject a `NullAdvisoryCache` here. Runtime callers that need cache
     /// injection should use [`OsvClient::new_with_cache`] instead.
+    ///
+    /// Reuses `advisory_cache` for both the positive and negative layers;
+    /// tests that need to assert separate behaviour should use
+    /// [`OsvClient::with_endpoint_and_caches`] instead.
     #[cfg(test)]
     pub fn with_endpoint_and_cache(
         endpoint: String,
         advisory_cache: Arc<dyn crate::cache::advisory::AdvisoryWriteCache>,
+    ) -> Self {
+        Self::with_endpoint_and_caches(endpoint, Arc::clone(&advisory_cache), advisory_cache)
+    }
+
+    /// Test-only constructor: explicit endpoint, positive cache, and
+    /// negative cache. Mirrors [`OsvClient::new_with_caches`] but lets the
+    /// caller pin the URL to a wiremock server.
+    #[cfg(test)]
+    pub fn with_endpoint_and_caches(
+        endpoint: String,
+        positive_cache: Arc<dyn crate::cache::advisory::AdvisoryWriteCache>,
+        negative_cache: Arc<dyn crate::cache::advisory::AdvisoryWriteCache>,
     ) -> Self {
         let client = Client::builder()
             .timeout(Duration::from_secs(30))
@@ -100,14 +142,21 @@ impl OsvClient {
         Self {
             base_url: endpoint,
             client: Arc::new(client),
-            advisory_cache,
+            advisory_cache: positive_cache,
+            negative_cache,
         }
     }
 
-    /// Accessor used by integration tests to verify cache state.
+    /// Accessor used by integration tests to verify positive cache state.
     #[cfg(test)]
     pub fn advisory_cache(&self) -> &Arc<dyn crate::cache::advisory::AdvisoryWriteCache> {
         &self.advisory_cache
+    }
+
+    /// Accessor used by integration tests to verify negative cache state.
+    #[cfg(test)]
+    pub fn negative_cache(&self) -> &Arc<dyn crate::cache::advisory::AdvisoryWriteCache> {
+        &self.negative_cache
     }
 
     fn convert_vulnerability(osv: &OsvVulnerability) -> Vulnerability {
@@ -241,12 +290,14 @@ impl OsvClient {
             ids.len()
         );
 
-        let cache = Arc::clone(&self.advisory_cache);
+        let positive_cache = Arc::clone(&self.advisory_cache);
+        let negative_cache = Arc::clone(&self.negative_cache);
         let results: Vec<bool> = stream::iter(ids.iter().cloned())
             .map(|id| {
                 let url = format!("{}/vulns/{id}", self.base_url);
                 let client = Arc::clone(&self.client);
-                let cache = Arc::clone(&cache);
+                let positive_cache = Arc::clone(&positive_cache);
+                let negative_cache = Arc::clone(&negative_cache);
 
                 async move {
                     if !is_valid_advisory_id(&id) {
@@ -254,13 +305,21 @@ impl OsvClient {
                         return false;
                     }
 
-                    if let Some(cached) = cache.get(&id).await {
+                    // Positive cache wins over negative: if a real `Found`
+                    // entry exists, it cannot also be `NotFound`. Check it
+                    // first to avoid the (cheap) negative-cache lookup.
+                    if let Some(cached) = positive_cache.get(&id).await {
                         return match cached.kind {
                             crate::cache::advisory::AdvisoryKind::Found {
                                 unmaintained, ..
                             } => unmaintained,
                             crate::cache::advisory::AdvisoryKind::NotFound => false,
                         };
+                    }
+                    if let Some(cached) = negative_cache.get(&id).await
+                        && matches!(cached.kind, crate::cache::advisory::AdvisoryKind::NotFound)
+                    {
+                        return false;
                     }
 
                     let response = match client.get(&url).send().await {
@@ -272,7 +331,9 @@ impl OsvClient {
                     };
 
                     if response.status().as_u16() == 404 {
-                        cache
+                        // 404s land in the negative cache so they expire on
+                        // the shorter `negative_ttl_secs` schedule.
+                        negative_cache
                             .insert(crate::cache::advisory::CachedAdvisory {
                                 id: id.clone(),
                                 kind: crate::cache::advisory::AdvisoryKind::NotFound,
@@ -318,7 +379,7 @@ impl OsvClient {
                         summary_match || informational_match
                     });
 
-                    cache
+                    positive_cache
                         .insert(crate::cache::advisory::CachedAdvisory {
                             id: id.clone(),
                             kind: crate::cache::advisory::AdvisoryKind::Found {
@@ -782,6 +843,95 @@ mod tests {
             .await
             .expect("negative cached");
         assert_eq!(cached.kind, AdvisoryKind::NotFound);
+    }
+
+    #[tokio::test]
+    async fn http_404_lands_on_negative_cache_only() {
+        let server = MockServer::start().await;
+        Mock::given(method("GET"))
+            .and(path("/vulns/RUSTSEC-9999-0001"))
+            .respond_with(ResponseTemplate::new(404))
+            .mount(&server)
+            .await;
+
+        let positive: Arc<dyn AdvisoryWriteCache> = Arc::new(MemoryAdvisoryCache::new());
+        let negative: Arc<dyn AdvisoryWriteCache> = Arc::new(MemoryAdvisoryCache::new());
+        let client = OsvClient::with_endpoint_and_caches(
+            server.uri(),
+            Arc::clone(&positive),
+            Arc::clone(&negative),
+        );
+
+        let _ = client
+            .check_rustsec_unmaintained(&["RUSTSEC-9999-0001".to_string()])
+            .await;
+
+        assert!(
+            positive.get("RUSTSEC-9999-0001").await.is_none(),
+            "404 must NOT land on the positive cache"
+        );
+        let cached = negative
+            .get("RUSTSEC-9999-0001")
+            .await
+            .expect("404 should land on negative cache");
+        assert_eq!(cached.kind, AdvisoryKind::NotFound);
+    }
+
+    #[tokio::test]
+    async fn http_200_lands_on_positive_cache_only() {
+        let server = MockServer::start().await;
+        Mock::given(method("GET"))
+            .and(path("/vulns/RUSTSEC-2020-0036"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(sample_response_body()))
+            .mount(&server)
+            .await;
+
+        let positive: Arc<dyn AdvisoryWriteCache> = Arc::new(MemoryAdvisoryCache::new());
+        let negative: Arc<dyn AdvisoryWriteCache> = Arc::new(MemoryAdvisoryCache::new());
+        let client = OsvClient::with_endpoint_and_caches(
+            server.uri(),
+            Arc::clone(&positive),
+            Arc::clone(&negative),
+        );
+
+        let _ = client
+            .check_rustsec_unmaintained(&["RUSTSEC-2020-0036".to_string()])
+            .await;
+
+        let cached = positive
+            .get("RUSTSEC-2020-0036")
+            .await
+            .expect("200 should land on positive cache");
+        assert!(matches!(cached.kind, AdvisoryKind::Found { .. }));
+        assert!(
+            negative.get("RUSTSEC-2020-0036").await.is_none(),
+            "200 must NOT land on the negative cache"
+        );
+    }
+
+    /// Confirm `negative_from_config` produces a memory-only hybrid that
+    /// honours `negative_ttl_secs` instead of `ttl_secs`.
+    #[tokio::test]
+    async fn negative_from_config_uses_negative_ttl() {
+        // ttl_secs would keep the entry alive a long time; negative_ttl_secs
+        // is short. After the short TTL expires, the entry must be gone.
+        let config = crate::config::AdvisoryCacheConfig {
+            enabled: true,
+            ttl_secs: 86_400,
+            negative_ttl_secs: 0,
+            db_path: None,
+        };
+        let hybrid = crate::cache::HybridAdvisoryCache::negative_from_config(&config);
+        hybrid
+            .insert(CachedAdvisory {
+                id: "RUSTSEC-9999-0001".to_string(),
+                kind: AdvisoryKind::NotFound,
+                fetched_at: SystemTime::now(),
+            })
+            .await;
+        // ttl=0 expires immediately on read.
+        tokio::time::sleep(std::time::Duration::from_millis(2)).await;
+        assert!(hybrid.get("RUSTSEC-9999-0001").await.is_none());
     }
 
     #[tokio::test]

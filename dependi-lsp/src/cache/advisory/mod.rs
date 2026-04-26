@@ -189,6 +189,29 @@ impl HybridAdvisoryCache {
         Self::from_parts(memory, sqlite)
     }
 
+    /// Build a *negative* advisory cache from an [`AdvisoryCacheConfig`].
+    ///
+    /// 404 OSV responses live on a different freshness schedule than real
+    /// `Found` entries: a missing advisory might just mean OSV has not yet
+    /// ingested a brand-new RUSTSEC ID, so we want to retry sooner. This
+    /// constructor uses `config.negative_ttl_secs` for the memory TTL and
+    /// deliberately omits the SQLite layer — short-TTL entries do not need
+    /// cross-session persistence and would otherwise share storage with the
+    /// positive cache.
+    ///
+    /// When `enabled = false`, the cache is zero-TTL (always misses).
+    pub fn negative_from_config(config: &crate::config::AdvisoryCacheConfig) -> Self {
+        if !config.enabled {
+            return Self::from_parts(
+                memory::MemoryAdvisoryCache::with_ttl(Duration::from_secs(0)),
+                None,
+            );
+        }
+        let memory =
+            memory::MemoryAdvisoryCache::with_ttl(Duration::from_secs(config.negative_ttl_secs));
+        Self::from_parts(memory, None)
+    }
+
     /// Spawn a background task that periodically prunes expired entries from
     /// both layers. The default interval is [`ADVISORY_CLEANUP_INTERVAL`].
     pub fn spawn_default_cleanup_task(self: &Arc<Self>) {

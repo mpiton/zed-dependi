@@ -878,6 +878,13 @@ pub struct DependiBackend {
     /// the backend. Exposed via [`DependiBackend::advisory_cache`] for tests
     /// and observability.
     advisory_cache: Arc<crate::cache::HybridAdvisoryCache>,
+    /// Negative RustSec advisory cache (issue #237).
+    ///
+    /// Same shape as [`Self::advisory_cache`] but with `negative_ttl_secs`
+    /// and no SQLite layer — 404 entries should not be persisted across
+    /// LSP sessions. Held on the struct so the spawned cleanup task can
+    /// keep strong references.
+    negative_advisory_cache: Arc<crate::cache::HybridAdvisoryCache>,
     /// Per-(ecosystem, name, version) transitive vuln data.
     /// Populated during fresh OSV queries for transitive packages; read on cached re-attribution
     /// so subsequent document opens can still attribute transitives to their direct parents.
@@ -930,18 +937,25 @@ impl DependiBackend {
         // Create token provider manager for centralized auth management
         let token_manager = Arc::new(TokenProviderManager::new());
 
-        // Build the RustSec advisory cache (issue #237) from configuration
-        // and spawn its background cleanup task. The Arc is held on the
-        // struct so the spawned task keeps a strong reference to the cache
-        // layers. When `advisory_cache.enabled = false`, `from_config`
-        // returns a zero-TTL hybrid that always misses — so we keep a
-        // single concrete field type and avoid downstream branching.
+        // Build the RustSec advisory caches (issue #237) from configuration
+        // and spawn their background cleanup tasks. Two separate caches:
+        // - `advisory_cache` holds positive `Found` entries with `ttl_secs`.
+        // - `negative_advisory_cache` holds 404 entries with the shorter
+        //   `negative_ttl_secs`, memory-only because short-TTL entries do
+        //   not need cross-session persistence.
+        // Each Arc is kept on the struct so the spawned cleanup tasks have
+        // strong references for the lifetime of the backend.
         let advisory_cache = Arc::new(crate::cache::HybridAdvisoryCache::from_config(
             &config.advisory_cache,
         ));
         advisory_cache.spawn_default_cleanup_task();
-        let osv_client = match OsvClient::new_with_cache(
-            Arc::clone(&advisory_cache) as Arc<dyn crate::cache::AdvisoryWriteCache>
+        let negative_advisory_cache = Arc::new(
+            crate::cache::HybridAdvisoryCache::negative_from_config(&config.advisory_cache),
+        );
+        negative_advisory_cache.spawn_default_cleanup_task();
+        let osv_client = match OsvClient::new_with_caches(
+            Arc::clone(&advisory_cache) as Arc<dyn crate::cache::AdvisoryWriteCache>,
+            Arc::clone(&negative_advisory_cache) as Arc<dyn crate::cache::AdvisoryWriteCache>,
         ) {
             Ok(client) => Arc::new(client),
             Err(err) => {
@@ -981,6 +995,7 @@ impl DependiBackend {
             osv_client,
             vuln_cache: Arc::new(VulnerabilityCache::new()),
             advisory_cache,
+            negative_advisory_cache,
             transitive_vuln_data: Arc::new(DashMap::new()),
             debounce_tasks: Arc::new(DashMap::new()),
             debounce_generation: Arc::new(std::sync::atomic::AtomicU64::new(0)),
@@ -995,6 +1010,13 @@ impl DependiBackend {
     /// HTTP requests for individual RustSec advisories.
     pub fn advisory_cache(&self) -> &Arc<crate::cache::HybridAdvisoryCache> {
         &self.advisory_cache
+    }
+
+    /// Read access to the negative advisory cache (issue #237).
+    ///
+    /// Used by integration tests to inspect 404 caching state.
+    pub fn negative_advisory_cache(&self) -> &Arc<crate::cache::HybridAdvisoryCache> {
+        &self.negative_advisory_cache
     }
 
     fn create_processing_context(&self) -> ProcessingContext {
