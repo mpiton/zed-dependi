@@ -534,6 +534,7 @@ dependencies = [
  "tower-lsp",
  "tracing",
  "tracing-subscriber",
+ "url",
  "wiremock",
 ]
 
