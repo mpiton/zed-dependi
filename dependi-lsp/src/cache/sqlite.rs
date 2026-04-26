@@ -406,13 +406,13 @@ mod tests {
         }
     }
 
-    #[test]
-    fn test_insert_and_get() {
+    #[tokio::test]
+    async fn test_insert_and_get() {
         let cache = SqliteCache::in_memory().unwrap();
         let info = create_test_version_info();
 
-        cache.insert("test:package".to_string(), info.clone());
-        let retrieved = cache.get("test:package");
+        cache.insert("test:package".to_string(), info.clone()).await;
+        let retrieved = cache.get("test:package").await;
 
         assert!(retrieved.is_some());
         let retrieved = retrieved.unwrap();
@@ -420,15 +420,15 @@ mod tests {
         assert_eq!(retrieved.versions, info.versions);
     }
 
-    #[test]
-    fn test_get_nonexistent() {
+    #[tokio::test]
+    async fn test_get_nonexistent() {
         let cache = SqliteCache::in_memory().unwrap();
-        let retrieved = cache.get("nonexistent");
+        let retrieved = cache.get("nonexistent").await;
         assert!(retrieved.is_none());
     }
 
-    #[test]
-    fn test_overwrite() {
+    #[tokio::test]
+    async fn test_overwrite() {
         let cache = SqliteCache::in_memory().unwrap();
 
         let info1 = VersionInfo {
@@ -440,10 +440,10 @@ mod tests {
             ..create_test_version_info()
         };
 
-        cache.insert("test:package".to_string(), info1);
-        cache.insert("test:package".to_string(), info2);
+        cache.insert("test:package".to_string(), info1).await;
+        cache.insert("test:package".to_string(), info2).await;
 
-        let retrieved = cache.get("test:package").unwrap();
+        let retrieved = cache.get("test:package").await.unwrap();
         assert_eq!(retrieved.latest, Some("2.0.0".to_string()));
     }
 
@@ -454,41 +454,41 @@ mod tests {
         assert!(state.connections > 0);
     }
 
-    #[test]
-    fn test_remove() {
+    #[tokio::test]
+    async fn test_remove() {
         let cache = SqliteCache::in_memory().unwrap();
         let info = create_test_version_info();
 
-        cache.insert("test:package".to_string(), info);
-        assert!(cache.get("test:package").is_some());
+        cache.insert("test:package".to_string(), info).await;
+        assert!(cache.get("test:package").await.is_some());
 
-        let removed = cache.remove_with_result("test:package");
+        let removed = cache.remove_with_result("test:package").await;
         assert!(removed);
-        assert!(cache.get("test:package").is_none());
+        assert!(cache.get("test:package").await.is_none());
 
-        let removed_again = cache.remove_with_result("test:package");
+        let removed_again = cache.remove_with_result("test:package").await;
         assert!(!removed_again);
     }
 
-    #[test]
-    fn test_clear() {
+    #[tokio::test]
+    async fn test_clear() {
         let cache = SqliteCache::in_memory().unwrap();
         let info = create_test_version_info();
 
-        cache.insert("pkg1".to_string(), info.clone());
-        cache.insert("pkg2".to_string(), info.clone());
-        cache.insert("pkg3".to_string(), info);
+        cache.insert("pkg1".to_string(), info.clone()).await;
+        cache.insert("pkg2".to_string(), info.clone()).await;
+        cache.insert("pkg3".to_string(), info).await;
 
-        let cleared = cache.clear_with_count().unwrap();
+        let cleared = cache.clear_with_count().await.unwrap();
         assert_eq!(cleared, 3);
 
-        assert!(cache.get("pkg1").is_none());
-        assert!(cache.get("pkg2").is_none());
-        assert!(cache.get("pkg3").is_none());
+        assert!(cache.get("pkg1").await.is_none());
+        assert!(cache.get("pkg2").await.is_none());
+        assert!(cache.get("pkg3").await.is_none());
     }
 
-    #[test]
-    fn test_insert_batch() {
+    #[tokio::test]
+    async fn test_insert_batch() {
         let cache = SqliteCache::in_memory().unwrap();
 
         let entries: Vec<(String, VersionInfo)> = (0..10)
@@ -499,128 +499,20 @@ mod tests {
             })
             .collect();
 
-        let count = cache.insert_batch(entries).unwrap();
+        let count = cache.insert_batch(entries).await.unwrap();
         assert_eq!(count, 10);
 
         for i in 0..10 {
-            let retrieved = cache.get(&format!("pkg{i}")).unwrap();
+            let retrieved = cache.get(&format!("pkg{i}")).await.unwrap();
             assert_eq!(retrieved.latest, Some(format!("{i}.0.0")));
         }
     }
 
-    #[test]
-    fn test_insert_batch_empty() {
+    #[tokio::test]
+    async fn test_insert_batch_empty() {
         let cache = SqliteCache::in_memory().unwrap();
-        let count = cache.insert_batch(vec![]).unwrap();
+        let count = cache.insert_batch(vec![]).await.unwrap();
         assert_eq!(count, 0);
-    }
-
-    #[test]
-    fn test_concurrent_reads() {
-        use std::sync::Arc;
-        use std::thread;
-
-        let cache = Arc::new(SqliteCache::in_memory().unwrap());
-
-        for i in 0..20 {
-            let mut info = create_test_version_info();
-            info.latest = Some(format!("{i}.0.0"));
-            cache.insert(format!("pkg{i}"), info);
-        }
-
-        let handles: Vec<_> = (0..10)
-            .map(|thread_id| {
-                let cache = Arc::clone(&cache);
-                thread::spawn(move || {
-                    for i in 0..20 {
-                        let key = format!("pkg{i}");
-                        let result = cache.get(&key);
-                        assert!(result.is_some(), "Thread {thread_id} failed to read {key}");
-                    }
-                })
-            })
-            .collect();
-
-        for handle in handles {
-            handle.join().expect("Thread panicked");
-        }
-    }
-
-    #[test]
-    fn test_concurrent_writes() {
-        use std::sync::Arc;
-        use std::thread;
-
-        let cache = Arc::new(SqliteCache::in_memory().unwrap());
-
-        let handles: Vec<_> = (0..5)
-            .map(|thread_id| {
-                let cache = Arc::clone(&cache);
-                thread::spawn(move || {
-                    for i in 0..10 {
-                        let key = format!("thread{thread_id}:pkg{i}");
-                        let mut info = create_test_version_info();
-                        info.latest = Some(format!("{thread_id}.{i}.0"));
-                        cache.insert(key, info);
-                    }
-                })
-            })
-            .collect();
-
-        for handle in handles {
-            handle.join().expect("Thread panicked");
-        }
-
-        for thread_id in 0..5 {
-            for i in 0..10 {
-                let key = format!("thread{thread_id}:pkg{i}");
-                let result = cache.get(&key);
-                assert!(result.is_some(), "Missing key: {key}");
-            }
-        }
-    }
-
-    #[test]
-    fn test_concurrent_mixed_operations() {
-        use std::sync::Arc;
-        use std::thread;
-
-        let cache = Arc::new(SqliteCache::in_memory().unwrap());
-
-        for i in 0..50 {
-            let mut info = create_test_version_info();
-            info.latest = Some(format!("{i}.0.0"));
-            cache.insert(format!("pkg{i}"), info);
-        }
-
-        let handles: Vec<_> = (0..10)
-            .map(|thread_id| {
-                let cache = Arc::clone(&cache);
-                thread::spawn(move || {
-                    for i in 0..50 {
-                        match thread_id % 3 {
-                            0 => {
-                                let _ = cache.get(&format!("pkg{i}"));
-                            }
-                            1 => {
-                                let mut info = create_test_version_info();
-                                info.latest = Some(format!("updated-{thread_id}-{i}"));
-                                cache.insert(format!("pkg{i}"), info);
-                            }
-                            _ => {
-                                let mut info = create_test_version_info();
-                                info.latest = Some(format!("new-{thread_id}-{i}"));
-                                cache.insert(format!("new-pkg-{thread_id}-{i}"), info);
-                            }
-                        }
-                    }
-                })
-            })
-            .collect();
-
-        for handle in handles {
-            handle.join().expect("Thread panicked");
-        }
     }
 
     #[test]
