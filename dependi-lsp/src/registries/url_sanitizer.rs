@@ -10,11 +10,21 @@
 /// (`.git`). Returns `None` for any other scheme, empty input, or
 /// unparseable input.
 pub(crate) fn sanitize_repo_url(raw: &str) -> Option<String> {
-    let parsed = url::Url::parse(raw.trim()).ok()?;
-    match parsed.scheme() {
-        "http" | "https" => Some(parsed.to_string()),
-        _ => None,
+    let trimmed = raw.trim();
+    let stripped = trimmed.strip_prefix("git+").unwrap_or(trimmed);
+
+    let mut parsed = url::Url::parse(stripped).ok()?;
+
+    if !matches!(parsed.scheme(), "http" | "https") {
+        return None;
     }
+
+    let path = parsed.path().to_string();
+    if let Some(without_git) = path.strip_suffix(".git") {
+        parsed.set_path(without_git);
+    }
+
+    Some(parsed.to_string())
 }
 
 #[cfg(test)]
@@ -33,6 +43,22 @@ mod tests {
     fn accepts_http() {
         assert_eq!(
             sanitize_repo_url("http://example.com/repo"),
+            Some("http://example.com/repo".to_string())
+        );
+    }
+
+    #[test]
+    fn strips_git_plus_https() {
+        assert_eq!(
+            sanitize_repo_url("git+https://github.com/user/repo.git"),
+            Some("https://github.com/user/repo".to_string())
+        );
+    }
+
+    #[test]
+    fn strips_git_plus_http() {
+        assert_eq!(
+            sanitize_repo_url("git+http://example.com/repo.git"),
             Some("http://example.com/repo".to_string())
         );
     }
