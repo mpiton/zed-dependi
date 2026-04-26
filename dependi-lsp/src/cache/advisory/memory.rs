@@ -3,6 +3,7 @@
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 
+use async_trait::async_trait;
 use dashmap::DashMap;
 
 use super::{AdvisoryReadCache, AdvisoryWriteCache, CachedAdvisory};
@@ -54,6 +55,7 @@ impl MemoryAdvisoryCache {
     }
 }
 
+#[async_trait]
 impl AdvisoryReadCache for MemoryAdvisoryCache {
     async fn get(&self, advisory_id: &str) -> Option<CachedAdvisory> {
         self.entries
@@ -62,6 +64,7 @@ impl AdvisoryReadCache for MemoryAdvisoryCache {
     }
 }
 
+#[async_trait]
 impl AdvisoryWriteCache for MemoryAdvisoryCache {
     async fn insert(&self, advisory: CachedAdvisory) {
         self.entries.insert(

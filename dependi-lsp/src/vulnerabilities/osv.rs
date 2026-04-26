@@ -27,10 +27,21 @@ pub struct QueryResult {
 pub struct OsvClient {
     client: Arc<Client>,
     base_url: String,
+    // Wired into `check_rustsec_unmaintained` in Task 22; until then the field
+    // is only consumed via the test-only `advisory_cache()` accessor, so the
+    // lib-only build legitimately sees no read.
+    #[allow(dead_code)]
+    advisory_cache: Arc<dyn crate::cache::advisory::AdvisoryWriteCache>,
 }
 
 impl OsvClient {
     pub fn new() -> anyhow::Result<Self> {
+        Self::new_with_cache(Arc::new(crate::cache::advisory::NullAdvisoryCache))
+    }
+
+    pub fn new_with_cache(
+        advisory_cache: Arc<dyn crate::cache::advisory::AdvisoryWriteCache>,
+    ) -> anyhow::Result<Self> {
         let client = Client::builder()
             .user_agent("dependi-lsp (https://github.com/mathieu/zed-dependi)")
             .timeout(Duration::from_secs(30))
@@ -39,11 +50,23 @@ impl OsvClient {
         Ok(Self {
             client: Arc::new(client),
             base_url: OSV_API_BASE.to_string(),
+            advisory_cache,
         })
     }
 
-    /// Constructor used in tests to point the client at a mock server.
+    /// Constructor used in tests to point the client at a mock server (no cache).
     pub fn with_endpoint(endpoint: String) -> Self {
+        Self::with_endpoint_and_cache(
+            endpoint,
+            Arc::new(crate::cache::advisory::NullAdvisoryCache),
+        )
+    }
+
+    /// Test/runtime constructor: explicit endpoint and cache.
+    pub fn with_endpoint_and_cache(
+        endpoint: String,
+        advisory_cache: Arc<dyn crate::cache::advisory::AdvisoryWriteCache>,
+    ) -> Self {
         Self {
             base_url: endpoint,
             client: Arc::new(
@@ -52,7 +75,14 @@ impl OsvClient {
                     .build()
                     .expect("reqwest client should build"),
             ),
+            advisory_cache,
         }
+    }
+
+    /// Accessor used by integration tests to verify cache state.
+    #[cfg(test)]
+    pub fn advisory_cache(&self) -> &Arc<dyn crate::cache::advisory::AdvisoryWriteCache> {
+        &self.advisory_cache
     }
 
     fn convert_vulnerability(osv: &OsvVulnerability) -> Vulnerability {
@@ -496,6 +526,23 @@ mod tests {
         assert!(
             result.is_err(),
             "query to unreachable endpoint should error, got {result:?}"
+        );
+    }
+
+    use crate::cache::advisory::{AdvisoryReadCache, AdvisoryWriteCache, NullAdvisoryCache};
+
+    #[tokio::test]
+    async fn with_endpoint_accepts_advisory_cache() {
+        let cache: Arc<dyn AdvisoryWriteCache> = Arc::new(NullAdvisoryCache);
+        let client =
+            OsvClient::with_endpoint_and_cache("http://example.invalid".to_string(), cache);
+        // Smoke-test: cache is reachable through the public accessor.
+        assert!(
+            client
+                .advisory_cache()
+                .get("RUSTSEC-2020-0036")
+                .await
+                .is_none()
         );
     }
 

@@ -6,6 +6,7 @@ use std::sync::Arc;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
+use async_trait::async_trait;
 use r2d2::Pool;
 use rusqlite::params;
 
@@ -139,6 +140,7 @@ impl SqliteAdvisoryCache {
     }
 }
 
+#[async_trait]
 impl AdvisoryReadCache for SqliteAdvisoryCache {
     async fn get(&self, advisory_id: &str) -> Option<CachedAdvisory> {
         let pool = Arc::clone(&self.pool);
@@ -177,6 +179,7 @@ impl AdvisoryReadCache for SqliteAdvisoryCache {
     }
 }
 
+#[async_trait]
 impl AdvisoryWriteCache for SqliteAdvisoryCache {
     async fn insert(&self, advisory: CachedAdvisory) {
         let pool = Arc::clone(&self.pool);

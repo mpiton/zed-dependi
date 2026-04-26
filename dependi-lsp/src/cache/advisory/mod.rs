@@ -9,6 +9,7 @@ pub mod sqlite;
 use std::sync::Arc;
 use std::time::{Duration, SystemTime};
 
+use async_trait::async_trait;
 use serde::{Deserialize, Serialize};
 
 pub use memory::{AdvisoryCacheStats, DEFAULT_ADVISORY_TTL, MemoryAdvisoryCache};
@@ -37,7 +38,8 @@ pub struct CachedAdvisory {
 /// Read-only access to the advisory cache.
 ///
 /// Mirrors [`crate::cache::ReadCache`] but specialised for advisory entries.
-#[allow(async_fn_in_trait)]
+/// Uses `#[async_trait]` so the trait remains dyn-compatible (`Arc<dyn …>`).
+#[async_trait]
 pub trait AdvisoryReadCache: Send + Sync {
     /// Fetch a cached advisory. Returns `None` on miss or expiry.
     async fn get(&self, advisory_id: &str) -> Option<CachedAdvisory>;
@@ -53,7 +55,7 @@ pub trait AdvisoryReadCache: Send + Sync {
 /// Mirrors [`crate::cache::WriteCache`] but specialised for advisory entries.
 /// Unlike `WriteCache`, the key is not passed separately — `CachedAdvisory`
 /// carries its own `id`.
-#[allow(async_fn_in_trait)]
+#[async_trait]
 pub trait AdvisoryWriteCache: AdvisoryReadCache {
     /// Insert (or replace) an advisory entry.
     ///
@@ -68,7 +70,8 @@ pub trait AdvisoryWriteCache: AdvisoryReadCache {
     async fn clear(&self);
 }
 
-impl<T: AdvisoryReadCache> AdvisoryReadCache for Arc<T> {
+#[async_trait]
+impl<T: AdvisoryReadCache + ?Sized> AdvisoryReadCache for Arc<T> {
     async fn get(&self, advisory_id: &str) -> Option<CachedAdvisory> {
         (**self).get(advisory_id).await
     }
@@ -78,7 +81,8 @@ impl<T: AdvisoryReadCache> AdvisoryReadCache for Arc<T> {
     }
 }
 
-impl<T: AdvisoryWriteCache> AdvisoryWriteCache for Arc<T> {
+#[async_trait]
+impl<T: AdvisoryWriteCache + ?Sized> AdvisoryWriteCache for Arc<T> {
     async fn insert(&self, advisory: CachedAdvisory) {
         (**self).insert(advisory).await
     }
@@ -98,12 +102,14 @@ impl<T: AdvisoryWriteCache> AdvisoryWriteCache for Arc<T> {
 #[derive(Clone, Copy, Debug, Default)]
 pub struct NullAdvisoryCache;
 
+#[async_trait]
 impl AdvisoryReadCache for NullAdvisoryCache {
     async fn get(&self, _advisory_id: &str) -> Option<CachedAdvisory> {
         None
     }
 }
 
+#[async_trait]
 impl AdvisoryWriteCache for NullAdvisoryCache {
     async fn insert(&self, _advisory: CachedAdvisory) {}
     async fn remove(&self, _advisory_id: &str) {}
@@ -189,6 +195,7 @@ impl Default for HybridAdvisoryCache {
     }
 }
 
+#[async_trait]
 impl AdvisoryReadCache for HybridAdvisoryCache {
     async fn get(&self, advisory_id: &str) -> Option<CachedAdvisory> {
         if let Some(value) = self.memory.get(advisory_id).await {
@@ -206,6 +213,7 @@ impl AdvisoryReadCache for HybridAdvisoryCache {
     }
 }
 
+#[async_trait]
 impl AdvisoryWriteCache for HybridAdvisoryCache {
     async fn insert(&self, advisory: CachedAdvisory) {
         self.memory.insert(advisory.clone()).await;
@@ -377,6 +385,7 @@ mod tests {
             value: Option<CachedAdvisory>,
         }
 
+        #[async_trait]
         impl AdvisoryReadCache for DummyCache {
             async fn get(&self, _id: &str) -> Option<CachedAdvisory> {
                 self.value.clone()

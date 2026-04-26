@@ -511,6 +511,7 @@ name = "dependi-lsp"
 version = "1.7.0"
 dependencies = [
  "anyhow",
+ "async-trait",
  "chrono",
  "clap",
  "criterion",
