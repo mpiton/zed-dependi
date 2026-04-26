@@ -129,7 +129,7 @@ impl MemoryCache {
 }
 
 impl ReadCache for MemoryCache {
-    fn get(&self, key: &str) -> Option<VersionInfo> {
+    async fn get(&self, key: &str) -> Option<VersionInfo> {
         self.entries.get(key).and_then(|entry| {
             if entry.is_expired() {
                 None
@@ -141,7 +141,7 @@ impl ReadCache for MemoryCache {
 }
 
 impl WriteCache for MemoryCache {
-    fn insert(&self, key: String, value: VersionInfo) {
+    async fn insert(&self, key: String, value: VersionInfo) {
         self.entries.insert(
             key,
             CacheEntry {
@@ -152,11 +152,11 @@ impl WriteCache for MemoryCache {
         );
     }
 
-    fn remove(&self, key: &str) {
+    async fn remove(&self, key: &str) {
         self.entries.remove(key);
     }
 
-    fn clear(&self) {
+    async fn clear(&self) {
         self.entries.clear();
     }
 }
