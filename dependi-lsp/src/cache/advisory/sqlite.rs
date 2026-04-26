@@ -395,4 +395,34 @@ mod tests {
         // Newer entry must still be present.
         assert_eq!(cache.get("RUSTSEC-2020-0036").await, Some(newer));
     }
+
+    #[tokio::test]
+    async fn corrupted_row_is_deleted_and_treated_as_miss() {
+        let cache = SqliteAdvisoryCache::in_memory().unwrap();
+        let now = current_timestamp();
+        {
+            let conn = cache.pool.get().unwrap();
+            conn.execute(
+                "INSERT INTO advisories (id, data, inserted_at, ttl_secs) VALUES (?, ?, ?, ?)",
+                params![
+                    "RUSTSEC-2020-0036",
+                    "{not valid json",
+                    now,
+                    DEFAULT_ADVISORY_TTL_SECS
+                ],
+            )
+            .unwrap();
+        }
+        assert!(cache.get("RUSTSEC-2020-0036").await.is_none());
+
+        let conn = cache.pool.get().unwrap();
+        let count: i64 = conn
+            .query_row(
+                "SELECT count(*) FROM advisories WHERE id = ?",
+                ["RUSTSEC-2020-0036"],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert_eq!(count, 0);
+    }
 }
