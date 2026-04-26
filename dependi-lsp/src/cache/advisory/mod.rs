@@ -200,6 +200,27 @@ mod tests {
         assert_eq!(hybrid.get("RUSTSEC-2020-0036").await, Some(advisory));
     }
 
+    #[tokio::test]
+    async fn hybrid_l2_hit_backfills_l1() {
+        let memory = MemoryAdvisoryCache::new();
+        let sqlite = Arc::new(SqliteAdvisoryCache::in_memory().expect("in-memory sqlite"));
+        let advisory = sample_found("RUSTSEC-2020-0036");
+        sqlite.insert(advisory.clone()).await;
+        let hybrid = HybridAdvisoryCache::from_parts(memory.clone(), Some(sqlite));
+
+        assert_eq!(hybrid.get(&advisory.id).await, Some(advisory.clone()));
+        // After the first read, the memory layer should hold it directly.
+        assert_eq!(memory.get(&advisory.id).await, Some(advisory));
+    }
+
+    #[tokio::test]
+    async fn hybrid_double_miss_returns_none() {
+        let memory = MemoryAdvisoryCache::new();
+        let sqlite = Arc::new(SqliteAdvisoryCache::in_memory().expect("in-memory sqlite"));
+        let hybrid = HybridAdvisoryCache::from_parts(memory, Some(sqlite));
+        assert!(hybrid.get("RUSTSEC-1990-0001").await.is_none());
+    }
+
     #[test]
     fn cached_advisory_round_trips_through_json() {
         let advisory = CachedAdvisory {
