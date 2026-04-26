@@ -870,6 +870,14 @@ pub struct DependiBackend {
     /// Vulnerability scanning
     osv_client: Arc<OsvClient>,
     vuln_cache: Arc<VulnerabilityCache>,
+    /// RustSec advisory cache (issue #237).
+    ///
+    /// Held on the struct so the background cleanup task spawned by
+    /// `HybridAdvisoryCache::spawn_default_cleanup_task` keeps a strong
+    /// reference to the underlying memory/SQLite layers for the lifetime of
+    /// the backend. Exposed via [`DependiBackend::advisory_cache`] for tests
+    /// and observability.
+    advisory_cache: Arc<crate::cache::HybridAdvisoryCache>,
     /// Per-(ecosystem, name, version) transitive vuln data.
     /// Populated during fresh OSV queries for transitive packages; read on cached re-attribution
     /// so subsequent document opens can still attribute transitives to their direct parents.
@@ -922,6 +930,23 @@ impl DependiBackend {
         // Create token provider manager for centralized auth management
         let token_manager = Arc::new(TokenProviderManager::new());
 
+        // Build the RustSec advisory cache (issue #237) and spawn its
+        // background cleanup task. The Arc is held on the struct so the
+        // spawned task keeps a strong reference to the cache layers.
+        let advisory_cache = Arc::new(crate::cache::HybridAdvisoryCache::new());
+        advisory_cache.spawn_default_cleanup_task();
+        let osv_client = match OsvClient::new_with_cache(
+            Arc::clone(&advisory_cache) as Arc<dyn crate::cache::AdvisoryWriteCache>
+        ) {
+            Ok(client) => Arc::new(client),
+            Err(err) => {
+                tracing::warn!(
+                    "OsvClient init with advisory cache failed ({err}); falling back to default"
+                );
+                Arc::new(OsvClient::default())
+            }
+        };
+
         Self {
             client,
             config: Arc::new(RwLock::new(config)),
@@ -948,13 +973,23 @@ impl DependiBackend {
             maven_central,
             http_client,
             token_manager,
-            osv_client: Arc::new(OsvClient::default()),
+            osv_client,
             vuln_cache: Arc::new(VulnerabilityCache::new()),
+            advisory_cache,
             transitive_vuln_data: Arc::new(DashMap::new()),
             debounce_tasks: Arc::new(DashMap::new()),
             debounce_generation: Arc::new(std::sync::atomic::AtomicU64::new(0)),
             pending_changes: Arc::new(DashMap::new()),
         }
+    }
+
+    /// Read access to the advisory cache (issue #237).
+    ///
+    /// Used by integration tests and observability tooling. Returns the
+    /// hybrid memory+SQLite cache that `OsvClient` consults before issuing
+    /// HTTP requests for individual RustSec advisories.
+    pub fn advisory_cache(&self) -> &Arc<crate::cache::HybridAdvisoryCache> {
+        &self.advisory_cache
     }
 
     fn create_processing_context(&self) -> ProcessingContext {
