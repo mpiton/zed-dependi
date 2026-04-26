@@ -1,7 +1,7 @@
 use std::path::PathBuf;
 use std::process::Command;
 
-use wiremock::matchers::{body_json, method, path, path_regex};
+use wiremock::matchers::{method, path, path_regex};
 use wiremock::{Mock, MockServer, ResponseTemplate};
 
 fn dependi_lsp_bin() -> String {
@@ -21,32 +21,39 @@ async fn test_scan_queries_osv_npm_ecosystem_and_reports_direct_vulnerabilities(
 
     Mock::given(method("POST"))
         .and(path("/querybatch"))
-        .and(body_json(serde_json::json!({
-            "queries": [
-                {
-                    "package": { "name": "react", "ecosystem": "npm" },
-                    "version": "18.2.0"
-                },
-                {
-                    "package": { "name": "scheduler", "ecosystem": "npm" },
-                    "version": "0.23.0"
-                }
-            ]
-        })))
-        .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
-            "results": [
-                {
-                    "vulns": [{
-                        "id": "CVE-NPM-DIRECT-001",
-                        "modified": "2024-01-01T00:00:00Z",
-                        "summary": "direct react vulnerability",
-                        "severity": [{ "type": "CVSS_V3", "score": "9.8" }],
-                        "references": [{ "type": "WEB", "url": "https://example.test/CVE-NPM-DIRECT-001" }]
-                    }]
-                },
-                { "vulns": [] }
-            ]
-        })))
+        .respond_with(|request: &wiremock::Request| {
+            let body: serde_json::Value = request
+                .body_json()
+                .expect("querybatch request body should be valid JSON");
+            let queries = body["queries"]
+                .as_array()
+                .expect("querybatch.queries should be an array");
+            let results: Vec<serde_json::Value> = queries
+                .iter()
+                .map(|query| {
+                    if query["package"]["name"] == "react"
+                        && query["package"]["ecosystem"] == "npm"
+                        && query["version"] == "18.2.0"
+                    {
+                        serde_json::json!({
+                            "vulns": [{
+                                "id": "CVE-NPM-DIRECT-001",
+                                "modified": "2024-01-01T00:00:00Z",
+                                "summary": "direct react vulnerability",
+                                "severity": [{ "type": "CVSS_V3", "score": "9.8" }],
+                                "references": [{ "type": "WEB", "url": "https://example.test/CVE-NPM-DIRECT-001" }]
+                            }]
+                        })
+                    } else {
+                        serde_json::json!({ "vulns": [] })
+                    }
+                })
+                .collect();
+
+            ResponseTemplate::new(200).set_body_json(serde_json::json!({
+                "results": results
+            }))
+        })
         .mount(&server)
         .await;
 
@@ -56,7 +63,7 @@ async fn test_scan_queries_osv_npm_ecosystem_and_reports_direct_vulnerabilities(
             "id": "CVE-NPM-DIRECT-001",
             "summary": "direct react vulnerability",
             "details": "test details",
-            "severity": [{ "type": "CVSS_V3", "score": "9.8" }],
+            "severity": [{ "type": "CVSS_V3", "score": "CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:H/I:H/A:H" }],
             "references": []
         })))
         .mount(&server)
@@ -70,6 +77,37 @@ async fn test_scan_queries_osv_npm_ecosystem_and_reports_direct_vulnerabilities(
         .arg(&fixture)
         .output()
         .expect("failed to run dependi-lsp");
+
+    let requests = server
+        .received_requests()
+        .await
+        .expect("failed to collect mock server requests");
+    let querybatch = requests
+        .iter()
+        .find(|request| request.url.path() == "/querybatch")
+        .expect("expected POST /querybatch");
+    let querybatch_body: serde_json::Value = querybatch
+        .body_json()
+        .expect("querybatch body should be valid JSON");
+    let queries = querybatch_body["queries"]
+        .as_array()
+        .expect("querybatch.queries should be an array");
+    let has_npm_query = |package_name: &str, version: &str| {
+        queries.iter().any(|query| {
+            query["package"]["name"] == package_name
+                && query["package"]["ecosystem"] == "npm"
+                && query["version"] == version
+        })
+    };
+
+    assert!(
+        has_npm_query("react", "18.2.0"),
+        "expected npm OSV query for react@18.2.0"
+    );
+    assert!(
+        has_npm_query("scheduler", "0.23.0"),
+        "expected npm OSV query for scheduler@0.23.0"
+    );
 
     assert_eq!(
         output.status.code(),
