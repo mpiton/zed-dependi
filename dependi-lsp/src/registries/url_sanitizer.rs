@@ -13,7 +13,13 @@ pub(crate) fn sanitize_repo_url(raw: &str) -> Option<String> {
     let trimmed = raw.trim();
     let stripped = trimmed.strip_prefix("git+").unwrap_or(trimmed);
 
-    let mut parsed = url::Url::parse(stripped).ok()?;
+    let normalized = if let Some(rest) = stripped.strip_prefix("git://") {
+        format!("https://{rest}")
+    } else {
+        stripped.to_string()
+    };
+
+    let mut parsed = url::Url::parse(&normalized).ok()?;
 
     if !matches!(parsed.scheme(), "http" | "https") {
         return None;
@@ -60,6 +66,22 @@ mod tests {
         assert_eq!(
             sanitize_repo_url("git+http://example.com/repo.git"),
             Some("http://example.com/repo".to_string())
+        );
+    }
+
+    #[test]
+    fn legacy_git_protocol_converted_to_https() {
+        assert_eq!(
+            sanitize_repo_url("git://github.com/user/repo"),
+            Some("https://github.com/user/repo".to_string())
+        );
+    }
+
+    #[test]
+    fn legacy_git_plus_git_protocol_converted_to_https() {
+        assert_eq!(
+            sanitize_repo_url("git+git://github.com/user/repo.git"),
+            Some("https://github.com/user/repo".to_string())
         );
     }
 }
