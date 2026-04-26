@@ -7,7 +7,7 @@ pub mod memory;
 pub mod sqlite;
 
 use std::sync::Arc;
-use std::time::SystemTime;
+use std::time::{Duration, SystemTime};
 
 use serde::{Deserialize, Serialize};
 
@@ -110,9 +110,95 @@ impl AdvisoryWriteCache for NullAdvisoryCache {
     async fn clear(&self) {}
 }
 
+/// Cleanup interval for the hybrid cache background task (30 minutes).
+pub const ADVISORY_CLEANUP_INTERVAL: Duration = Duration::from_secs(30 * 60);
+
+/// Two-tier advisory cache: in-memory L1 backed by SQLite L2.
+pub struct HybridAdvisoryCache {
+    memory: memory::MemoryAdvisoryCache,
+    sqlite: Option<Arc<sqlite::SqliteAdvisoryCache>>,
+}
+
+impl HybridAdvisoryCache {
+    /// Construct a hybrid cache, attempting to open the default SQLite path.
+    pub fn new() -> Self {
+        let sqlite = match sqlite::SqliteAdvisoryCache::new() {
+            Ok(cache) => {
+                tracing::info!("Advisory SQLite cache initialised");
+                Some(Arc::new(cache))
+            }
+            Err(err) => {
+                tracing::warn!(
+                    "Advisory SQLite cache unavailable, using memory only: {}",
+                    err
+                );
+                None
+            }
+        };
+        let memory = memory::MemoryAdvisoryCache::new();
+        Self { memory, sqlite }
+    }
+
+    /// Build directly from prepared layers (used by tests and by callers
+    /// that have constructed a custom SQLite cache).
+    pub fn from_parts(
+        memory: memory::MemoryAdvisoryCache,
+        sqlite: Option<Arc<sqlite::SqliteAdvisoryCache>>,
+    ) -> Self {
+        Self { memory, sqlite }
+    }
+}
+
+impl Default for HybridAdvisoryCache {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+impl AdvisoryReadCache for HybridAdvisoryCache {
+    async fn get(&self, advisory_id: &str) -> Option<CachedAdvisory> {
+        if let Some(value) = self.memory.get(advisory_id).await {
+            return Some(value);
+        }
+
+        if let Some(ref sqlite) = self.sqlite
+            && let Some(value) = sqlite.get(advisory_id).await
+        {
+            self.memory.insert(value.clone()).await;
+            return Some(value);
+        }
+
+        None
+    }
+}
+
 #[cfg(test)]
 mod tests {
+    use super::memory::MemoryAdvisoryCache;
+    use super::sqlite::SqliteAdvisoryCache;
     use super::*;
+
+    fn sample_found(id: &str) -> CachedAdvisory {
+        CachedAdvisory {
+            id: id.to_string(),
+            kind: AdvisoryKind::Found {
+                summary: Some("unmaintained".to_string()),
+                unmaintained: true,
+            },
+            fetched_at: SystemTime::UNIX_EPOCH,
+        }
+    }
+
+    #[tokio::test]
+    async fn hybrid_l1_hit_returns_without_consulting_l2() {
+        let memory = MemoryAdvisoryCache::new();
+        let sqlite = Arc::new(SqliteAdvisoryCache::in_memory().expect("in-memory sqlite"));
+        let advisory = sample_found("RUSTSEC-2020-0036");
+        memory.insert(advisory.clone()).await;
+        // Note: deliberately NOT inserting into SQLite.
+        let hybrid = HybridAdvisoryCache::from_parts(memory, Some(sqlite));
+        assert_eq!(hybrid.get("RUSTSEC-2020-0036").await, Some(advisory));
+    }
 
     #[test]
     fn cached_advisory_round_trips_through_json() {
