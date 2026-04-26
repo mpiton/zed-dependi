@@ -4,16 +4,20 @@ use std::path::PathBuf;
 use std::sync::Arc;
 #[cfg(test)]
 use std::sync::atomic::{AtomicU64, Ordering};
-use std::time::Duration;
-#[cfg(test)]
-use std::time::{SystemTime, UNIX_EPOCH};
+use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 use r2d2::Pool;
+use rusqlite::params;
 
 use crate::cache::sqlite_manager::SqliteConnectionManager;
 
+use super::{AdvisoryReadCache, AdvisoryWriteCache, CachedAdvisory};
+
 /// Default TTL for stored advisories (24 hours).
 pub const DEFAULT_ADVISORY_TTL_SECS: i64 = 86_400;
+
+/// Nanoseconds per second — matches `cache::sqlite::NANOS_PER_SEC`.
+const NANOS_PER_SEC: i64 = 1_000_000_000;
 
 #[cfg(test)]
 static TEST_DB_COUNTER: AtomicU64 = AtomicU64::new(0);
@@ -95,10 +99,6 @@ impl SqliteAdvisoryCache {
              ON advisories(inserted_at, ttl_secs)",
             [],
         )?;
-        tracing::debug!(
-            ttl_secs = self.ttl_secs,
-            "SqliteAdvisoryCache schema initialised"
-        );
         Ok(())
     }
 
@@ -123,7 +123,99 @@ impl SqliteAdvisoryCache {
     }
 }
 
-#[cfg(test)]
+impl AdvisoryReadCache for SqliteAdvisoryCache {
+    async fn get(&self, advisory_id: &str) -> Option<CachedAdvisory> {
+        let pool = Arc::clone(&self.pool);
+        let id = advisory_id.to_string();
+        tokio::task::spawn_blocking(move || {
+            let conn = pool.get().ok()?;
+            let now = current_timestamp();
+            let row: Result<(String, i64, i64), _> = conn.query_row(
+                "SELECT data, inserted_at, ttl_secs FROM advisories WHERE id = ?",
+                [id.as_str()],
+                |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
+            );
+            match row {
+                Ok((data, inserted_at, ttl_secs)) => {
+                    if now > inserted_at + ttl_secs * NANOS_PER_SEC {
+                        let _ = conn.execute("DELETE FROM advisories WHERE id = ?", [id.as_str()]);
+                        None
+                    } else {
+                        match serde_json::from_str::<CachedAdvisory>(&data) {
+                            Ok(advisory) => Some(advisory),
+                            Err(err) => {
+                                tracing::warn!("Corrupted advisory cache row for {}: {}", id, err);
+                                let _ = conn
+                                    .execute("DELETE FROM advisories WHERE id = ?", [id.as_str()]);
+                                None
+                            }
+                        }
+                    }
+                }
+                Err(_) => None,
+            }
+        })
+        .await
+        .ok()
+        .flatten()
+    }
+}
+
+impl AdvisoryWriteCache for SqliteAdvisoryCache {
+    async fn insert(&self, advisory: CachedAdvisory) {
+        let pool = Arc::clone(&self.pool);
+        let ttl_secs = self.ttl_secs;
+        let now = current_timestamp();
+        let id = advisory.id.clone();
+        let data = match serde_json::to_string(&advisory) {
+            Ok(s) => s,
+            Err(err) => {
+                tracing::warn!("Failed to serialise advisory {}: {}", id, err);
+                return;
+            }
+        };
+        let _ = tokio::task::spawn_blocking(move || {
+            let Some(conn) = pool.get().ok() else {
+                return;
+            };
+            let _ = conn.execute(
+                "INSERT INTO advisories (id, data, inserted_at, ttl_secs) \
+                 VALUES (?, ?, ?, ?) \
+                 ON CONFLICT(id) DO UPDATE SET \
+                   data = excluded.data, \
+                   inserted_at = excluded.inserted_at, \
+                   ttl_secs = excluded.ttl_secs \
+                 WHERE excluded.inserted_at >= advisories.inserted_at",
+                params![id, data, now, ttl_secs],
+            );
+        })
+        .await;
+    }
+
+    async fn remove(&self, advisory_id: &str) {
+        let pool = Arc::clone(&self.pool);
+        let id = advisory_id.to_string();
+        let _ = tokio::task::spawn_blocking(move || {
+            let Some(conn) = pool.get().ok() else {
+                return;
+            };
+            let _ = conn.execute("DELETE FROM advisories WHERE id = ?", [id.as_str()]);
+        })
+        .await;
+    }
+
+    async fn clear(&self) {
+        let pool = Arc::clone(&self.pool);
+        let _ = tokio::task::spawn_blocking(move || {
+            let Some(conn) = pool.get().ok() else {
+                return;
+            };
+            let _ = conn.execute("DELETE FROM advisories", []);
+        })
+        .await;
+    }
+}
+
 fn current_timestamp() -> i64 {
     let nanos = SystemTime::now()
         .duration_since(UNIX_EPOCH)
@@ -175,5 +267,34 @@ mod tests {
             .expect("open in-memory cache")
             .with_ttl_secs(42);
         assert_eq!(cache.ttl_secs, 42);
+    }
+
+    use std::time::SystemTime;
+
+    use super::super::{AdvisoryKind, CachedAdvisory};
+
+    fn sample_found() -> CachedAdvisory {
+        CachedAdvisory {
+            id: "RUSTSEC-2020-0036".to_string(),
+            kind: AdvisoryKind::Found {
+                summary: Some("unmaintained".to_string()),
+                unmaintained: true,
+            },
+            fetched_at: SystemTime::UNIX_EPOCH,
+        }
+    }
+
+    #[tokio::test]
+    async fn insert_then_get_returns_advisory() {
+        let cache = SqliteAdvisoryCache::in_memory().unwrap();
+        let advisory = sample_found();
+        cache.insert(advisory.clone()).await;
+        assert_eq!(cache.get(&advisory.id).await, Some(advisory));
+    }
+
+    #[tokio::test]
+    async fn get_unknown_id_returns_none() {
+        let cache = SqliteAdvisoryCache::in_memory().unwrap();
+        assert!(cache.get("RUSTSEC-2099-9999").await.is_none());
     }
 }
