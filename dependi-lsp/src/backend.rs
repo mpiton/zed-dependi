@@ -930,10 +930,15 @@ impl DependiBackend {
         // Create token provider manager for centralized auth management
         let token_manager = Arc::new(TokenProviderManager::new());
 
-        // Build the RustSec advisory cache (issue #237) and spawn its
-        // background cleanup task. The Arc is held on the struct so the
-        // spawned task keeps a strong reference to the cache layers.
-        let advisory_cache = Arc::new(crate::cache::HybridAdvisoryCache::new());
+        // Build the RustSec advisory cache (issue #237) from configuration
+        // and spawn its background cleanup task. The Arc is held on the
+        // struct so the spawned task keeps a strong reference to the cache
+        // layers. When `advisory_cache.enabled = false`, `from_config`
+        // returns a zero-TTL hybrid that always misses — so we keep a
+        // single concrete field type and avoid downstream branching.
+        let advisory_cache = Arc::new(crate::cache::HybridAdvisoryCache::from_config(
+            &config.advisory_cache,
+        ));
         advisory_cache.spawn_default_cleanup_task();
         let osv_client = match OsvClient::new_with_cache(
             Arc::clone(&advisory_cache) as Arc<dyn crate::cache::AdvisoryWriteCache>

@@ -154,6 +154,41 @@ impl HybridAdvisoryCache {
         Self { memory, sqlite }
     }
 
+    /// Build a hybrid cache from an [`AdvisoryCacheConfig`] (issue #237).
+    ///
+    /// When `config.enabled` is `false`, returns a hybrid whose memory layer
+    /// has a zero-second TTL and no SQLite backing. Every read therefore
+    /// misses, which matches the "caching disabled" semantics without
+    /// requiring callers to branch on a different concrete type.
+    ///
+    /// When `enabled` is `true`, the memory TTL is taken from
+    /// `config.ttl_secs` and the SQLite layer is opened at `config.db_path`
+    /// (or the default location). A SQLite open failure is logged and falls
+    /// back to a memory-only hybrid — matching pre-existing `new()` behaviour.
+    pub fn from_config(config: &crate::config::AdvisoryCacheConfig) -> Self {
+        if !config.enabled {
+            return Self::from_parts(
+                memory::MemoryAdvisoryCache::with_ttl(Duration::from_secs(0)),
+                None,
+            );
+        }
+        let memory = memory::MemoryAdvisoryCache::with_ttl(Duration::from_secs(config.ttl_secs));
+        let sqlite = match sqlite::SqliteAdvisoryCache::from_config(config) {
+            Ok(cache) => {
+                tracing::info!("Advisory SQLite cache initialised from config");
+                Some(Arc::new(cache))
+            }
+            Err(err) => {
+                tracing::warn!(
+                    "Advisory SQLite cache unavailable, using memory only: {}",
+                    err
+                );
+                None
+            }
+        };
+        Self::from_parts(memory, sqlite)
+    }
+
     /// Spawn a background task that periodically prunes expired entries from
     /// both layers. The default interval is [`ADVISORY_CLEANUP_INTERVAL`].
     pub fn spawn_default_cleanup_task(self: &Arc<Self>) {
@@ -484,6 +519,73 @@ mod tests {
         let cache = NullAdvisoryCache;
         assert_eq!(cache.get("RUSTSEC-2020-0036").await, None);
         assert!(!cache.contains("RUSTSEC-2020-0036").await);
+    }
+
+    #[tokio::test]
+    async fn from_config_disabled_returns_hybrid_that_always_misses() {
+        let config = crate::config::AdvisoryCacheConfig {
+            enabled: false,
+            ttl_secs: 86_400,
+            negative_ttl_secs: 3_600,
+            db_path: None,
+        };
+        let hybrid = HybridAdvisoryCache::from_config(&config);
+        // Insert an advisory, then read it back: a zero-TTL hybrid must miss
+        // even immediately after insertion.
+        hybrid
+            .insert(CachedAdvisory {
+                id: "RUSTSEC-2020-0036".to_string(),
+                kind: AdvisoryKind::NotFound,
+                fetched_at: SystemTime::now(),
+            })
+            .await;
+        // Wait one tick to ensure the zero TTL has definitely elapsed.
+        tokio::time::sleep(Duration::from_millis(2)).await;
+        assert!(hybrid.get("RUSTSEC-2020-0036").await.is_none());
+    }
+
+    #[tokio::test]
+    async fn from_config_enabled_uses_configured_ttl_for_memory_layer() {
+        let tmp = tempfile::tempdir().expect("tmp dir");
+        let config = crate::config::AdvisoryCacheConfig {
+            enabled: true,
+            ttl_secs: 3_600,
+            negative_ttl_secs: 60,
+            db_path: Some(tmp.path().join("advisory_cache.db")),
+        };
+        let hybrid = HybridAdvisoryCache::from_config(&config);
+        hybrid
+            .insert(CachedAdvisory {
+                id: "RUSTSEC-2020-0036".to_string(),
+                kind: AdvisoryKind::NotFound,
+                fetched_at: SystemTime::now(),
+            })
+            .await;
+        // With ttl_secs = 3600 the entry must be present immediately.
+        assert!(hybrid.get("RUSTSEC-2020-0036").await.is_some());
+    }
+
+    #[tokio::test]
+    async fn from_config_enabled_with_unwritable_path_falls_back_to_memory_only() {
+        // A path inside a non-existent directory hierarchy SQLite cannot
+        // create — we must NOT panic; the hybrid should fall back to memory.
+        let config = crate::config::AdvisoryCacheConfig {
+            enabled: true,
+            ttl_secs: 60,
+            negative_ttl_secs: 30,
+            db_path: Some(std::path::PathBuf::from(
+                "/this/path/should/not/exist/dependi/advisory_cache.db",
+            )),
+        };
+        let hybrid = HybridAdvisoryCache::from_config(&config);
+        hybrid
+            .insert(CachedAdvisory {
+                id: "RUSTSEC-2020-0036".to_string(),
+                kind: AdvisoryKind::NotFound,
+                fetched_at: SystemTime::now(),
+            })
+            .await;
+        assert!(hybrid.get("RUSTSEC-2020-0036").await.is_some());
     }
 
     #[tokio::test]

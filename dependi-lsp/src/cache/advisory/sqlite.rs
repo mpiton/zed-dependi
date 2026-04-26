@@ -35,6 +35,23 @@ impl SqliteAdvisoryCache {
         Self::with_path(path, DEFAULT_ADVISORY_TTL_SECS)
     }
 
+    /// Build a cache from an [`AdvisoryCacheConfig`] (issue #237).
+    ///
+    /// Uses `config.db_path` if set, otherwise the default cache location.
+    /// Returns an error if the database directory cannot be created or the
+    /// connection pool cannot be built.
+    pub fn from_config(config: &crate::config::AdvisoryCacheConfig) -> anyhow::Result<Self> {
+        let path = match &config.db_path {
+            Some(p) => p.clone(),
+            None => {
+                let cache_dir = Self::cache_dir()?;
+                std::fs::create_dir_all(&cache_dir)?;
+                cache_dir.join("advisory_cache.db")
+            }
+        };
+        Self::with_path(path, config.ttl_secs as i64)
+    }
+
     /// Build a cache at a custom path, with a custom TTL.
     pub fn with_path(path: PathBuf, ttl_secs: i64) -> anyhow::Result<Self> {
         let manager = SqliteConnectionManager::file_with_config(&path, 5_000, 64_000);
