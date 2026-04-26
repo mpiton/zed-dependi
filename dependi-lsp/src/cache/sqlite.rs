@@ -6,7 +6,7 @@ use std::sync::Arc;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
-use super::sqlite_manager::SqliteConnectionManager;
+use super::sqlite_manager::{NANOS_PER_SEC, SqliteConnectionManager};
 use r2d2::Pool;
 use rusqlite::params;
 
@@ -403,10 +403,6 @@ pub struct PoolState {
     /// Number of idle connections available
     pub idle_connections: u32,
 }
-
-/// Nanoseconds in one second — used to convert `ttl_secs` to the same unit as
-/// `inserted_at` when computing expiration in SQL queries.
-const NANOS_PER_SEC: i64 = 1_000_000_000;
 
 /// Current Unix time in nanoseconds.
 ///

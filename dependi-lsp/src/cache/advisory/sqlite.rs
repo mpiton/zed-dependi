@@ -10,15 +10,12 @@ use async_trait::async_trait;
 use r2d2::Pool;
 use rusqlite::params;
 
-use crate::cache::sqlite_manager::SqliteConnectionManager;
+use crate::cache::sqlite_manager::{NANOS_PER_SEC, SqliteConnectionManager};
 
 use super::{AdvisoryReadCache, AdvisoryWriteCache, CachedAdvisory};
 
 /// Default TTL for stored advisories (24 hours).
 pub const DEFAULT_ADVISORY_TTL_SECS: i64 = 86_400;
-
-/// Nanoseconds per second — matches `cache::sqlite::NANOS_PER_SEC`.
-const NANOS_PER_SEC: i64 = 1_000_000_000;
 
 #[cfg(test)]
 static TEST_DB_COUNTER: AtomicU64 = AtomicU64::new(0);
