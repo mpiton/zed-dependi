@@ -7,7 +7,7 @@ use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 use super::sqlite_manager::SqliteConnectionManager;
-use r2d2::{Pool, PooledConnection};
+use r2d2::Pool;
 use rusqlite::params;
 
 use crate::cache::{ReadCache, WriteCache};
@@ -162,11 +162,6 @@ impl SqliteCache {
         let cache_dir = dirs::cache_dir()
             .ok_or_else(|| anyhow::anyhow!("Could not determine cache directory"))?;
         Ok(cache_dir.join("dependi"))
-    }
-
-    /// Get a connection from the pool, returning None if unavailable
-    fn get_conn(&self) -> Option<PooledConnection<SqliteConnectionManager>> {
-        self.pool.get().ok()
     }
 
     /// Initialize the database schema with WAL mode
