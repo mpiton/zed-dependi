@@ -11,6 +11,8 @@ use std::time::SystemTime;
 
 use serde::{Deserialize, Serialize};
 
+pub use memory::{DEFAULT_ADVISORY_TTL, MemoryAdvisoryCache};
+
 /// Cached classification of a single OSV advisory.
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub enum AdvisoryKind {
