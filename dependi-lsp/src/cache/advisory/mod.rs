@@ -147,6 +147,40 @@ impl HybridAdvisoryCache {
     ) -> Self {
         Self { memory, sqlite }
     }
+
+    /// Spawn a background task that periodically prunes expired entries from
+    /// both layers. The default interval is [`ADVISORY_CLEANUP_INTERVAL`].
+    pub fn spawn_default_cleanup_task(self: &Arc<Self>) {
+        self.spawn_cleanup_task(ADVISORY_CLEANUP_INTERVAL);
+    }
+
+    /// Spawn the cleanup task with a custom interval (used by tests).
+    pub fn spawn_cleanup_task(self: &Arc<Self>, interval: Duration) {
+        let memory = self.memory.clone();
+        let sqlite = self.sqlite.clone();
+        tokio::spawn(async move {
+            let mut ticker = tokio::time::interval(interval);
+            ticker.tick().await; // skip immediate fire
+            loop {
+                ticker.tick().await;
+                let removed = memory.cleanup_expired();
+                if removed > 0 {
+                    tracing::debug!("Advisory cache: pruned {} expired memory entries", removed);
+                }
+                if let Some(ref sqlite) = sqlite {
+                    match sqlite.cleanup_expired().await {
+                        Ok(rows) if rows > 0 => {
+                            tracing::debug!("Advisory cache: pruned {} expired SQLite rows", rows);
+                        }
+                        Ok(_) => {}
+                        Err(err) => {
+                            tracing::warn!("Advisory cache cleanup failed for SQLite: {}", err);
+                        }
+                    }
+                }
+            }
+        });
+    }
 }
 
 impl Default for HybridAdvisoryCache {
@@ -293,6 +327,21 @@ mod tests {
 
         hybrid.insert(advisory.clone()).await;
         assert_eq!(hybrid.get(&advisory.id).await, Some(advisory));
+    }
+
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn background_cleanup_removes_expired_memory_entries() {
+        let memory = MemoryAdvisoryCache::with_ttl(Duration::from_millis(20));
+        memory.insert(sample_found("RUSTSEC-2020-0036")).await;
+        let sqlite = Arc::new(SqliteAdvisoryCache::in_memory().expect("in-memory sqlite"));
+        let hybrid = Arc::new(HybridAdvisoryCache::from_parts(
+            memory.clone(),
+            Some(sqlite),
+        ));
+        hybrid.spawn_cleanup_task(Duration::from_millis(40));
+
+        tokio::time::sleep(Duration::from_millis(120)).await;
+        assert!(memory.get("RUSTSEC-2020-0036").await.is_none());
     }
 
     #[test]
