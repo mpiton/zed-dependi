@@ -3,34 +3,49 @@
 //! Allows only `http`/`https` URLs after stripping common package-manager
 //! prefixes (`git+`) and suffixes (`.git`). Any other scheme is dropped.
 
+const ALLOWED_SCHEMES: &[&str] = &["http", "https"];
+
 /// Sanitize a repository URL from package metadata.
 ///
-/// Returns `Some(url)` only if the resulting scheme is `http` or `https`
-/// after stripping known package-manager prefixes (`git+`) and suffixes
-/// (`.git`). Returns `None` for any other scheme, empty input, or
-/// unparseable input.
+/// Accepted input shapes:
+///   * `https://...`, `http://...`
+///   * `git+https://...`, `git+http://...` (the `git+` prefix is stripped)
+///   * `git://...`, `git+git://...` (rewritten to `https://` for legacy compat)
+///
+/// Anything else (`ssh`, `git+ssh`, `ftp`, `file`, `javascript`, `data`,
+/// `mailto`, unparseable input, empty/whitespace input) returns `None`.
+///
+/// A trailing `.git` is stripped from the path; query and fragment are
+/// preserved. The scheme is normalized to lowercase by the underlying URL
+/// parser.
 pub(crate) fn sanitize_repo_url(raw: &str) -> Option<String> {
-    let trimmed = raw.trim();
-    let stripped = trimmed.strip_prefix("git+").unwrap_or(trimmed);
-
-    let normalized = if let Some(rest) = stripped.strip_prefix("git://") {
-        format!("https://{rest}")
-    } else {
-        stripped.to_string()
-    };
-
+    let normalized = normalize_compound_scheme(raw.trim());
     let mut parsed = url::Url::parse(&normalized).ok()?;
 
-    if !matches!(parsed.scheme(), "http" | "https") {
+    if !ALLOWED_SCHEMES.contains(&parsed.scheme()) {
         return None;
     }
 
-    let path = parsed.path().to_string();
-    if let Some(without_git) = path.strip_suffix(".git") {
-        parsed.set_path(without_git);
-    }
-
+    strip_dot_git_suffix(&mut parsed);
     Some(parsed.to_string())
+}
+
+/// Strip the `git+` prefix and rewrite legacy `git://` to `https://`.
+fn normalize_compound_scheme(input: &str) -> String {
+    let without_prefix = input.strip_prefix("git+").unwrap_or(input);
+    if let Some(rest) = without_prefix.strip_prefix("git://") {
+        format!("https://{rest}")
+    } else {
+        without_prefix.to_string()
+    }
+}
+
+/// Remove a trailing `.git` from the URL path, in place.
+fn strip_dot_git_suffix(url: &mut url::Url) {
+    let path = url.path().to_string();
+    if let Some(without_git) = path.strip_suffix(".git") {
+        url.set_path(without_git);
+    }
 }
 
 #[cfg(test)]
