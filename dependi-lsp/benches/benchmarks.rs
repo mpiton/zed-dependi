@@ -474,6 +474,9 @@ fn bench_parsers(c: &mut Criterion) {
 // =============================================================================
 
 fn bench_memory_cache(c: &mut Criterion) {
+    use tokio::runtime::Runtime;
+
+    let rt = Runtime::new().unwrap();
     let mut group = c.benchmark_group("cache/memory");
 
     for entry_count in [100, 1000, 10000] {
@@ -482,15 +485,20 @@ fn bench_memory_cache(c: &mut Criterion) {
         // Pre-populate cache
         for i in 0..entry_count {
             let info = create_version_info();
-            cache.insert(format!("package_{i}"), info);
+            rt.block_on(cache.insert(format!("package_{i}"), info));
         }
+
+        // Use a key guaranteed to exist for the current parameter set so the
+        // benchmark always exercises the hit path (`package_500` is missing
+        // when `entry_count == 100`).
+        let hit_key = format!("package_{}", entry_count / 2);
 
         group.bench_with_input(
             BenchmarkId::new("get_hit", entry_count),
             &cache,
             |b, cache| {
                 b.iter(|| {
-                    black_box(cache.get("package_500"));
+                    black_box(rt.block_on(cache.get(&hit_key)));
                 });
             },
         );
@@ -500,7 +508,7 @@ fn bench_memory_cache(c: &mut Criterion) {
             &cache,
             |b, cache| {
                 b.iter(|| {
-                    black_box(cache.get("nonexistent_package"));
+                    black_box(rt.block_on(cache.get("nonexistent_package")));
                 });
             },
         );
@@ -511,7 +519,7 @@ fn bench_memory_cache(c: &mut Criterion) {
             |b, cache| {
                 let mut i = entry_count;
                 b.iter(|| {
-                    cache.insert(format!("new_package_{i}"), create_version_info());
+                    rt.block_on(cache.insert(format!("new_package_{i}"), create_version_info()));
                     i += 1;
                 });
             },
@@ -523,7 +531,9 @@ fn bench_memory_cache(c: &mut Criterion) {
 
 fn bench_sqlite_cache(c: &mut Criterion) {
     use std::path::PathBuf;
+    use tokio::runtime::Runtime;
 
+    let rt = Runtime::new().unwrap();
     let mut group = c.benchmark_group("cache/sqlite");
 
     // Use a temporary file for benchmarks since in_memory() is cfg(test) only
@@ -539,18 +549,22 @@ fn bench_sqlite_cache(c: &mut Criterion) {
 
     for entry_count in [100, 1000] {
         // Clear and pre-populate cache
-        cache.clear();
+        rt.block_on(cache.clear());
         for i in 0..entry_count {
             let info = create_version_info();
-            cache.insert(format!("package_{i}"), info);
+            rt.block_on(cache.insert(format!("package_{i}"), info));
         }
+
+        // Use a key guaranteed to exist for the current parameter set so the
+        // benchmark always exercises the hit path.
+        let hit_key = format!("package_{}", entry_count / 2);
 
         group.bench_with_input(
             BenchmarkId::new("get_hit", entry_count),
             &entry_count,
             |b, _| {
                 b.iter(|| {
-                    black_box(cache.get("package_500"));
+                    black_box(rt.block_on(cache.get(&hit_key)));
                 });
             },
         );
@@ -560,7 +574,7 @@ fn bench_sqlite_cache(c: &mut Criterion) {
             &entry_count,
             |b, _| {
                 b.iter(|| {
-                    black_box(cache.get("nonexistent_package"));
+                    black_box(rt.block_on(cache.get("nonexistent_package")));
                 });
             },
         );
@@ -571,10 +585,10 @@ fn bench_sqlite_cache(c: &mut Criterion) {
             &entry_count,
             |b, _| {
                 b.iter(|| {
-                    cache.insert(
+                    rt.block_on(cache.insert(
                         format!("new_package_{insert_counter}"),
                         create_version_info(),
-                    );
+                    ));
                     insert_counter += 1;
                 });
             },

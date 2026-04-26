@@ -129,8 +129,8 @@ fn test_parse_realistic_package_json() {
 }
 
 /// Test cache integration
-#[test]
-fn test_cache_integration() {
+#[tokio::test]
+async fn test_cache_integration() {
     let cache = MemoryCache::new();
 
     // Insert some version info
@@ -150,15 +150,17 @@ fn test_cache_integration() {
         transitive_vulnerabilities: vec![],
     };
 
-    cache.insert("crates:serde".to_string(), serde_info.clone());
+    cache
+        .insert("crates:serde".to_string(), serde_info.clone())
+        .await;
 
     // Retrieve and verify
-    let retrieved = cache.get("crates:serde").unwrap();
+    let retrieved = cache.get("crates:serde").await.unwrap();
     assert_eq!(retrieved.latest, Some("1.0.200".to_string()));
     assert_eq!(retrieved.license, Some("MIT OR Apache-2.0".to_string()));
 
     // Test cache miss
-    assert!(cache.get("crates:nonexistent").is_none());
+    assert!(cache.get("crates:nonexistent").await.is_none());
 }
 
 /// Test inlay hint generation with various scenarios

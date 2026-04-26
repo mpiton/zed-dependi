@@ -29,15 +29,19 @@ pub use sqlite::SqliteCache;
 /// This trait defines the minimal interface for reading cached values.
 /// Implementations can provide additional write operations via the
 /// [`WriteCache`] trait.
+///
+/// Note: `async_fn_in_trait` is allowed because this trait is internal and
+/// already bounds `Send + Sync`. Pattern matches `crate::registries::Registry`.
+#[allow(async_fn_in_trait)]
 pub trait ReadCache: Send + Sync {
-    /// Get a value from the cache
+    /// Get a value from the cache.
     ///
     /// Returns `None` if the key doesn't exist or the entry is expired.
-    fn get(&self, key: &str) -> Option<VersionInfo>;
+    async fn get(&self, key: &str) -> Option<VersionInfo>;
 
-    /// Check if a key exists in the cache (without fetching the value)
-    fn contains(&self, key: &str) -> bool {
-        self.get(key).is_some()
+    /// Check if a key exists in the cache (without fetching the value).
+    async fn contains(&self, key: &str) -> bool {
+        self.get(key).await.is_some()
     }
 }
 
@@ -46,40 +50,41 @@ pub trait ReadCache: Send + Sync {
 /// This trait extends [`ReadCache`] with the ability to insert and update
 /// cache entries. Caches that support both read and write operations should
 /// implement this trait.
+#[allow(async_fn_in_trait)]
 pub trait WriteCache: ReadCache {
-    /// Insert a value into the cache
+    /// Insert a value into the cache.
     ///
     /// If a value with the same key already exists, it will be overwritten.
-    fn insert(&self, key: String, value: VersionInfo);
+    async fn insert(&self, key: String, value: VersionInfo);
 
-    /// Remove a value from the cache
-    fn remove(&self, key: &str);
+    /// Remove a value from the cache.
+    async fn remove(&self, key: &str);
 
-    /// Clear all entries from the cache
-    fn clear(&self);
+    /// Clear all entries from the cache.
+    async fn clear(&self);
 }
 
 impl<T: ReadCache> ReadCache for Arc<T> {
-    fn get(&self, key: &str) -> Option<VersionInfo> {
-        (**self).get(key)
+    async fn get(&self, key: &str) -> Option<VersionInfo> {
+        (**self).get(key).await
     }
 
-    fn contains(&self, key: &str) -> bool {
-        (**self).contains(key)
+    async fn contains(&self, key: &str) -> bool {
+        (**self).contains(key).await
     }
 }
 
 impl<T: WriteCache> WriteCache for Arc<T> {
-    fn insert(&self, key: String, value: VersionInfo) {
-        (**self).insert(key, value)
+    async fn insert(&self, key: String, value: VersionInfo) {
+        (**self).insert(key, value).await
     }
 
-    fn remove(&self, key: &str) {
-        (**self).remove(key)
+    async fn remove(&self, key: &str) {
+        (**self).remove(key).await
     }
 
-    fn clear(&self) {
-        (**self).clear()
+    async fn clear(&self) {
+        (**self).clear().await
     }
 }
 
@@ -124,7 +129,7 @@ impl MemoryCache {
 }
 
 impl ReadCache for MemoryCache {
-    fn get(&self, key: &str) -> Option<VersionInfo> {
+    async fn get(&self, key: &str) -> Option<VersionInfo> {
         self.entries.get(key).and_then(|entry| {
             if entry.is_expired() {
                 None
@@ -136,7 +141,7 @@ impl ReadCache for MemoryCache {
 }
 
 impl WriteCache for MemoryCache {
-    fn insert(&self, key: String, value: VersionInfo) {
+    async fn insert(&self, key: String, value: VersionInfo) {
         self.entries.insert(
             key,
             CacheEntry {
@@ -147,11 +152,11 @@ impl WriteCache for MemoryCache {
         );
     }
 
-    fn remove(&self, key: &str) {
+    async fn remove(&self, key: &str) {
         self.entries.remove(key);
     }
 
-    fn clear(&self) {
+    async fn clear(&self) {
         self.entries.clear();
     }
 }
@@ -287,14 +292,21 @@ impl HybridCache {
                     );
                 }
 
-                if let Some(ref sqlite) = sqlite
-                    && let Ok(rows) = sqlite.cleanup_expired()
-                    && rows > 0
-                {
-                    tracing::info!(
-                        "Background cleanup: removed {} expired entries from SQLite cache",
-                        rows
-                    );
+                if let Some(ref sqlite) = sqlite {
+                    match sqlite.cleanup_expired().await {
+                        Ok(rows) if rows > 0 => {
+                            tracing::info!(
+                                "Background cleanup: removed {} expired entries from SQLite cache",
+                                rows
+                            );
+                        }
+                        Ok(_) => {}
+                        Err(err) => {
+                            tracing::error!(
+                                "Background cleanup: SQLite cleanup_expired failed: {err}"
+                            );
+                        }
+                    }
                 }
             }
         });
@@ -302,18 +314,18 @@ impl HybridCache {
 }
 
 impl ReadCache for HybridCache {
-    fn get(&self, key: &str) -> Option<VersionInfo> {
+    async fn get(&self, key: &str) -> Option<VersionInfo> {
         // Fast path: check memory cache first
-        if let Some(value) = self.memory.get(key) {
+        if let Some(value) = self.memory.get(key).await {
             return Some(value);
         }
 
         // Slow path: check SQLite cache
         if let Some(ref sqlite) = self.sqlite
-            && let Some(value) = sqlite.get(key)
+            && let Some(value) = sqlite.get(key).await
         {
             // Populate memory cache for future fast access
-            self.memory.insert(key.to_string(), value.clone());
+            self.memory.insert(key.to_string(), value.clone()).await;
             return Some(value);
         }
 
@@ -322,24 +334,24 @@ impl ReadCache for HybridCache {
 }
 
 impl WriteCache for HybridCache {
-    fn insert(&self, key: String, value: VersionInfo) {
-        self.memory.insert(key.clone(), value.clone());
+    async fn insert(&self, key: String, value: VersionInfo) {
+        self.memory.insert(key.clone(), value.clone()).await;
         if let Some(ref sqlite) = self.sqlite {
-            sqlite.insert(key, value);
+            sqlite.insert(key, value).await;
         }
     }
 
-    fn remove(&self, key: &str) {
-        self.memory.remove(key);
+    async fn remove(&self, key: &str) {
+        self.memory.remove(key).await;
         if let Some(ref sqlite) = self.sqlite {
-            sqlite.remove(key);
+            sqlite.remove(key).await;
         }
     }
 
-    fn clear(&self) {
-        self.memory.clear();
+    async fn clear(&self) {
+        self.memory.clear().await;
         if let Some(ref sqlite) = self.sqlite {
-            sqlite.clear();
+            sqlite.clear().await;
         }
     }
 }
@@ -366,12 +378,16 @@ mod tests {
         }
     }
 
-    #[test]
-    fn test_memory_cache_cleanup_expired() {
+    #[tokio::test]
+    async fn test_memory_cache_cleanup_expired() {
         let cache = MemoryCache::with_ttl(Duration::from_millis(10));
 
-        cache.insert("key1".to_string(), create_test_version_info());
-        cache.insert("key2".to_string(), create_test_version_info());
+        cache
+            .insert("key1".to_string(), create_test_version_info())
+            .await;
+        cache
+            .insert("key2".to_string(), create_test_version_info())
+            .await;
 
         assert_eq!(cache.len(), 2);
 
@@ -383,17 +399,21 @@ mod tests {
         assert_eq!(cache.len(), 0);
     }
 
-    #[test]
-    fn test_memory_cache_cleanup_partial() {
+    #[tokio::test]
+    async fn test_memory_cache_cleanup_partial() {
         let cache = MemoryCache::with_ttl(Duration::from_millis(200));
 
-        cache.insert("key1".to_string(), create_test_version_info());
+        cache
+            .insert("key1".to_string(), create_test_version_info())
+            .await;
 
         // Wait for first entry to almost expire
         std::thread::sleep(Duration::from_millis(150));
 
         // Insert second entry
-        cache.insert("key2".to_string(), create_test_version_info());
+        cache
+            .insert("key2".to_string(), create_test_version_info())
+            .await;
 
         // Wait for first to expire but not second
         std::thread::sleep(Duration::from_millis(100));
@@ -401,15 +421,19 @@ mod tests {
         let removed = cache.cleanup_expired();
         assert_eq!(removed, 1);
         assert_eq!(cache.len(), 1);
-        assert!(cache.get("key2").is_some());
+        assert!(cache.get("key2").await.is_some());
     }
 
-    #[test]
-    fn test_memory_cache_stats() {
+    #[tokio::test]
+    async fn test_memory_cache_stats() {
         let cache = MemoryCache::with_ttl(Duration::from_millis(100));
 
-        cache.insert("key1".to_string(), create_test_version_info());
-        cache.insert("key2".to_string(), create_test_version_info());
+        cache
+            .insert("key1".to_string(), create_test_version_info())
+            .await;
+        cache
+            .insert("key2".to_string(), create_test_version_info())
+            .await;
 
         let stats = cache.stats();
         assert_eq!(stats.total_entries, 2);
@@ -438,46 +462,64 @@ mod tests {
         assert!(display.contains("valid: 7"));
     }
 
-    #[test]
-    fn test_memory_cache_is_empty() {
+    #[tokio::test]
+    async fn test_memory_cache_is_empty() {
         let cache = MemoryCache::with_ttl(Duration::from_secs(60));
         assert!(cache.is_empty());
-        cache.insert("key".to_string(), create_test_version_info());
+        cache
+            .insert("key".to_string(), create_test_version_info())
+            .await;
         assert!(!cache.is_empty());
     }
 
-    #[test]
-    fn test_read_cache_contains() {
-        let cache = MemoryCache::new();
-        let cache_ref: &dyn ReadCache = &cache;
+    #[tokio::test]
+    async fn test_read_cache_contains() {
+        async fn assert_contains_via_trait<C: ReadCache>(cache: &C, key: &str) -> bool {
+            cache.contains(key).await
+        }
 
-        assert!(!cache_ref.contains("key"));
-        cache.insert("key".to_string(), create_test_version_info());
-        assert!(cache_ref.contains("key"));
+        let cache = MemoryCache::new();
+        assert!(!assert_contains_via_trait(&cache, "key").await);
+
+        cache
+            .insert("key".to_string(), create_test_version_info())
+            .await;
+        assert!(assert_contains_via_trait(&cache, "key").await);
     }
 
-    #[test]
-    fn test_write_cache_remove() {
+    #[tokio::test]
+    async fn test_write_cache_remove() {
+        async fn insert_via_trait<C: WriteCache>(cache: &C, key: String, v: VersionInfo) {
+            cache.insert(key, v).await;
+        }
+        async fn remove_via_trait<C: WriteCache>(cache: &C, key: &str) {
+            cache.remove(key).await;
+        }
+
         let cache = MemoryCache::new();
-        let cache_ref: &dyn WriteCache = &cache;
+        insert_via_trait(&cache, "key".to_string(), create_test_version_info()).await;
+        assert!(cache.get("key").await.is_some());
 
-        cache_ref.insert("key".to_string(), create_test_version_info());
-        assert!(cache.get("key").is_some());
-
-        cache_ref.remove("key");
-        assert!(cache.get("key").is_none());
+        remove_via_trait(&cache, "key").await;
+        assert!(cache.get("key").await.is_none());
     }
 
-    #[test]
-    fn test_write_cache_clear() {
-        let cache = MemoryCache::new();
-        let cache_ref: &dyn WriteCache = &cache;
+    #[tokio::test]
+    async fn test_write_cache_clear() {
+        async fn clear_via_trait<C: WriteCache>(cache: &C) {
+            cache.clear().await;
+        }
 
-        cache_ref.insert("key1".to_string(), create_test_version_info());
-        cache_ref.insert("key2".to_string(), create_test_version_info());
+        let cache = MemoryCache::new();
+        cache
+            .insert("key1".to_string(), create_test_version_info())
+            .await;
+        cache
+            .insert("key2".to_string(), create_test_version_info())
+            .await;
         assert_eq!(cache.len(), 2);
 
-        cache_ref.clear();
+        clear_via_trait(&cache).await;
         assert!(cache.is_empty());
     }
 }

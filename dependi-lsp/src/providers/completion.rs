@@ -72,7 +72,7 @@ pub fn fmt_release_age(released_at: DateTime<Utc>) -> impl fmt::Display + fmt::D
 }
 
 /// Get completions for a position in the document
-pub fn get_completions(
+pub async fn get_completions(
     dependencies: &[Dependency],
     position: Position,
     cache: &impl ReadCache,
@@ -84,7 +84,7 @@ pub fn get_completions(
         .find(|d| d.version_span.contains_lsp_position(&position))?;
 
     let cache_key = cache_key_fn(&dep.name);
-    let version_info = cache.get(&cache_key)?;
+    let version_info = cache.get(&cache_key).await?;
 
     // Return the last 10 versions as completions
     let items: Vec<CompletionItem> = version_info
@@ -262,21 +262,23 @@ mod tests {
         assert_eq!(format_release_age(near_future), "just now");
     }
 
-    #[test]
-    fn test_get_completions() {
+    #[tokio::test]
+    async fn test_get_completions() {
         let cache = MemoryCache::new();
-        cache.insert(
-            "test:serde".to_string(),
-            VersionInfo {
-                latest: Some("1.0.200".to_string()),
-                versions: vec![
-                    "1.0.200".to_string(),
-                    "1.0.199".to_string(),
-                    "1.0.198".to_string(),
-                ],
-                ..Default::default()
-            },
-        );
+        cache
+            .insert(
+                "test:serde".to_string(),
+                VersionInfo {
+                    latest: Some("1.0.200".to_string()),
+                    versions: vec![
+                        "1.0.200".to_string(),
+                        "1.0.199".to_string(),
+                        "1.0.198".to_string(),
+                    ],
+                    ..Default::default()
+                },
+            )
+            .await;
 
         let deps = vec![create_test_dependency("serde", "1.0.0", 5)];
         // Position inside the version field
@@ -285,7 +287,8 @@ mod tests {
             character: 13, // Within version_start to version_end
         };
 
-        let completions = get_completions(&deps, position, &cache, |name| format!("test:{name}"));
+        let completions =
+            get_completions(&deps, position, &cache, |name| format!("test:{name}")).await;
 
         assert!(completions.is_some());
         let items = completions.unwrap();
@@ -294,27 +297,29 @@ mod tests {
         assert_eq!(items[1].label, "1.0.199");
     }
 
-    #[test]
-    fn test_get_completions_with_release_dates() {
+    #[tokio::test]
+    async fn test_get_completions_with_release_dates() {
         let cache = MemoryCache::new();
         let now = Utc::now();
         let mut release_dates = HashMap::new();
         release_dates.insert("1.0.200".to_string(), now - Duration::days(2));
         release_dates.insert("1.0.199".to_string(), now - Duration::days(10));
 
-        cache.insert(
-            "test:serde".to_string(),
-            VersionInfo {
-                latest: Some("1.0.200".to_string()),
-                versions: vec![
-                    "1.0.200".to_string(),
-                    "1.0.199".to_string(),
-                    "1.0.198".to_string(),
-                ],
-                release_dates,
-                ..Default::default()
-            },
-        );
+        cache
+            .insert(
+                "test:serde".to_string(),
+                VersionInfo {
+                    latest: Some("1.0.200".to_string()),
+                    versions: vec![
+                        "1.0.200".to_string(),
+                        "1.0.199".to_string(),
+                        "1.0.198".to_string(),
+                    ],
+                    release_dates,
+                    ..Default::default()
+                },
+            )
+            .await;
 
         let deps = vec![create_test_dependency("serde", "1.0.0", 5)];
         let position = Position {
@@ -322,7 +327,8 @@ mod tests {
             character: 13,
         };
 
-        let completions = get_completions(&deps, position, &cache, |name| format!("test:{name}"));
+        let completions =
+            get_completions(&deps, position, &cache, |name| format!("test:{name}")).await;
 
         assert!(completions.is_some());
         let items = completions.unwrap();
@@ -341,17 +347,19 @@ mod tests {
         assert_eq!(items[2].detail.as_ref().unwrap(), "Version 1.0.198");
     }
 
-    #[test]
-    fn test_no_completions_outside_version() {
+    #[tokio::test]
+    async fn test_no_completions_outside_version() {
         let cache = MemoryCache::new();
-        cache.insert(
-            "test:serde".to_string(),
-            VersionInfo {
-                latest: Some("1.0.200".to_string()),
-                versions: vec!["1.0.200".to_string()],
-                ..Default::default()
-            },
-        );
+        cache
+            .insert(
+                "test:serde".to_string(),
+                VersionInfo {
+                    latest: Some("1.0.200".to_string()),
+                    versions: vec!["1.0.200".to_string()],
+                    ..Default::default()
+                },
+            )
+            .await;
 
         let deps = vec![create_test_dependency("serde", "1.0.0", 5)];
         // Position outside the version field
@@ -360,22 +368,25 @@ mod tests {
             character: 0, // At the start, not in version
         };
 
-        let completions = get_completions(&deps, position, &cache, |name| format!("test:{name}"));
+        let completions =
+            get_completions(&deps, position, &cache, |name| format!("test:{name}")).await;
 
         assert!(completions.is_none());
     }
 
-    #[test]
-    fn test_no_completions_wrong_line() {
+    #[tokio::test]
+    async fn test_no_completions_wrong_line() {
         let cache = MemoryCache::new();
-        cache.insert(
-            "test:serde".to_string(),
-            VersionInfo {
-                latest: Some("1.0.200".to_string()),
-                versions: vec!["1.0.200".to_string()],
-                ..Default::default()
-            },
-        );
+        cache
+            .insert(
+                "test:serde".to_string(),
+                VersionInfo {
+                    latest: Some("1.0.200".to_string()),
+                    versions: vec!["1.0.200".to_string()],
+                    ..Default::default()
+                },
+            )
+            .await;
 
         let deps = vec![create_test_dependency("serde", "1.0.0", 5)];
         let position = Position {
@@ -383,13 +394,14 @@ mod tests {
             character: 13,
         };
 
-        let completions = get_completions(&deps, position, &cache, |name| format!("test:{name}"));
+        let completions =
+            get_completions(&deps, position, &cache, |name| format!("test:{name}")).await;
 
         assert!(completions.is_none());
     }
 
-    #[test]
-    fn test_no_completions_no_cache() {
+    #[tokio::test]
+    async fn test_no_completions_no_cache() {
         let cache = MemoryCache::new();
         let deps = vec![create_test_dependency("unknown", "1.0.0", 5)];
         let position = Position {
@@ -397,7 +409,8 @@ mod tests {
             character: 13,
         };
 
-        let completions = get_completions(&deps, position, &cache, |name| format!("test:{name}"));
+        let completions =
+            get_completions(&deps, position, &cache, |name| format!("test:{name}")).await;
 
         assert!(completions.is_none());
     }
@@ -442,18 +455,20 @@ mod tests {
         assert_eq!(age, "just now");
     }
 
-    #[test]
-    fn test_completions_many_versions() {
+    #[tokio::test]
+    async fn test_completions_many_versions() {
         let cache = MemoryCache::new();
         let versions: Vec<String> = (0..20).map(|i| format!("1.0.{}", 20 - i)).collect();
-        cache.insert(
-            "test:serde".to_string(),
-            VersionInfo {
-                latest: Some("1.0.20".to_string()),
-                versions,
-                ..Default::default()
-            },
-        );
+        cache
+            .insert(
+                "test:serde".to_string(),
+                VersionInfo {
+                    latest: Some("1.0.20".to_string()),
+                    versions,
+                    ..Default::default()
+                },
+            )
+            .await;
 
         let deps = vec![create_test_dependency("serde", "1.0.0", 5)];
         let position = Position {
@@ -461,7 +476,8 @@ mod tests {
             character: 13,
         };
 
-        let completions = get_completions(&deps, position, &cache, |name| format!("test:{name}"));
+        let completions =
+            get_completions(&deps, position, &cache, |name| format!("test:{name}")).await;
 
         assert!(completions.is_some());
         let items = completions.unwrap();
