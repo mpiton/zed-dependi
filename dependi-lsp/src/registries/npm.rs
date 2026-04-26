@@ -74,6 +74,7 @@ use super::version_utils::is_prerelease_npm;
 use super::{Registry, VersionInfo};
 use crate::auth::fmt_redact_token;
 use crate::config::NpmRegistryConfig;
+use crate::registries::url_sanitizer::{sanitize_external_url, sanitize_repo_url};
 
 /// Client for the npm registry
 pub struct NpmRegistry {
@@ -227,8 +228,8 @@ enum Repository {
 impl Repository {
     fn url(&self) -> Option<String> {
         match self {
-            Repository::String(s) => Some(normalize_repo_url(s)),
-            Repository::Object { url } => url.as_ref().map(|u| normalize_repo_url(u)),
+            Repository::String(s) => sanitize_repo_url(s),
+            Repository::Object { url } => url.as_ref().and_then(|u| sanitize_repo_url(u)),
         }
     }
 }
@@ -258,22 +259,6 @@ struct DistTags {
 #[derive(Debug, Deserialize)]
 struct VersionMetadata {
     deprecated: Option<String>,
-}
-
-fn normalize_repo_url(url: &str) -> String {
-    // Convert git+https://github.com/user/repo.git to https://github.com/user/repo
-    let url = url
-        .strip_prefix("git+")
-        .unwrap_or(url)
-        .strip_suffix(".git")
-        .unwrap_or(url);
-
-    // Convert git://github.com to https://github.com
-    if url.starts_with("git://") {
-        return url.replace("git://", "https://");
-    }
-
-    url.to_string()
 }
 
 impl Registry for NpmRegistry {
@@ -370,7 +355,7 @@ impl Registry for NpmRegistry {
             latest_prerelease,
             versions,
             description: pkg.description,
-            homepage: pkg.homepage,
+            homepage: pkg.homepage.as_deref().and_then(sanitize_external_url),
             repository,
             license: pkg.license.and_then(|l| l.as_string()),
             vulnerabilities: vec![], // Filled by the shared OSV vulnerability scan.
@@ -398,33 +383,29 @@ mod tests {
     }
 
     #[test]
-    fn test_normalize_repo_url() {
-        assert_eq!(
-            normalize_repo_url("git+https://github.com/user/repo.git"),
-            "https://github.com/user/repo"
-        );
-        assert_eq!(
-            normalize_repo_url("git://github.com/user/repo"),
-            "https://github.com/user/repo"
-        );
-        assert_eq!(
-            normalize_repo_url("https://github.com/user/repo"),
-            "https://github.com/user/repo"
-        );
-    }
-
-    #[test]
-    fn test_repository_string_variant() {
+    fn test_repository_string_sanitization() {
         let repo = Repository::String("git+https://github.com/user/repo.git".to_string());
         assert_eq!(repo.url(), Some("https://github.com/user/repo".to_string()));
     }
 
     #[test]
-    fn test_repository_object_variant() {
-        let repo = Repository::Object {
-            url: Some("git://github.com/user/repo".to_string()),
-        };
+    fn test_repository_string_legacy_git_protocol() {
+        let repo = Repository::String("git://github.com/user/repo".to_string());
         assert_eq!(repo.url(), Some("https://github.com/user/repo".to_string()));
+    }
+
+    #[test]
+    fn test_repository_string_passthrough_https() {
+        let repo = Repository::String("https://github.com/user/repo".to_string());
+        assert_eq!(repo.url(), Some("https://github.com/user/repo".to_string()));
+    }
+
+    #[test]
+    fn test_repository_object_drops_invalid_scheme() {
+        let repo = Repository::Object {
+            url: Some("ssh://git@github.com/user/repo".to_string()),
+        };
+        assert_eq!(repo.url(), None);
     }
 
     #[test]
