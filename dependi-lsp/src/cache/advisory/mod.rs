@@ -82,6 +82,24 @@ impl<T: AdvisoryWriteCache> AdvisoryWriteCache for Arc<T> {
     }
 }
 
+/// No-op cache used when caching is disabled via configuration.
+///
+/// All reads return `None`, all writes are silently dropped.
+#[derive(Clone, Copy, Debug, Default)]
+pub struct NullAdvisoryCache;
+
+impl AdvisoryReadCache for NullAdvisoryCache {
+    async fn get(&self, _advisory_id: &str) -> Option<CachedAdvisory> {
+        None
+    }
+}
+
+impl AdvisoryWriteCache for NullAdvisoryCache {
+    async fn insert(&self, _advisory: CachedAdvisory) {}
+    async fn remove(&self, _advisory_id: &str) {}
+    async fn clear(&self) {}
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -135,5 +153,27 @@ mod tests {
         });
         assert_eq!(cache.get("anything").await, Some(advisory.clone()));
         assert!(cache.contains("anything").await);
+    }
+
+    #[tokio::test]
+    async fn null_cache_get_returns_none() {
+        let cache = NullAdvisoryCache;
+        assert_eq!(cache.get("RUSTSEC-2020-0036").await, None);
+        assert!(!cache.contains("RUSTSEC-2020-0036").await);
+    }
+
+    #[tokio::test]
+    async fn null_cache_writes_are_noop() {
+        let cache = NullAdvisoryCache;
+        cache
+            .insert(CachedAdvisory {
+                id: "RUSTSEC-2020-0036".to_string(),
+                kind: AdvisoryKind::NotFound,
+                fetched_at: SystemTime::UNIX_EPOCH,
+            })
+            .await;
+        cache.remove("RUSTSEC-2020-0036").await;
+        cache.clear().await;
+        assert_eq!(cache.get("RUSTSEC-2020-0036").await, None);
     }
 }

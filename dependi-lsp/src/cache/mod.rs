@@ -23,7 +23,9 @@ pub mod advisory;
 pub mod sqlite;
 pub(crate) mod sqlite_manager;
 
-pub use advisory::{AdvisoryKind, AdvisoryReadCache, AdvisoryWriteCache, CachedAdvisory};
+pub use advisory::{
+    AdvisoryKind, AdvisoryReadCache, AdvisoryWriteCache, CachedAdvisory, NullAdvisoryCache,
+};
 pub use sqlite::SqliteCache;
 
 /// Trait for read-only cache operations
