@@ -6,6 +6,7 @@
 use std::sync::Arc;
 use std::time::Duration;
 
+use futures::stream::{self, StreamExt};
 use reqwest::Client;
 use serde::{Deserialize, Serialize};
 
@@ -13,6 +14,7 @@ use super::VulnerabilityQuery;
 use crate::registries::{Vulnerability, VulnerabilitySeverity};
 
 const OSV_API_BASE: &str = "https://api.osv.dev/v1";
+const RUSTSEC_ADVISORY_LOOKUP_CONCURRENCY: usize = 5;
 
 /// Result of a vulnerability query
 #[derive(Debug, Clone, Default)]
@@ -184,19 +186,16 @@ impl OsvClient {
             ids.len()
         );
 
-        // Spawn all tasks in parallel
-        let tasks: Vec<_> = ids
-            .iter()
+        let results: Vec<bool> = stream::iter(ids.iter().cloned())
             .map(|id| {
                 let url = format!("{}/vulns/{id}", self.base_url);
                 let client = Arc::clone(&self.client);
-                let id_clone = id.clone();
 
-                tokio::spawn(async move {
+                async move {
                     let response = match client.get(&url).send().await {
                         Ok(r) => r,
                         Err(e) => {
-                            tracing::warn!("Failed to fetch advisory {}: {}", id_clone, e);
+                            tracing::warn!("Failed to fetch advisory {}: {}", id, e);
                             return false;
                         }
                     };
@@ -204,7 +203,7 @@ impl OsvClient {
                     let details: Option<OsvVulnerabilityDetails> = match response.json().await {
                         Ok(d) => d,
                         Err(e) => {
-                            tracing::warn!("Failed to parse advisory {}: {}", id_clone, e);
+                            tracing::warn!("Failed to parse advisory {}: {}", id, e);
                             return false;
                         }
                     };
@@ -233,7 +232,7 @@ impl OsvClient {
                     if is_unmaintained {
                         tracing::info!(
                             "Advisory {} indicates unmaintained package: {}",
-                            id_clone,
+                            id,
                             details
                                 .as_ref()
                                 .and_then(|v| v.summary.as_ref())
@@ -242,15 +241,13 @@ impl OsvClient {
                     }
 
                     is_unmaintained
-                })
+                }
             })
-            .collect();
+            .buffer_unordered(RUSTSEC_ADVISORY_LOOKUP_CONCURRENCY)
+            .collect()
+            .await;
 
-        // Wait for ALL tasks to complete in parallel using join_all
-        let results = futures::future::join_all(tasks).await;
-
-        // Check if any task returned true (found unmaintained package)
-        results.into_iter().any(|r| r.unwrap_or(false))
+        results.into_iter().any(|is_unmaintained| is_unmaintained)
     }
 }
 
@@ -325,7 +322,57 @@ struct OsvDatabaseSpecific {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::sync::Arc;
+    use std::sync::atomic::{AtomicUsize, Ordering};
+    use std::time::Duration;
+
     use crate::vulnerabilities::Ecosystem;
+    use tokio::io::{AsyncReadExt, AsyncWriteExt};
+    use tokio::net::TcpListener;
+
+    async fn spawn_counting_osv_server(
+        active_requests: Arc<AtomicUsize>,
+        max_seen: Arc<AtomicUsize>,
+    ) -> String {
+        let listener = TcpListener::bind("127.0.0.1:0")
+            .await
+            .expect("counting test server should bind");
+        let addr = listener
+            .local_addr()
+            .expect("counting test server should have local address");
+
+        tokio::spawn(async move {
+            loop {
+                let Ok((mut socket, _peer)) = listener.accept().await else {
+                    break;
+                };
+                let active_requests = Arc::clone(&active_requests);
+                let max_seen = Arc::clone(&max_seen);
+
+                tokio::spawn(async move {
+                    let current = active_requests.fetch_add(1, Ordering::SeqCst) + 1;
+                    max_seen.fetch_max(current, Ordering::SeqCst);
+
+                    let mut buffer = [0_u8; 2048];
+                    let _ = socket.read(&mut buffer).await;
+
+                    tokio::time::sleep(Duration::from_millis(50)).await;
+
+                    let body =
+                        r#"{"id":"RUSTSEC-2099-0001","summary":"ordinary advisory","affected":[]}"#;
+                    let body_len = body.len();
+                    let response = format!(
+                        "HTTP/1.1 200 OK\r\ncontent-type: application/json\r\ncontent-length: {body_len}\r\nconnection: close\r\n\r\n{body}"
+                    );
+                    let _ = socket.write_all(response.as_bytes()).await;
+
+                    active_requests.fetch_sub(1, Ordering::SeqCst);
+                });
+            }
+        });
+
+        format!("http://{addr}")
+    }
 
     #[test]
     fn test_parse_cvss_severity() {
@@ -449,6 +496,32 @@ mod tests {
         assert!(
             result.is_err(),
             "query to unreachable endpoint should error, got {result:?}"
+        );
+    }
+
+    #[tokio::test]
+    async fn test_rustsec_advisory_lookup_limits_concurrency() {
+        const EXPECTED_LIMIT: usize = 5;
+
+        let active_requests = Arc::new(AtomicUsize::new(0));
+        let max_seen = Arc::new(AtomicUsize::new(0));
+        let endpoint =
+            spawn_counting_osv_server(Arc::clone(&active_requests), Arc::clone(&max_seen)).await;
+        let client = OsvClient::with_endpoint(endpoint);
+        let ids: Vec<String> = (0..(EXPECTED_LIMIT * 2 + 3))
+            .map(|index| format!("RUSTSEC-2099-{index:04}"))
+            .collect();
+
+        let deprecated = client.check_rustsec_unmaintained(&ids).await;
+
+        assert!(
+            !deprecated,
+            "test advisories should not be marked as unmaintained"
+        );
+        assert!(
+            max_seen.load(Ordering::SeqCst) <= EXPECTED_LIMIT,
+            "expected at most {EXPECTED_LIMIT} concurrent advisory lookups, saw {}",
+            max_seen.load(Ordering::SeqCst)
         );
     }
 
