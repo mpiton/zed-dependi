@@ -6,9 +6,20 @@
 use std::sync::Arc;
 
 use dependi_lsp::cache::{AdvisoryReadCache, HybridAdvisoryCache};
+use dependi_lsp::config::AdvisoryCacheConfig;
 
 #[tokio::test]
 async fn hybrid_advisory_cache_constructs_without_panic() {
-    let cache = Arc::new(HybridAdvisoryCache::new());
+    // Use an isolated db_path so a previous run that persisted a hit for
+    // RUSTSEC-2020-0036 in the user's default cache cannot turn this miss
+    // assertion into a flake.
+    let tmp = tempfile::tempdir().expect("tempdir");
+    let config = AdvisoryCacheConfig {
+        enabled: true,
+        ttl_secs: 60,
+        negative_ttl_secs: 30,
+        db_path: Some(tmp.path().join("advisory_cache.db")),
+    };
+    let cache = Arc::new(HybridAdvisoryCache::from_config(&config));
     assert!(cache.get("RUSTSEC-2020-0036").await.is_none());
 }

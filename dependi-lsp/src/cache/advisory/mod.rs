@@ -227,7 +227,14 @@ impl HybridAdvisoryCache {
             ticker.tick().await; // skip immediate fire
             loop {
                 ticker.tick().await;
-                let removed = memory.cleanup_expired();
+                // DashMap::retain holds a write lock during the scan. For
+                // very large caches this can briefly block the executor —
+                // offload to the blocking pool to keep the runtime healthy.
+                let memory_for_cleanup = memory.clone();
+                let removed =
+                    tokio::task::spawn_blocking(move || memory_for_cleanup.cleanup_expired())
+                        .await
+                        .unwrap_or(0);
                 if removed > 0 {
                     tracing::debug!("Advisory cache: pruned {} expired memory entries", removed);
                 }
@@ -590,15 +597,21 @@ mod tests {
 
     #[tokio::test]
     async fn from_config_enabled_with_unwritable_path_falls_back_to_memory_only() {
-        // A path inside a non-existent directory hierarchy SQLite cannot
-        // create — we must NOT panic; the hybrid should fall back to memory.
+        // Build a deterministic "cannot create directory" condition: place a
+        // regular file where a parent directory would need to live, then ask
+        // SQLite to open a path beneath it. `create_dir_all` rejects this on
+        // every platform regardless of permissions (file is not a directory),
+        // so the test does not depend on whether the runner has root or
+        // peculiar /this/path locations.
+        let tmp = tempfile::tempdir().expect("tempdir");
+        let blocker = tmp.path().join("blocker_file");
+        std::fs::write(&blocker, b"not a directory").expect("write blocker");
+        let db_path = blocker.join("nested").join("advisory_cache.db");
         let config = crate::config::AdvisoryCacheConfig {
             enabled: true,
             ttl_secs: 60,
             negative_ttl_secs: 30,
-            db_path: Some(std::path::PathBuf::from(
-                "/this/path/should/not/exist/dependi/advisory_cache.db",
-            )),
+            db_path: Some(db_path),
         };
         let hybrid = HybridAdvisoryCache::from_config(&config);
         hybrid

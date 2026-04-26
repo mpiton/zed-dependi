@@ -819,6 +819,38 @@ impl ProcessingContext {
     }
 }
 
+/// Build the trio of cache layers and the OSV client that the LSP backend
+/// uses for RustSec advisory lookups, configured from
+/// [`crate::config::AdvisoryCacheConfig`].
+///
+/// Extracted as a free function so [`DependiBackend::with_http_client`] and
+/// [`DependiBackend::initialize`] share one construction path. Keeping the
+/// helper isolated also makes the configuration wiring testable without
+/// instantiating an LSP `Client`.
+fn build_advisory_runtime(
+    config: &crate::config::AdvisoryCacheConfig,
+) -> anyhow::Result<(
+    Arc<crate::cache::HybridAdvisoryCache>,
+    Arc<crate::cache::HybridAdvisoryCache>,
+    Arc<OsvClient>,
+)> {
+    let advisory_cache = Arc::new(crate::cache::HybridAdvisoryCache::from_config(config));
+    advisory_cache.spawn_default_cleanup_task();
+    let negative_advisory_cache = Arc::new(
+        crate::cache::HybridAdvisoryCache::negative_from_config(config),
+    );
+    negative_advisory_cache.spawn_default_cleanup_task();
+    let osv_client = OsvClient::new_with_caches(
+        Arc::clone(&advisory_cache) as Arc<dyn crate::cache::AdvisoryWriteCache>,
+        Arc::clone(&negative_advisory_cache) as Arc<dyn crate::cache::AdvisoryWriteCache>,
+    )?;
+    Ok((
+        advisory_cache,
+        negative_advisory_cache,
+        Arc::new(osv_client),
+    ))
+}
+
 /// Context passed to the background vulnerability fetch task so it can write
 /// per-document transitive attribution after the OSV query completes.
 struct VulnBgContext {
@@ -867,24 +899,28 @@ pub struct DependiBackend {
     http_client: Arc<HttpClient>,
     /// Token provider manager for authentication across all ecosystems
     token_manager: Arc<TokenProviderManager>,
-    /// Vulnerability scanning
-    osv_client: Arc<OsvClient>,
+    /// Vulnerability scanning. Wrapped in `RwLock` so [`Self::initialize`]
+    /// can swap the client to one wired with caches built from the user's
+    /// `AdvisoryCacheConfig` once the LSP receives client settings.
+    osv_client: Arc<tokio::sync::RwLock<Arc<OsvClient>>>,
     vuln_cache: Arc<VulnerabilityCache>,
     /// RustSec advisory cache (issue #237).
     ///
     /// Held on the struct so the background cleanup task spawned by
     /// `HybridAdvisoryCache::spawn_default_cleanup_task` keeps a strong
     /// reference to the underlying memory/SQLite layers for the lifetime of
-    /// the backend. Exposed via [`DependiBackend::advisory_cache`] for tests
-    /// and observability.
-    advisory_cache: Arc<crate::cache::HybridAdvisoryCache>,
+    /// the backend. Wrapped in `RwLock` so [`Self::initialize`] can swap in
+    /// a cache built from the user's `AdvisoryCacheConfig`. Exposed via
+    /// [`DependiBackend::advisory_cache`] for tests and observability.
+    advisory_cache: Arc<tokio::sync::RwLock<Arc<crate::cache::HybridAdvisoryCache>>>,
     /// Negative RustSec advisory cache (issue #237).
     ///
     /// Same shape as [`Self::advisory_cache`] but with `negative_ttl_secs`
     /// and no SQLite layer — 404 entries should not be persisted across
     /// LSP sessions. Held on the struct so the spawned cleanup task can
-    /// keep strong references.
-    negative_advisory_cache: Arc<crate::cache::HybridAdvisoryCache>,
+    /// keep strong references. Wrapped in `RwLock` for the same
+    /// reconfiguration reason as `advisory_cache`.
+    negative_advisory_cache: Arc<tokio::sync::RwLock<Arc<crate::cache::HybridAdvisoryCache>>>,
     /// Per-(ecosystem, name, version) transitive vuln data.
     /// Populated during fresh OSV queries for transitive packages; read on cached re-attribution
     /// so subsequent document opens can still attribute transitives to their direct parents.
@@ -937,34 +973,15 @@ impl DependiBackend {
         // Create token provider manager for centralized auth management
         let token_manager = Arc::new(TokenProviderManager::new());
 
-        // Build the RustSec advisory caches (issue #237) from configuration
-        // and spawn their background cleanup tasks. Two separate caches:
-        // - `advisory_cache` holds positive `Found` entries with `ttl_secs`.
-        // - `negative_advisory_cache` holds 404 entries with the shorter
-        //   `negative_ttl_secs`, memory-only because short-TTL entries do
-        //   not need cross-session persistence.
-        // Each Arc is kept on the struct so the spawned cleanup tasks have
-        // strong references for the lifetime of the backend.
-        let advisory_cache = Arc::new(crate::cache::HybridAdvisoryCache::from_config(
-            &config.advisory_cache,
-        ));
-        advisory_cache.spawn_default_cleanup_task();
-        let negative_advisory_cache = Arc::new(
-            crate::cache::HybridAdvisoryCache::negative_from_config(&config.advisory_cache),
-        );
-        negative_advisory_cache.spawn_default_cleanup_task();
-        let osv_client = match OsvClient::new_with_caches(
-            Arc::clone(&advisory_cache) as Arc<dyn crate::cache::AdvisoryWriteCache>,
-            Arc::clone(&negative_advisory_cache) as Arc<dyn crate::cache::AdvisoryWriteCache>,
-        ) {
-            Ok(client) => Arc::new(client),
-            Err(err) => {
-                tracing::warn!(
-                    "OsvClient init with advisory cache failed ({err}); falling back to default"
-                );
-                Arc::new(OsvClient::default())
-            }
-        };
+        // Build the RustSec advisory caches (issue #237) from defaults so the
+        // backend has a working OsvClient even before `initialize` arrives.
+        // The trio is wrapped in RwLock and replaced in `initialize` once the
+        // user's `AdvisoryCacheConfig` is parsed; otherwise client overrides
+        // (custom `db_path`, custom TTLs, `enabled = false`) would never take
+        // effect because the LSP cannot see them at struct-construction time.
+        let (advisory_cache, negative_advisory_cache, osv_client) =
+            build_advisory_runtime(&config.advisory_cache)
+                .expect("Failed to build advisory cache runtime at startup");
 
         Self {
             client,
@@ -992,10 +1009,10 @@ impl DependiBackend {
             maven_central,
             http_client,
             token_manager,
-            osv_client,
+            osv_client: Arc::new(tokio::sync::RwLock::new(osv_client)),
             vuln_cache: Arc::new(VulnerabilityCache::new()),
-            advisory_cache,
-            negative_advisory_cache,
+            advisory_cache: Arc::new(tokio::sync::RwLock::new(advisory_cache)),
+            negative_advisory_cache: Arc::new(tokio::sync::RwLock::new(negative_advisory_cache)),
             transitive_vuln_data: Arc::new(DashMap::new()),
             debounce_tasks: Arc::new(DashMap::new()),
             debounce_generation: Arc::new(std::sync::atomic::AtomicU64::new(0)),
@@ -1007,19 +1024,21 @@ impl DependiBackend {
     ///
     /// Used by integration tests and observability tooling. Returns the
     /// hybrid memory+SQLite cache that `OsvClient` consults before issuing
-    /// HTTP requests for individual RustSec advisories.
-    pub fn advisory_cache(&self) -> &Arc<crate::cache::HybridAdvisoryCache> {
-        &self.advisory_cache
+    /// HTTP requests for individual RustSec advisories. Async because the
+    /// underlying handle is now wrapped in a `RwLock` to support runtime
+    /// reconfiguration in `initialize`.
+    pub async fn advisory_cache(&self) -> Arc<crate::cache::HybridAdvisoryCache> {
+        Arc::clone(&*self.advisory_cache.read().await)
     }
 
     /// Read access to the negative advisory cache (issue #237).
     ///
     /// Used by integration tests to inspect 404 caching state.
-    pub fn negative_advisory_cache(&self) -> &Arc<crate::cache::HybridAdvisoryCache> {
-        &self.negative_advisory_cache
+    pub async fn negative_advisory_cache(&self) -> Arc<crate::cache::HybridAdvisoryCache> {
+        Arc::clone(&*self.negative_advisory_cache.read().await)
     }
 
-    fn create_processing_context(&self) -> ProcessingContext {
+    async fn create_processing_context(&self) -> ProcessingContext {
         ProcessingContext {
             client: self.client.clone(),
             config: Arc::clone(&self.config),
@@ -1044,7 +1063,7 @@ impl DependiBackend {
             nuget: Arc::clone(&self.nuget),
             rubygems: Arc::clone(&self.rubygems),
             maven_central: Arc::clone(&self.maven_central),
-            osv_client: Arc::clone(&self.osv_client),
+            osv_client: Arc::clone(&*self.osv_client.read().await),
             vuln_cache: Arc::clone(&self.vuln_cache),
             transitive_vuln_data: Arc::clone(&self.transitive_vuln_data),
         }
@@ -1458,6 +1477,7 @@ impl DependiBackend {
 
     async fn process_document(&self, uri: &Url, content: &str) {
         self.create_processing_context()
+            .await
             .process_document(uri, content)
             .await;
     }
@@ -1789,6 +1809,30 @@ impl LanguageServer for DependiBackend {
             );
         }
 
+        // Reconfigure the RustSec advisory cache trio (issue #237). The
+        // backend was constructed with `Config::default()` because the LSP
+        // protocol delivers client settings only at `initialize` time, so
+        // user overrides for `db_path`, TTLs, or `enabled` would otherwise
+        // never take effect.
+        match build_advisory_runtime(&config.advisory_cache) {
+            Ok((new_cache, new_neg, new_osv)) => {
+                *self.advisory_cache.write().await = new_cache;
+                *self.negative_advisory_cache.write().await = new_neg;
+                *self.osv_client.write().await = new_osv;
+                tracing::info!(
+                    "Advisory cache reconfigured from client settings (enabled={}, ttl_secs={}, negative_ttl_secs={})",
+                    config.advisory_cache.enabled,
+                    config.advisory_cache.ttl_secs,
+                    config.advisory_cache.negative_ttl_secs
+                );
+            }
+            Err(err) => {
+                tracing::warn!(
+                    "Advisory cache reconfiguration failed ({err}); keeping startup defaults"
+                );
+            }
+        }
+
         // Store the configuration
         if let Ok(mut cfg) = self.config.write() {
             *cfg = config;
@@ -1886,7 +1930,7 @@ impl LanguageServer for DependiBackend {
                 .unwrap_or(200);
 
             // Create processing context for the spawned task
-            let ctx = self.create_processing_context();
+            let ctx = self.create_processing_context().await;
             let uri_clone = uri.clone();
             let content = change.text;
             let pending_changes = Arc::clone(&self.pending_changes);
@@ -2379,6 +2423,43 @@ mod tests {
         assert!(
             found.is_none(),
             "expected None when no ancestor has .zed/, got {found:?}"
+        );
+    }
+
+    /// Regression for issue #237 reviewer finding: `AdvisoryCacheConfig` must
+    /// flow through to the SQLite layer instead of being locked to defaults.
+    /// We point the helper at a custom `db_path` and verify the file appears
+    /// after a write — proof that the user's config was honoured end-to-end.
+    #[tokio::test]
+    async fn build_advisory_runtime_honors_custom_db_path() {
+        use crate::cache::{AdvisoryKind, AdvisoryWriteCache, CachedAdvisory};
+        use crate::config::AdvisoryCacheConfig;
+        use std::time::SystemTime;
+
+        let tmp = tempfile::tempdir().expect("tempdir");
+        let db_path = tmp.path().join("nested").join("custom.db");
+        let config = AdvisoryCacheConfig {
+            enabled: true,
+            ttl_secs: 60,
+            negative_ttl_secs: 30,
+            db_path: Some(db_path.clone()),
+        };
+
+        let (cache, _neg, _osv) = super::build_advisory_runtime(&config).expect("runtime builds");
+        cache
+            .insert(CachedAdvisory {
+                id: "RUSTSEC-2020-0036".into(),
+                kind: AdvisoryKind::Found {
+                    summary: None,
+                    unmaintained: false,
+                },
+                fetched_at: SystemTime::now(),
+            })
+            .await;
+
+        assert!(
+            db_path.exists(),
+            "custom db_path {db_path:?} was not honoured by the helper"
         );
     }
 }

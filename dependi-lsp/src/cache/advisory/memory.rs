@@ -65,6 +65,9 @@ impl MemoryAdvisoryCache {
     /// from an L2 hit so that an entry near SQLite expiry does not gain a
     /// fresh full-length TTL by being read.
     pub async fn insert_with_remaining_ttl(&self, advisory: CachedAdvisory, remaining: Duration) {
+        if remaining.is_zero() {
+            return;
+        }
         self.entries.insert(
             advisory.id.clone(),
             MemoryAdvisoryEntry {
@@ -88,6 +91,12 @@ impl AdvisoryReadCache for MemoryAdvisoryCache {
 #[async_trait]
 impl AdvisoryWriteCache for MemoryAdvisoryCache {
     async fn insert(&self, advisory: CachedAdvisory) {
+        // A zero TTL marks the cache as disabled — drop writes so disabled
+        // mode does not accumulate entries that are immediately expired but
+        // still occupy memory until cleanup runs.
+        if self.ttl.is_zero() {
+            return;
+        }
         self.entries.insert(
             advisory.id.clone(),
             MemoryAdvisoryEntry {

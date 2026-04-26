@@ -68,6 +68,34 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- Reconfigure the advisory cache trio (`advisory_cache`,
+  `negative_advisory_cache`, `osv_client`) inside `LanguageServer::initialize`
+  once the LSP receives client settings. Previously the caches were built
+  from `Config::default()` at struct-construction time and never replaced,
+  so user overrides for `db_path`, `ttl_secs`, `negative_ttl_secs`, or
+  `enabled` had no runtime effect even though the wiring through
+  `HybridAdvisoryCache::from_config` itself was correct
+  ([#237](https://github.com/mpiton/zed-dependi/issues/237))
+- Create parent directories for a user-supplied `AdvisoryCacheConfig.db_path`
+  before opening SQLite. Without this, a nested override silently degraded
+  to the in-memory layer because `SqliteConnectionManager` could not find
+  the directory ([#237](https://github.com/mpiton/zed-dependi/issues/237))
+- Drop writes when the advisory memory cache is configured with a zero TTL
+  (i.e. `enabled = false`). Previously disabled-cache mode still inserted
+  entries that were immediately expired but kept occupying memory until
+  the cleanup task ran ([#237](https://github.com/mpiton/zed-dependi/issues/237))
+- Offload `MemoryAdvisoryCache::cleanup_expired` from the cleanup loop
+  through `tokio::task::spawn_blocking` so a `DashMap::retain` over a very
+  large cache cannot stall the runtime
+  ([#237](https://github.com/mpiton/zed-dependi/issues/237))
+- Replace the flaky unwritable-path advisory cache test with a deterministic
+  blocker file inside a `tempdir`, removing the dependency on
+  `/this/path/should/not/exist/...` succeeding to fail
+  ([#237](https://github.com/mpiton/zed-dependi/issues/237))
+- Isolate the advisory cache wiring smoke test behind a `tempdir`-scoped
+  `db_path` so a previously persisted `RUSTSEC-2020-0036` row in the user's
+  default cache cannot turn the miss assertion into a flake
+  ([#237](https://github.com/mpiton/zed-dependi/issues/237))
 - Wire `AdvisoryCacheConfig` through `HybridAdvisoryCache::from_config` so
   user settings (`enabled`, `ttl_secs`, `negative_ttl_secs`, `db_path`)
   actually take effect; previously the backend instantiated the cache via

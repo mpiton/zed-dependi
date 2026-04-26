@@ -42,7 +42,17 @@ impl SqliteAdvisoryCache {
     /// connection pool cannot be built.
     pub fn from_config(config: &crate::config::AdvisoryCacheConfig) -> anyhow::Result<Self> {
         let path = match &config.db_path {
-            Some(p) => p.clone(),
+            Some(p) => {
+                // Create parent directories for user-supplied custom paths.
+                // Without this, opening a nested override silently degrades
+                // to memory-only when SQLite cannot find the directory.
+                if let Some(parent) = p.parent()
+                    && !parent.as_os_str().is_empty()
+                {
+                    std::fs::create_dir_all(parent)?;
+                }
+                p.clone()
+            }
             None => {
                 let cache_dir = Self::cache_dir()?;
                 std::fs::create_dir_all(&cache_dir)?;
@@ -302,8 +312,8 @@ mod tests {
         assert!(b >= a);
     }
 
-    #[test]
-    fn with_ttl_secs_overrides_default() {
+    #[tokio::test]
+    async fn with_ttl_secs_overrides_default() {
         let cache = SqliteAdvisoryCache::in_memory()
             .expect("open in-memory cache")
             .with_ttl_secs(42);
