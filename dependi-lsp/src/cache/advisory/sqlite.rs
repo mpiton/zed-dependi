@@ -76,6 +76,22 @@ impl SqliteAdvisoryCache {
         Self { ttl_secs, ..self }
     }
 
+    /// Delete every expired entry. Returns the number of rows removed.
+    pub async fn cleanup_expired(&self) -> anyhow::Result<usize> {
+        let pool = Arc::clone(&self.pool);
+        tokio::task::spawn_blocking(move || -> anyhow::Result<usize> {
+            let conn = pool.get()?;
+            let now = current_timestamp();
+            let rows = conn.execute(
+                "DELETE FROM advisories WHERE inserted_at + ttl_secs * ? < ?",
+                params![NANOS_PER_SEC, now],
+            )?;
+            Ok(rows)
+        })
+        .await
+        .map_err(|e| anyhow::anyhow!("spawn_blocking join error: {e}"))?
+    }
+
     fn cache_dir() -> anyhow::Result<PathBuf> {
         let cache_dir = dirs::cache_dir()
             .ok_or_else(|| anyhow::anyhow!("Could not determine cache directory"))?;
@@ -318,6 +334,17 @@ mod tests {
             )
             .expect("query");
         assert_eq!(count, 0);
+    }
+
+    #[tokio::test]
+    async fn cleanup_expired_deletes_only_expired_rows() {
+        let cache = SqliteAdvisoryCache::in_memory().unwrap().with_ttl_secs(0);
+        cache.insert(sample_found()).await;
+        tokio::time::sleep(Duration::from_millis(2)).await;
+
+        let removed = cache.cleanup_expired().await.expect("cleanup");
+        assert_eq!(removed, 1);
+        assert!(cache.get("RUSTSEC-2020-0036").await.is_none());
     }
 
     #[tokio::test]
