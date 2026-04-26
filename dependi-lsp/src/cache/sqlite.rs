@@ -578,9 +578,6 @@ mod tests {
 
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
     async fn test_get_does_not_block_runtime() {
-        use std::sync::Arc;
-        use std::time::Duration;
-
         let cache = Arc::new(SqliteCache::in_memory().unwrap());
         cache.insert("k".to_string(), create_test_version_info()).await;
 
