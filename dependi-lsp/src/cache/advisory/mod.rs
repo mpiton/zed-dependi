@@ -172,6 +172,29 @@ impl AdvisoryReadCache for HybridAdvisoryCache {
     }
 }
 
+impl AdvisoryWriteCache for HybridAdvisoryCache {
+    async fn insert(&self, advisory: CachedAdvisory) {
+        self.memory.insert(advisory.clone()).await;
+        if let Some(ref sqlite) = self.sqlite {
+            sqlite.insert(advisory).await;
+        }
+    }
+
+    async fn remove(&self, advisory_id: &str) {
+        self.memory.remove(advisory_id).await;
+        if let Some(ref sqlite) = self.sqlite {
+            sqlite.remove(advisory_id).await;
+        }
+    }
+
+    async fn clear(&self) {
+        self.memory.clear().await;
+        if let Some(ref sqlite) = self.sqlite {
+            sqlite.clear().await;
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::memory::MemoryAdvisoryCache;
@@ -219,6 +242,47 @@ mod tests {
         let sqlite = Arc::new(SqliteAdvisoryCache::in_memory().expect("in-memory sqlite"));
         let hybrid = HybridAdvisoryCache::from_parts(memory, Some(sqlite));
         assert!(hybrid.get("RUSTSEC-1990-0001").await.is_none());
+    }
+
+    #[tokio::test]
+    async fn hybrid_insert_writes_both_layers() {
+        let memory = MemoryAdvisoryCache::new();
+        let sqlite = Arc::new(SqliteAdvisoryCache::in_memory().expect("in-memory sqlite"));
+        let advisory = sample_found("RUSTSEC-2020-0036");
+        let hybrid = HybridAdvisoryCache::from_parts(memory.clone(), Some(Arc::clone(&sqlite)));
+
+        hybrid.insert(advisory.clone()).await;
+
+        assert_eq!(memory.get(&advisory.id).await, Some(advisory.clone()));
+        assert_eq!(sqlite.get(&advisory.id).await, Some(advisory));
+    }
+
+    #[tokio::test]
+    async fn hybrid_remove_clears_both_layers() {
+        let memory = MemoryAdvisoryCache::new();
+        let sqlite = Arc::new(SqliteAdvisoryCache::in_memory().expect("in-memory sqlite"));
+        let advisory = sample_found("RUSTSEC-2020-0036");
+        let hybrid = HybridAdvisoryCache::from_parts(memory.clone(), Some(Arc::clone(&sqlite)));
+
+        hybrid.insert(advisory.clone()).await;
+        hybrid.remove(&advisory.id).await;
+
+        assert!(memory.get(&advisory.id).await.is_none());
+        assert!(sqlite.get(&advisory.id).await.is_none());
+    }
+
+    #[tokio::test]
+    async fn hybrid_clear_clears_both_layers() {
+        let memory = MemoryAdvisoryCache::new();
+        let sqlite = Arc::new(SqliteAdvisoryCache::in_memory().expect("in-memory sqlite"));
+        let hybrid = HybridAdvisoryCache::from_parts(memory.clone(), Some(Arc::clone(&sqlite)));
+
+        hybrid.insert(sample_found("RUSTSEC-2020-0036")).await;
+        hybrid.insert(sample_found("RUSTSEC-2021-0001")).await;
+        hybrid.clear().await;
+
+        assert!(memory.get("RUSTSEC-2020-0036").await.is_none());
+        assert!(sqlite.get("RUSTSEC-2021-0001").await.is_none());
     }
 
     #[test]
