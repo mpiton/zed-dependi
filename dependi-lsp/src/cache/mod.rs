@@ -375,8 +375,12 @@ mod tests {
     async fn test_memory_cache_cleanup_expired() {
         let cache = MemoryCache::with_ttl(Duration::from_millis(10));
 
-        cache.insert("key1".to_string(), create_test_version_info()).await;
-        cache.insert("key2".to_string(), create_test_version_info()).await;
+        cache
+            .insert("key1".to_string(), create_test_version_info())
+            .await;
+        cache
+            .insert("key2".to_string(), create_test_version_info())
+            .await;
 
         assert_eq!(cache.len(), 2);
 
@@ -392,13 +396,17 @@ mod tests {
     async fn test_memory_cache_cleanup_partial() {
         let cache = MemoryCache::with_ttl(Duration::from_millis(200));
 
-        cache.insert("key1".to_string(), create_test_version_info()).await;
+        cache
+            .insert("key1".to_string(), create_test_version_info())
+            .await;
 
         // Wait for first entry to almost expire
         std::thread::sleep(Duration::from_millis(150));
 
         // Insert second entry
-        cache.insert("key2".to_string(), create_test_version_info()).await;
+        cache
+            .insert("key2".to_string(), create_test_version_info())
+            .await;
 
         // Wait for first to expire but not second
         std::thread::sleep(Duration::from_millis(100));
@@ -413,8 +421,12 @@ mod tests {
     async fn test_memory_cache_stats() {
         let cache = MemoryCache::with_ttl(Duration::from_millis(100));
 
-        cache.insert("key1".to_string(), create_test_version_info()).await;
-        cache.insert("key2".to_string(), create_test_version_info()).await;
+        cache
+            .insert("key1".to_string(), create_test_version_info())
+            .await;
+        cache
+            .insert("key2".to_string(), create_test_version_info())
+            .await;
 
         let stats = cache.stats();
         assert_eq!(stats.total_entries, 2);
@@ -447,7 +459,9 @@ mod tests {
     async fn test_memory_cache_is_empty() {
         let cache = MemoryCache::with_ttl(Duration::from_secs(60));
         assert!(cache.is_empty());
-        cache.insert("key".to_string(), create_test_version_info()).await;
+        cache
+            .insert("key".to_string(), create_test_version_info())
+            .await;
         assert!(!cache.is_empty());
     }
 
@@ -460,7 +474,9 @@ mod tests {
         let cache = MemoryCache::new();
         assert!(!assert_contains_via_trait(&cache, "key").await);
 
-        cache.insert("key".to_string(), create_test_version_info()).await;
+        cache
+            .insert("key".to_string(), create_test_version_info())
+            .await;
         assert!(assert_contains_via_trait(&cache, "key").await);
     }
 
@@ -488,8 +504,12 @@ mod tests {
         }
 
         let cache = MemoryCache::new();
-        cache.insert("key1".to_string(), create_test_version_info()).await;
-        cache.insert("key2".to_string(), create_test_version_info()).await;
+        cache
+            .insert("key1".to_string(), create_test_version_info())
+            .await;
+        cache
+            .insert("key2".to_string(), create_test_version_info())
+            .await;
         assert_eq!(cache.len(), 2);
 
         clear_via_trait(&cache).await;

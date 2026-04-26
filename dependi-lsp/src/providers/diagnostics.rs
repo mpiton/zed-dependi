@@ -500,13 +500,15 @@ mod tests {
     #[tokio::test]
     async fn test_create_diagnostic_outdated() {
         let cache = MemoryCache::new();
-        cache.insert(
-            "test:serde".to_string(),
-            VersionInfo {
-                latest: Some("2.0.0".to_string()),
-                ..Default::default()
-            },
-        ).await;
+        cache
+            .insert(
+                "test:serde".to_string(),
+                VersionInfo {
+                    latest: Some("2.0.0".to_string()),
+                    ..Default::default()
+                },
+            )
+            .await;
 
         let deps = vec![create_test_dependency("serde", "1.0.0", 5)];
         let diagnostics = create_diagnostics(
@@ -517,7 +519,8 @@ mod tests {
             FileType::Cargo,
             &hashbrown::HashMap::new(),
             &[],
-        ).await;
+        )
+        .await;
 
         assert_eq!(diagnostics.len(), 1);
         assert!(diagnostics[0].message.contains("2.0.0"));
@@ -527,13 +530,15 @@ mod tests {
     #[tokio::test]
     async fn test_no_diagnostic_up_to_date() {
         let cache = MemoryCache::new();
-        cache.insert(
-            "test:serde".to_string(),
-            VersionInfo {
-                latest: Some("1.0.0".to_string()),
-                ..Default::default()
-            },
-        ).await;
+        cache
+            .insert(
+                "test:serde".to_string(),
+                VersionInfo {
+                    latest: Some("1.0.0".to_string()),
+                    ..Default::default()
+                },
+            )
+            .await;
 
         let deps = vec![create_test_dependency("serde", "1.0.0", 5)];
         let diagnostics = create_diagnostics(
@@ -544,7 +549,8 @@ mod tests {
             FileType::Cargo,
             &hashbrown::HashMap::new(),
             &[],
-        ).await;
+        )
+        .await;
 
         assert_eq!(diagnostics.len(), 0);
     }
@@ -561,7 +567,8 @@ mod tests {
             FileType::Cargo,
             &hashbrown::HashMap::new(),
             &[],
-        ).await;
+        )
+        .await;
 
         assert_eq!(diagnostics.len(), 0);
     }
@@ -590,15 +597,17 @@ mod tests {
     async fn test_deprecated_diagnostic() {
         let deps = vec![create_test_dependency("old-dep", "1.0.0", 5)];
         let cache = MemoryCache::new();
-        cache.insert(
-            "test:old-dep".to_string(),
-            VersionInfo {
-                deprecated: true,
-                latest: Some("2.0.0".to_string()),
-                homepage: Some("https://example.com".to_string()),
-                ..Default::default()
-            },
-        ).await;
+        cache
+            .insert(
+                "test:old-dep".to_string(),
+                VersionInfo {
+                    deprecated: true,
+                    latest: Some("2.0.0".to_string()),
+                    homepage: Some("https://example.com".to_string()),
+                    ..Default::default()
+                },
+            )
+            .await;
 
         let diagnostics = create_diagnostics(
             &deps,
@@ -608,7 +617,8 @@ mod tests {
             FileType::Cargo,
             &hashbrown::HashMap::new(),
             &[],
-        ).await;
+        )
+        .await;
 
         let deprecation_diags: Vec<_> = diagnostics
             .iter()
@@ -636,14 +646,16 @@ mod tests {
     async fn test_no_deprecated_diagnostic_for_active() {
         let deps = vec![create_test_dependency("serde", "1.0.0", 5)];
         let cache = MemoryCache::new();
-        cache.insert(
-            "test:serde".to_string(),
-            VersionInfo {
-                deprecated: false,
-                latest: Some("1.0.0".to_string()),
-                ..Default::default()
-            },
-        ).await;
+        cache
+            .insert(
+                "test:serde".to_string(),
+                VersionInfo {
+                    deprecated: false,
+                    latest: Some("1.0.0".to_string()),
+                    ..Default::default()
+                },
+            )
+            .await;
 
         let diagnostics = create_diagnostics(
             &deps,
@@ -653,7 +665,8 @@ mod tests {
             FileType::Cargo,
             &hashbrown::HashMap::new(),
             &[],
-        ).await;
+        )
+        .await;
 
         let deprecation_diags: Vec<_> = diagnostics
             .iter()
@@ -675,19 +688,21 @@ mod tests {
     async fn test_deprecated_with_vulnerabilities() {
         let deps = vec![create_test_dependency("vuln-dep", "1.0.0", 5)];
         let cache = MemoryCache::new();
-        cache.insert(
-            "test:vuln-dep".to_string(),
-            VersionInfo {
-                deprecated: true,
-                vulnerabilities: vec![Vulnerability {
-                    id: "CVE-2024-1234".to_string(),
-                    severity: VulnerabilitySeverity::High,
-                    description: "Test vulnerability".to_string(),
-                    url: None,
-                }],
-                ..Default::default()
-            },
-        ).await;
+        cache
+            .insert(
+                "test:vuln-dep".to_string(),
+                VersionInfo {
+                    deprecated: true,
+                    vulnerabilities: vec![Vulnerability {
+                        id: "CVE-2024-1234".to_string(),
+                        severity: VulnerabilitySeverity::High,
+                        description: "Test vulnerability".to_string(),
+                        url: None,
+                    }],
+                    ..Default::default()
+                },
+            )
+            .await;
 
         let diagnostics = create_diagnostics(
             &deps,
@@ -697,7 +712,8 @@ mod tests {
             FileType::Cargo,
             &hashbrown::HashMap::new(),
             &[],
-        ).await;
+        )
+        .await;
 
         let deprecation_diags: Vec<_> = diagnostics
             .iter()
@@ -737,14 +753,16 @@ mod tests {
     async fn test_yanked_diagnostic() {
         let deps = vec![create_test_dependency("serde", "1.0.0", 5)];
         let cache = MemoryCache::new();
-        cache.insert(
-            "test:serde".to_string(),
-            VersionInfo {
-                yanked_versions: vec!["1.0.0".to_string()],
-                latest: Some("2.0.0".to_string()),
-                ..Default::default()
-            },
-        ).await;
+        cache
+            .insert(
+                "test:serde".to_string(),
+                VersionInfo {
+                    yanked_versions: vec!["1.0.0".to_string()],
+                    latest: Some("2.0.0".to_string()),
+                    ..Default::default()
+                },
+            )
+            .await;
 
         let diagnostics = create_diagnostics(
             &deps,
@@ -754,7 +772,8 @@ mod tests {
             FileType::Cargo,
             &hashbrown::HashMap::new(),
             &[],
-        ).await;
+        )
+        .await;
 
         let yanked_diags: Vec<_> = diagnostics
             .iter()
@@ -778,14 +797,16 @@ mod tests {
     async fn test_no_yanked_diagnostic_for_non_yanked() {
         let deps = vec![create_test_dependency("serde", "1.0.0", 5)];
         let cache = MemoryCache::new();
-        cache.insert(
-            "test:serde".to_string(),
-            VersionInfo {
-                yanked_versions: vec!["0.9.0".to_string()],
-                latest: Some("1.0.0".to_string()),
-                ..Default::default()
-            },
-        ).await;
+        cache
+            .insert(
+                "test:serde".to_string(),
+                VersionInfo {
+                    yanked_versions: vec!["0.9.0".to_string()],
+                    latest: Some("1.0.0".to_string()),
+                    ..Default::default()
+                },
+            )
+            .await;
 
         let diagnostics = create_diagnostics(
             &deps,
@@ -795,7 +816,8 @@ mod tests {
             FileType::Cargo,
             &hashbrown::HashMap::new(),
             &[],
-        ).await;
+        )
+        .await;
 
         let yanked_diags: Vec<_> = diagnostics
             .iter()
@@ -817,15 +839,17 @@ mod tests {
     async fn test_yanked_priority_over_deprecated_diagnostic() {
         let deps = vec![create_test_dependency("serde", "1.0.0", 5)];
         let cache = MemoryCache::new();
-        cache.insert(
-            "test:serde".to_string(),
-            VersionInfo {
-                yanked_versions: vec!["1.0.0".to_string()],
-                deprecated: true,
-                latest: Some("2.0.0".to_string()),
-                ..Default::default()
-            },
-        ).await;
+        cache
+            .insert(
+                "test:serde".to_string(),
+                VersionInfo {
+                    yanked_versions: vec!["1.0.0".to_string()],
+                    deprecated: true,
+                    latest: Some("2.0.0".to_string()),
+                    ..Default::default()
+                },
+            )
+            .await;
 
         let diagnostics = create_diagnostics(
             &deps,
@@ -835,7 +859,8 @@ mod tests {
             FileType::Cargo,
             &hashbrown::HashMap::new(),
             &[],
-        ).await;
+        )
+        .await;
 
         let yanked_diags: Vec<_> = diagnostics
             .iter()
@@ -875,20 +900,22 @@ mod tests {
     async fn test_yanked_priority_over_vulnerabilities_diagnostic() {
         let deps = vec![create_test_dependency("serde", "1.0.0", 5)];
         let cache = MemoryCache::new();
-        cache.insert(
-            "test:serde".to_string(),
-            VersionInfo {
-                yanked_versions: vec!["1.0.0".to_string()],
-                vulnerabilities: vec![Vulnerability {
-                    id: "CVE-2024-1234".to_string(),
-                    severity: VulnerabilitySeverity::High,
-                    description: "Test vulnerability".to_string(),
-                    url: None,
-                }],
-                latest: Some("2.0.0".to_string()),
-                ..Default::default()
-            },
-        ).await;
+        cache
+            .insert(
+                "test:serde".to_string(),
+                VersionInfo {
+                    yanked_versions: vec!["1.0.0".to_string()],
+                    vulnerabilities: vec![Vulnerability {
+                        id: "CVE-2024-1234".to_string(),
+                        severity: VulnerabilitySeverity::High,
+                        description: "Test vulnerability".to_string(),
+                        url: None,
+                    }],
+                    latest: Some("2.0.0".to_string()),
+                    ..Default::default()
+                },
+            )
+            .await;
 
         let diagnostics = create_diagnostics(
             &deps,
@@ -898,7 +925,8 @@ mod tests {
             FileType::Cargo,
             &hashbrown::HashMap::new(),
             &[],
-        ).await;
+        )
+        .await;
 
         let yanked_diags: Vec<_> = diagnostics
             .iter()
@@ -947,7 +975,8 @@ mod tests {
             FileType::Cargo,
             &hashbrown::HashMap::new(),
             &[],
-        ).await;
+        )
+        .await;
 
         assert_eq!(diagnostics.len(), 1);
         assert!(diagnostics[0].message.contains("Local"));
@@ -958,27 +987,29 @@ mod tests {
     async fn test_vulnerability_summary_diagnostic() {
         let deps = vec![create_test_dependency("vuln-dep", "1.0.0", 5)];
         let cache = MemoryCache::new();
-        cache.insert(
-            "test:vuln-dep".to_string(),
-            VersionInfo {
-                latest: Some("1.0.0".to_string()),
-                vulnerabilities: vec![
-                    Vulnerability {
-                        id: "CVE-2024-1234".to_string(),
-                        severity: VulnerabilitySeverity::High,
-                        description: "High severity vulnerability".to_string(),
-                        url: Some("https://osv.dev/CVE-2024-1234".to_string()),
-                    },
-                    Vulnerability {
-                        id: "CVE-2024-5678".to_string(),
-                        severity: VulnerabilitySeverity::Medium,
-                        description: "Medium severity vulnerability".to_string(),
-                        url: None,
-                    },
-                ],
-                ..Default::default()
-            },
-        ).await;
+        cache
+            .insert(
+                "test:vuln-dep".to_string(),
+                VersionInfo {
+                    latest: Some("1.0.0".to_string()),
+                    vulnerabilities: vec![
+                        Vulnerability {
+                            id: "CVE-2024-1234".to_string(),
+                            severity: VulnerabilitySeverity::High,
+                            description: "High severity vulnerability".to_string(),
+                            url: Some("https://osv.dev/CVE-2024-1234".to_string()),
+                        },
+                        Vulnerability {
+                            id: "CVE-2024-5678".to_string(),
+                            severity: VulnerabilitySeverity::Medium,
+                            description: "Medium severity vulnerability".to_string(),
+                            url: None,
+                        },
+                    ],
+                    ..Default::default()
+                },
+            )
+            .await;
 
         let diagnostics = create_diagnostics(
             &deps,
@@ -988,7 +1019,8 @@ mod tests {
             FileType::Cargo,
             &hashbrown::HashMap::new(),
             &[],
-        ).await;
+        )
+        .await;
 
         let vuln_diags: Vec<_> = diagnostics
             .iter()
@@ -1009,27 +1041,29 @@ mod tests {
     async fn test_vulnerability_severity_filtering() {
         let deps = vec![create_test_dependency("vuln-dep", "1.0.0", 5)];
         let cache = MemoryCache::new();
-        cache.insert(
-            "test:vuln-dep".to_string(),
-            VersionInfo {
-                latest: Some("1.0.0".to_string()),
-                vulnerabilities: vec![
-                    Vulnerability {
-                        id: "CVE-2024-LOW".to_string(),
-                        severity: VulnerabilitySeverity::Low,
-                        description: "Low severity".to_string(),
-                        url: None,
-                    },
-                    Vulnerability {
-                        id: "CVE-2024-HIGH".to_string(),
-                        severity: VulnerabilitySeverity::High,
-                        description: "High severity".to_string(),
-                        url: None,
-                    },
-                ],
-                ..Default::default()
-            },
-        ).await;
+        cache
+            .insert(
+                "test:vuln-dep".to_string(),
+                VersionInfo {
+                    latest: Some("1.0.0".to_string()),
+                    vulnerabilities: vec![
+                        Vulnerability {
+                            id: "CVE-2024-LOW".to_string(),
+                            severity: VulnerabilitySeverity::Low,
+                            description: "Low severity".to_string(),
+                            url: None,
+                        },
+                        Vulnerability {
+                            id: "CVE-2024-HIGH".to_string(),
+                            severity: VulnerabilitySeverity::High,
+                            description: "High severity".to_string(),
+                            url: None,
+                        },
+                    ],
+                    ..Default::default()
+                },
+            )
+            .await;
 
         let diagnostics = create_diagnostics(
             &deps,
@@ -1039,7 +1073,8 @@ mod tests {
             FileType::Cargo,
             &hashbrown::HashMap::new(),
             &[],
-        ).await;
+        )
+        .await;
 
         let vuln_diags: Vec<_> = diagnostics
             .iter()
@@ -1058,15 +1093,17 @@ mod tests {
     async fn test_deprecation_diagnostic_with_repository() {
         let deps = vec![create_test_dependency("old-dep", "1.0.0", 5)];
         let cache = MemoryCache::new();
-        cache.insert(
-            "test:old-dep".to_string(),
-            VersionInfo {
-                deprecated: true,
-                latest: Some("2.0.0".to_string()),
-                repository: Some("https://github.com/user/old-dep".to_string()),
-                ..Default::default()
-            },
-        ).await;
+        cache
+            .insert(
+                "test:old-dep".to_string(),
+                VersionInfo {
+                    deprecated: true,
+                    latest: Some("2.0.0".to_string()),
+                    repository: Some("https://github.com/user/old-dep".to_string()),
+                    ..Default::default()
+                },
+            )
+            .await;
 
         let diagnostics = create_diagnostics(
             &deps,
@@ -1076,7 +1113,8 @@ mod tests {
             FileType::Cargo,
             &hashbrown::HashMap::new(),
             &[],
-        ).await;
+        )
+        .await;
 
         let deprecation_diags: Vec<_> = diagnostics
             .iter()
@@ -1097,15 +1135,17 @@ mod tests {
     async fn test_yanked_diagnostic_with_repository() {
         let deps = vec![create_test_dependency("serde", "1.0.0", 5)];
         let cache = MemoryCache::new();
-        cache.insert(
-            "test:serde".to_string(),
-            VersionInfo {
-                yanked_versions: vec!["1.0.0".to_string()],
-                latest: Some("2.0.0".to_string()),
-                repository: Some("https://github.com/serde-rs/serde".to_string()),
-                ..Default::default()
-            },
-        ).await;
+        cache
+            .insert(
+                "test:serde".to_string(),
+                VersionInfo {
+                    yanked_versions: vec!["1.0.0".to_string()],
+                    latest: Some("2.0.0".to_string()),
+                    repository: Some("https://github.com/serde-rs/serde".to_string()),
+                    ..Default::default()
+                },
+            )
+            .await;
 
         let diagnostics = create_diagnostics(
             &deps,
@@ -1115,7 +1155,8 @@ mod tests {
             FileType::Cargo,
             &hashbrown::HashMap::new(),
             &[],
-        ).await;
+        )
+        .await;
 
         let yanked_diags: Vec<_> = diagnostics
             .iter()
@@ -1185,19 +1226,21 @@ mod tests {
     async fn test_vulnerability_low_severity_hint() {
         let deps = vec![create_test_dependency("vuln-dep", "1.0.0", 5)];
         let cache = MemoryCache::new();
-        cache.insert(
-            "test:vuln-dep".to_string(),
-            VersionInfo {
-                latest: Some("1.0.0".to_string()),
-                vulnerabilities: vec![Vulnerability {
-                    id: "CVE-2024-LOW".to_string(),
-                    severity: VulnerabilitySeverity::Low,
-                    description: "Low severity".to_string(),
-                    url: None,
-                }],
-                ..Default::default()
-            },
-        ).await;
+        cache
+            .insert(
+                "test:vuln-dep".to_string(),
+                VersionInfo {
+                    latest: Some("1.0.0".to_string()),
+                    vulnerabilities: vec![Vulnerability {
+                        id: "CVE-2024-LOW".to_string(),
+                        severity: VulnerabilitySeverity::Low,
+                        description: "Low severity".to_string(),
+                        url: None,
+                    }],
+                    ..Default::default()
+                },
+            )
+            .await;
 
         let diagnostics = create_diagnostics(
             &deps,
@@ -1207,7 +1250,8 @@ mod tests {
             FileType::Cargo,
             &hashbrown::HashMap::new(),
             &[],
-        ).await;
+        )
+        .await;
 
         let vuln_diags: Vec<_> = diagnostics
             .iter()
@@ -1226,19 +1270,21 @@ mod tests {
     async fn test_vulnerability_medium_severity_warning() {
         let deps = vec![create_test_dependency("vuln-dep", "1.0.0", 5)];
         let cache = MemoryCache::new();
-        cache.insert(
-            "test:vuln-dep".to_string(),
-            VersionInfo {
-                latest: Some("1.0.0".to_string()),
-                vulnerabilities: vec![Vulnerability {
-                    id: "CVE-2024-MED".to_string(),
-                    severity: VulnerabilitySeverity::Medium,
-                    description: "Medium severity".to_string(),
-                    url: None,
-                }],
-                ..Default::default()
-            },
-        ).await;
+        cache
+            .insert(
+                "test:vuln-dep".to_string(),
+                VersionInfo {
+                    latest: Some("1.0.0".to_string()),
+                    vulnerabilities: vec![Vulnerability {
+                        id: "CVE-2024-MED".to_string(),
+                        severity: VulnerabilitySeverity::Medium,
+                        description: "Medium severity".to_string(),
+                        url: None,
+                    }],
+                    ..Default::default()
+                },
+            )
+            .await;
 
         let diagnostics = create_diagnostics(
             &deps,
@@ -1248,7 +1294,8 @@ mod tests {
             FileType::Cargo,
             &hashbrown::HashMap::new(),
             &[],
-        ).await;
+        )
+        .await;
 
         let vuln_diags: Vec<_> = diagnostics
             .iter()
@@ -1267,19 +1314,21 @@ mod tests {
     async fn test_vulnerability_critical_severity_error() {
         let deps = vec![create_test_dependency("vuln-dep", "1.0.0", 5)];
         let cache = MemoryCache::new();
-        cache.insert(
-            "test:vuln-dep".to_string(),
-            VersionInfo {
-                latest: Some("1.0.0".to_string()),
-                vulnerabilities: vec![Vulnerability {
-                    id: "CVE-2024-CRIT".to_string(),
-                    severity: VulnerabilitySeverity::Critical,
-                    description: "Critical severity".to_string(),
-                    url: None,
-                }],
-                ..Default::default()
-            },
-        ).await;
+        cache
+            .insert(
+                "test:vuln-dep".to_string(),
+                VersionInfo {
+                    latest: Some("1.0.0".to_string()),
+                    vulnerabilities: vec![Vulnerability {
+                        id: "CVE-2024-CRIT".to_string(),
+                        severity: VulnerabilitySeverity::Critical,
+                        description: "Critical severity".to_string(),
+                        url: None,
+                    }],
+                    ..Default::default()
+                },
+            )
+            .await;
 
         let diagnostics = create_diagnostics(
             &deps,
@@ -1289,7 +1338,8 @@ mod tests {
             FileType::Cargo,
             &hashbrown::HashMap::new(),
             &[],
-        ).await;
+        )
+        .await;
 
         let vuln_diags: Vec<_> = diagnostics
             .iter()
@@ -1308,14 +1358,16 @@ mod tests {
     async fn test_yanked_diagnostic_uses_registry_name_npm() {
         let deps = vec![create_test_dependency("lodash", "1.0.0", 5)];
         let cache = MemoryCache::new();
-        cache.insert(
-            "test:lodash".to_string(),
-            VersionInfo {
-                yanked_versions: vec!["1.0.0".to_string()],
-                latest: Some("4.17.21".to_string()),
-                ..Default::default()
-            },
-        ).await;
+        cache
+            .insert(
+                "test:lodash".to_string(),
+                VersionInfo {
+                    yanked_versions: vec!["1.0.0".to_string()],
+                    latest: Some("4.17.21".to_string()),
+                    ..Default::default()
+                },
+            )
+            .await;
 
         let diagnostics = create_diagnostics(
             &deps,
@@ -1325,7 +1377,8 @@ mod tests {
             FileType::Npm,
             &hashbrown::HashMap::new(),
             &[],
-        ).await;
+        )
+        .await;
 
         let yanked_diags: Vec<_> = diagnostics
             .iter()
@@ -1357,13 +1410,15 @@ mod tests {
 
         let deps = vec![create_test_dependency("my-dep", "1.0.0", 5)];
         let cache = MemoryCache::new();
-        cache.insert(
-            "test:my-dep".to_string(),
-            VersionInfo {
-                latest: Some("1.0.0".to_string()),
-                ..Default::default()
-            },
-        ).await;
+        cache
+            .insert(
+                "test:my-dep".to_string(),
+                VersionInfo {
+                    latest: Some("1.0.0".to_string()),
+                    ..Default::default()
+                },
+            )
+            .await;
 
         // Transitive vulns are now stored per-document, not in version_cache.
         let mut doc_transitives: hashbrown::HashMap<String, Vec<TransitiveVuln>> =
@@ -1390,7 +1445,8 @@ mod tests {
             FileType::Cargo,
             &doc_transitives,
             &[],
-        ).await;
+        )
+        .await;
 
         let vuln_diags: Vec<_> = diagnostics
             .iter()
@@ -1423,13 +1479,15 @@ mod tests {
     async fn test_transitive_vulns_respect_min_severity() {
         let deps = vec![create_test_dependency("my-dep", "1.0.0", 5)];
         let cache = MemoryCache::new();
-        cache.insert(
-            "test:my-dep".to_string(),
-            VersionInfo {
-                latest: Some("1.0.0".to_string()),
-                ..Default::default()
-            },
-        ).await;
+        cache
+            .insert(
+                "test:my-dep".to_string(),
+                VersionInfo {
+                    latest: Some("1.0.0".to_string()),
+                    ..Default::default()
+                },
+            )
+            .await;
 
         let mut doc_transitives: hashbrown::HashMap<String, Vec<TransitiveVuln>> =
             hashbrown::HashMap::new();
@@ -1467,7 +1525,8 @@ mod tests {
             FileType::Cargo,
             &doc_transitives,
             &[],
-        ).await;
+        )
+        .await;
 
         let vuln_diags: Vec<_> = diagnostics
             .iter()
@@ -1498,13 +1557,15 @@ mod tests {
     #[tokio::test]
     async fn test_diagnostic_skipped_for_ignored_package() {
         let cache = MemoryCache::new();
-        cache.insert(
-            "test:lodash".to_string(),
-            VersionInfo {
-                latest: Some("2.0.0".to_string()),
-                ..Default::default()
-            },
-        ).await;
+        cache
+            .insert(
+                "test:lodash".to_string(),
+                VersionInfo {
+                    latest: Some("2.0.0".to_string()),
+                    ..Default::default()
+                },
+            )
+            .await;
         let deps = vec![create_test_dependency("lodash", "1.0.0", 5)];
         let ignored = vec!["lodash".to_string()];
 
@@ -1516,7 +1577,8 @@ mod tests {
             FileType::Cargo,
             &hashbrown::HashMap::new(),
             &ignored,
-        ).await;
+        )
+        .await;
 
         assert!(
             diagnostics.is_empty(),
@@ -1527,13 +1589,15 @@ mod tests {
     #[tokio::test]
     async fn test_diagnostic_skipped_for_wildcard_match() {
         let cache = MemoryCache::new();
-        cache.insert(
-            "test:@internal/utils".to_string(),
-            VersionInfo {
-                latest: Some("2.0.0".to_string()),
-                ..Default::default()
-            },
-        ).await;
+        cache
+            .insert(
+                "test:@internal/utils".to_string(),
+                VersionInfo {
+                    latest: Some("2.0.0".to_string()),
+                    ..Default::default()
+                },
+            )
+            .await;
         let deps = vec![create_test_dependency("@internal/utils", "1.0.0", 5)];
         let ignored = vec!["@internal/*".to_string()];
 
@@ -1545,7 +1609,8 @@ mod tests {
             FileType::Cargo,
             &hashbrown::HashMap::new(),
             &ignored,
-        ).await;
+        )
+        .await;
 
         assert!(
             diagnostics.is_empty(),
@@ -1556,13 +1621,15 @@ mod tests {
     #[tokio::test]
     async fn test_diagnostic_emitted_when_not_ignored() {
         let cache = MemoryCache::new();
-        cache.insert(
-            "test:react".to_string(),
-            VersionInfo {
-                latest: Some("18.0.0".to_string()),
-                ..Default::default()
-            },
-        ).await;
+        cache
+            .insert(
+                "test:react".to_string(),
+                VersionInfo {
+                    latest: Some("18.0.0".to_string()),
+                    ..Default::default()
+                },
+            )
+            .await;
         let deps = vec![create_test_dependency("react", "17.0.0", 5)];
         let ignored = vec!["lodash".to_string()];
 
@@ -1574,7 +1641,8 @@ mod tests {
             FileType::Cargo,
             &hashbrown::HashMap::new(),
             &ignored,
-        ).await;
+        )
+        .await;
 
         assert_eq!(
             diagnostics.len(),

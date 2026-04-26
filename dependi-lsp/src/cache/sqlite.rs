@@ -211,10 +211,7 @@ impl ReadCache for SqliteCache {
             match result {
                 Ok((data, inserted_at, ttl_secs)) => {
                     if now > inserted_at + ttl_secs {
-                        let _ = conn.execute(
-                            "DELETE FROM packages WHERE key = ?",
-                            [key.as_str()],
-                        );
+                        let _ = conn.execute("DELETE FROM packages WHERE key = ?", [key.as_str()]);
                         None
                     } else {
                         serde_json::from_str(&data).ok()
@@ -523,7 +520,9 @@ mod tests {
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
     async fn test_get_does_not_block_runtime() {
         let cache = Arc::new(SqliteCache::in_memory().unwrap());
-        cache.insert("k".to_string(), create_test_version_info()).await;
+        cache
+            .insert("k".to_string(), create_test_version_info())
+            .await;
 
         let cache_clone = Arc::clone(&cache);
         let read_task = tokio::spawn(async move { cache_clone.get("k").await });
@@ -534,8 +533,14 @@ mod tests {
         )
         .await;
 
-        assert!(timer_ok.is_ok(), "tokio runtime appears blocked while SQLite read in flight");
-        assert!(read_task.await.unwrap().is_some(), "expected cache hit on key 'k'");
+        assert!(
+            timer_ok.is_ok(),
+            "tokio runtime appears blocked while SQLite read in flight"
+        );
+        assert!(
+            read_task.await.unwrap().is_some(),
+            "expected cache hit on key 'k'"
+        );
     }
 
     #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
@@ -656,7 +661,9 @@ mod tests {
         let _ = cache.get("dropme").await;
 
         // A subsequent insert + get must work normally.
-        cache.insert("k".to_string(), create_test_version_info()).await;
+        cache
+            .insert("k".to_string(), create_test_version_info())
+            .await;
         assert!(cache.get("k").await.is_some());
     }
 
@@ -671,6 +678,9 @@ mod tests {
         .ok()
         .flatten();
 
-        assert!(result.is_none(), "panic must downgrade to None via fail-soft pattern");
+        assert!(
+            result.is_none(),
+            "panic must downgrade to None via fail-soft pattern"
+        );
     }
 }

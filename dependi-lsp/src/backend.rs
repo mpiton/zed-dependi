@@ -1938,7 +1938,10 @@ impl LanguageServer for DependiBackend {
                     }
                 })
                 .collect();
-            futures::future::join_all(futures).await.into_iter().collect()
+            futures::future::join_all(futures)
+                .await
+                .into_iter()
+                .collect()
         };
 
         let hints: Vec<InlayHint> = visible_deps

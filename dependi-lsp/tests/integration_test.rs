@@ -150,7 +150,9 @@ async fn test_cache_integration() {
         transitive_vulnerabilities: vec![],
     };
 
-    cache.insert("crates:serde".to_string(), serde_info.clone()).await;
+    cache
+        .insert("crates:serde".to_string(), serde_info.clone())
+        .await;
 
     // Retrieve and verify
     let retrieved = cache.get("crates:serde").await.unwrap();
