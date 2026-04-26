@@ -83,6 +83,46 @@ impl AdvisoryWriteCache for MemoryAdvisoryCache {
     }
 }
 
+impl MemoryAdvisoryCache {
+    /// Remove every expired entry. Returns the number of entries removed.
+    pub fn cleanup_expired(&self) -> usize {
+        let before = self.entries.len();
+        self.entries.retain(|_, entry| !entry.is_expired());
+        before.saturating_sub(self.entries.len())
+    }
+
+    /// Snapshot statistics about the cache.
+    pub fn stats(&self) -> AdvisoryCacheStats {
+        let total = self.entries.len();
+        let expired = self.entries.iter().filter(|e| e.is_expired()).count();
+        AdvisoryCacheStats {
+            total,
+            expired,
+            valid: total.saturating_sub(expired),
+        }
+    }
+
+    /// Test-only length accessor.
+    #[cfg(test)]
+    pub fn len(&self) -> usize {
+        self.entries.len()
+    }
+
+    /// Test-only emptiness check.
+    #[cfg(test)]
+    pub fn is_empty(&self) -> bool {
+        self.entries.is_empty()
+    }
+}
+
+/// Snapshot statistics for an advisory cache.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct AdvisoryCacheStats {
+    pub total: usize,
+    pub expired: usize,
+    pub valid: usize,
+}
+
 #[cfg(test)]
 mod tests {
     use std::time::SystemTime;
@@ -174,5 +214,33 @@ mod tests {
             summary: Some("unmaintained".to_string()),
             unmaintained: true,
         }));
+    }
+
+    #[tokio::test]
+    async fn cleanup_expired_removes_only_expired_entries() {
+        let cache = MemoryAdvisoryCache::with_ttl(Duration::from_millis(20));
+        cache.insert(sample_found()).await;
+        tokio::time::sleep(Duration::from_millis(30)).await;
+        cache.insert(sample_not_found("RUSTSEC-9999-0001")).await;
+
+        let removed = cache.cleanup_expired();
+        assert_eq!(removed, 1);
+        assert!(cache.get("RUSTSEC-2020-0036").await.is_none());
+        assert!(cache.get("RUSTSEC-9999-0001").await.is_some());
+    }
+
+    #[tokio::test]
+    async fn stats_report_total_expired_and_valid() {
+        let cache = MemoryAdvisoryCache::with_ttl(Duration::from_millis(20));
+        cache.insert(sample_found()).await;
+        let before = cache.stats();
+        assert_eq!(before.total, 1);
+        assert_eq!(before.expired, 0);
+        assert_eq!(before.valid, 1);
+        tokio::time::sleep(Duration::from_millis(30)).await;
+        let after = cache.stats();
+        assert_eq!(after.total, 1);
+        assert_eq!(after.expired, 1);
+        assert_eq!(after.valid, 0);
     }
 }

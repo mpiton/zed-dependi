@@ -24,7 +24,8 @@ pub mod sqlite;
 pub(crate) mod sqlite_manager;
 
 pub use advisory::{
-    AdvisoryKind, AdvisoryReadCache, AdvisoryWriteCache, CachedAdvisory, NullAdvisoryCache,
+    AdvisoryCacheStats, AdvisoryKind, AdvisoryReadCache, AdvisoryWriteCache, CachedAdvisory,
+    DEFAULT_ADVISORY_TTL, MemoryAdvisoryCache, NullAdvisoryCache,
 };
 pub use sqlite::SqliteCache;
 
