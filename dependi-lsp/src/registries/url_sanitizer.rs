@@ -84,4 +84,45 @@ mod tests {
             Some("https://github.com/user/repo".to_string())
         );
     }
+
+    #[test]
+    fn rejects_ssh() {
+        assert_eq!(sanitize_repo_url("ssh://git@github.com/user/repo"), None);
+    }
+
+    #[test]
+    fn rejects_git_plus_ssh() {
+        assert_eq!(
+            sanitize_repo_url("git+ssh://git@github.com/user/repo.git"),
+            None
+        );
+    }
+
+    #[test]
+    fn rejects_ftp() {
+        assert_eq!(sanitize_repo_url("ftp://example.com/repo"), None);
+    }
+
+    #[test]
+    fn rejects_file() {
+        assert_eq!(sanitize_repo_url("file:///etc/passwd"), None);
+    }
+
+    #[test]
+    fn rejects_javascript() {
+        assert_eq!(sanitize_repo_url("javascript:alert(1)"), None);
+    }
+
+    #[test]
+    fn rejects_data_uri() {
+        assert_eq!(
+            sanitize_repo_url("data:text/html,<script>alert(1)</script>"),
+            None
+        );
+    }
+
+    #[test]
+    fn rejects_mailto() {
+        assert_eq!(sanitize_repo_url("mailto:foo@bar.com"), None);
+    }
 }
