@@ -373,7 +373,7 @@ impl Registry for NpmRegistry {
             homepage: pkg.homepage,
             repository,
             license: pkg.license.and_then(|l| l.as_string()),
-            vulnerabilities: vec![], // TODO: Integrate npm audit
+            vulnerabilities: vec![], // Filled by the shared OSV vulnerability scan.
             deprecated,
             yanked: false,
             yanked_versions: vec![], // Not applicable to npm
