@@ -75,11 +75,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   this the old tasks kept ticking forever holding `Arc` clones of the
   replaced memory/SQLite layers
   ([#237](https://github.com/mpiton/zed-dependi/issues/237))
-- Stop panicking when the OSV `reqwest` builder fails at startup. The new
-  `OsvClient::with_default_client_and_caches` infallible fallback uses
-  `reqwest::Client::new()` and keeps the cache wiring intact, so the LSP
-  can keep serving non-vulnerability features instead of crashing during
-  `with_http_client` ([#237](https://github.com/mpiton/zed-dependi/issues/237))
+- Reuse the LSP's shared `reqwest::Client` for the `OsvClient` instead of
+  building a second one. The new `OsvClient::with_shared_client_and_caches`
+  takes the already-verified `Arc<Client>` so there is no second TLS
+  builder failure point at startup, and `build_advisory_runtime` is
+  genuinely infallible (the previous "fallback" via `reqwest::Client::new()`
+  could itself panic, since `Client::new()` is `Client::builder().build().expect(...)`)
+  ([#237](https://github.com/mpiton/zed-dependi/issues/237))
 - Reconfigure the advisory cache trio (`advisory_cache`,
   `negative_advisory_cache`, `osv_client`) inside `LanguageServer::initialize`
   once the LSP receives client settings. Previously the caches were built

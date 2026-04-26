@@ -838,11 +838,15 @@ struct AdvisoryRuntime {
 /// helper isolated also makes the configuration wiring testable without
 /// instantiating an LSP `Client`.
 ///
-/// Infallible: when the OSV `reqwest` builder fails (rare; happens if the
-/// platform cannot load native TLS roots), this falls back to
-/// `reqwest::Client::new()` instead of panicking. The caches are still wired
-/// to the same OSV client, so backend cache handles do not become orphaned.
-fn build_advisory_runtime(config: &crate::config::AdvisoryCacheConfig) -> AdvisoryRuntime {
+/// Infallible: reuses the caller-supplied `reqwest::Client` (the LSP's
+/// shared HTTP client) instead of building a second one. The caller has
+/// already proven `reqwest` works on this platform, so this avoids a
+/// second TLS/builder failure point that previously forced the helper to
+/// either panic or fall back to the panicky `Client::new()`.
+fn build_advisory_runtime(
+    config: &crate::config::AdvisoryCacheConfig,
+    http_client: Arc<HttpClient>,
+) -> AdvisoryRuntime {
     let positive = Arc::new(crate::cache::HybridAdvisoryCache::from_config(config));
     let h1 = positive.spawn_default_cleanup_task();
     let negative = Arc::new(crate::cache::HybridAdvisoryCache::negative_from_config(
@@ -852,21 +856,11 @@ fn build_advisory_runtime(config: &crate::config::AdvisoryCacheConfig) -> Adviso
 
     let positive_dyn = Arc::clone(&positive) as Arc<dyn crate::cache::AdvisoryWriteCache>;
     let negative_dyn = Arc::clone(&negative) as Arc<dyn crate::cache::AdvisoryWriteCache>;
-    let osv_client = match OsvClient::new_with_caches(
-        Arc::clone(&positive_dyn),
-        Arc::clone(&negative_dyn),
-    ) {
-        Ok(client) => Arc::new(client),
-        Err(err) => {
-            tracing::warn!(
-                "OsvClient HTTP builder failed ({err}); falling back to default reqwest::Client. Vulnerability checks continue using the same caches."
-            );
-            Arc::new(OsvClient::with_default_client_and_caches(
-                positive_dyn,
-                negative_dyn,
-            ))
-        }
-    };
+    let osv_client = Arc::new(OsvClient::with_shared_client_and_caches(
+        http_client,
+        positive_dyn,
+        negative_dyn,
+    ));
 
     AdvisoryRuntime {
         positive,
@@ -1011,7 +1005,7 @@ impl DependiBackend {
         // user's `AdvisoryCacheConfig` is parsed; otherwise client overrides
         // (custom `db_path`, custom TTLs, `enabled = false`) would never take
         // effect because the LSP cannot see them at struct-construction time.
-        let runtime = build_advisory_runtime(&config.advisory_cache);
+        let runtime = build_advisory_runtime(&config.advisory_cache, Arc::clone(&http_client));
         let advisory_cache = runtime.positive;
         let negative_advisory_cache = runtime.negative;
         let osv_client = runtime.osv_client;
@@ -1851,7 +1845,8 @@ impl LanguageServer for DependiBackend {
         // never take effect. Abort the previous cleanup tasks before
         // installing the new runtime; otherwise they keep ticking with
         // strong references to the now-replaced caches (slow leak).
-        let new_runtime = build_advisory_runtime(&config.advisory_cache);
+        let new_runtime =
+            build_advisory_runtime(&config.advisory_cache, Arc::clone(&self.http_client));
         {
             let mut handles = self.advisory_cleanup_handles.lock().await;
             for handle in handles.drain(..) {
@@ -2481,7 +2476,9 @@ mod tests {
             db_path: Some(db_path.clone()),
         };
 
-        let runtime = super::build_advisory_runtime(&config);
+        let http_client = crate::registries::http_client::create_shared_client()
+            .expect("shared client builds in test");
+        let runtime = super::build_advisory_runtime(&config, http_client);
         runtime
             .positive
             .insert(CachedAdvisory {

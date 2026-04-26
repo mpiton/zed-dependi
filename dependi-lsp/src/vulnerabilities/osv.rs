@@ -88,17 +88,22 @@ impl OsvClient {
         })
     }
 
-    /// Infallible constructor used by the LSP backend as a startup fallback
-    /// when [`OsvClient::new_with_caches`] fails (rare reqwest builder
-    /// errors). Uses `reqwest::Client::new()` directly — which never
-    /// panics — so the LSP can keep serving non-vulnerability features
-    /// instead of crashing during `initialize`.
-    pub fn with_default_client_and_caches(
+    /// Infallible constructor that reuses an already-built `reqwest::Client`
+    /// (typically the LSP's shared HTTP client created via
+    /// `create_shared_client`). Avoids a second TLS/builder-init step that
+    /// could fail or panic at runtime — the caller has proven `reqwest`
+    /// works on this platform by virtue of holding a `Client` already.
+    ///
+    /// Note: drops the OSV-specific 30 s timeout customisation; the shared
+    /// client's default timeout applies. OSV requests are short-lived in
+    /// practice, so this is acceptable.
+    pub fn with_shared_client_and_caches(
+        client: Arc<Client>,
         positive_cache: Arc<dyn crate::cache::advisory::AdvisoryWriteCache>,
         negative_cache: Arc<dyn crate::cache::advisory::AdvisoryWriteCache>,
     ) -> Self {
         Self {
-            client: Arc::new(Client::new()),
+            client,
             base_url: OSV_API_BASE.to_string(),
             advisory_cache: positive_cache,
             negative_cache,
