@@ -16,6 +16,21 @@ use crate::registries::{Vulnerability, VulnerabilitySeverity};
 const OSV_API_BASE: &str = "https://api.osv.dev/v1";
 const RUSTSEC_ADVISORY_LOOKUP_CONCURRENCY: usize = 5;
 
+/// Maximum length for an OSV advisory ID. Real RUSTSEC IDs are 16 characters
+/// (`RUSTSEC-YYYY-NNNN`); 64 is generous head-room for related schemes.
+const MAX_ADVISORY_ID_LEN: usize = 64;
+
+/// Whitelist sanity check for advisory IDs returned by OSV.
+///
+/// `check_rustsec_unmaintained` interpolates the ID directly into a URL and
+/// uses it as a cache key, so we constrain the alphabet up-front.
+/// Accepts only ASCII alphanumerics and the `-` separator.
+fn is_valid_advisory_id(id: &str) -> bool {
+    !id.is_empty()
+        && id.len() <= MAX_ADVISORY_ID_LEN
+        && id.chars().all(|c| c.is_ascii_alphanumeric() || c == '-')
+}
+
 /// Result of a vulnerability query
 #[derive(Debug, Clone, Default)]
 pub struct QueryResult {
@@ -220,6 +235,11 @@ impl OsvClient {
                 let cache = Arc::clone(&cache);
 
                 async move {
+                    if !is_valid_advisory_id(&id) {
+                        tracing::warn!("Skipping advisory with unexpected ID format: {:?}", id);
+                        return false;
+                    }
+
                     if let Some(cached) = cache.get(&id).await {
                         return match cached.kind {
                             crate::cache::advisory::AdvisoryKind::Found {
@@ -431,6 +451,41 @@ mod tests {
         });
 
         format!("http://{addr}")
+    }
+
+    #[test]
+    fn is_valid_advisory_id_accepts_canonical_rustsec_format() {
+        assert!(is_valid_advisory_id("RUSTSEC-2020-0036"));
+        assert!(is_valid_advisory_id("RUSTSEC-2099-9999"));
+        // Non-RUSTSEC alphanumerics + `-` are also fine; OSV exposes
+        // GHSA / CVE / OSV IDs through the same endpoint.
+        assert!(is_valid_advisory_id("GHSA-xxxx-yyyy-zzzz"));
+        assert!(is_valid_advisory_id("CVE-2024-0001"));
+    }
+
+    #[test]
+    fn is_valid_advisory_id_rejects_dangerous_characters() {
+        // Empty string is rejected.
+        assert!(!is_valid_advisory_id(""));
+        // Path traversal attempts.
+        assert!(!is_valid_advisory_id("../etc/passwd"));
+        assert!(!is_valid_advisory_id("RUSTSEC/2020/0036"));
+        // URL-injection attempts.
+        assert!(!is_valid_advisory_id("RUSTSEC-2020-0036?evil=1"));
+        assert!(!is_valid_advisory_id("RUSTSEC-2020-0036#frag"));
+        // Whitespace and control chars.
+        assert!(!is_valid_advisory_id("RUSTSEC-2020 0036"));
+        assert!(!is_valid_advisory_id("RUSTSEC-2020-0036\n"));
+        // Unicode is rejected — OSV IDs are ASCII.
+        assert!(!is_valid_advisory_id("RUSTSEC-é"));
+    }
+
+    #[test]
+    fn is_valid_advisory_id_rejects_oversized_ids() {
+        let long = "A".repeat(65);
+        assert!(!is_valid_advisory_id(&long));
+        let just_at_limit = "A".repeat(64);
+        assert!(is_valid_advisory_id(&just_at_limit));
     }
 
     #[test]
