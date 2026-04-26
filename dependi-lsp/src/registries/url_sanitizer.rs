@@ -53,13 +53,34 @@ fn validate_external_url(parsed: &url::Url) -> Option<()> {
 }
 
 /// Strip the `git+` prefix and rewrite legacy `git://` to `https://`.
+///
+/// Prefix matching is ASCII-case-insensitive because URL schemes are
+/// case-insensitive per RFC 3986 §3.1, so inputs like `GIT+https://`
+/// and `Git://` must be normalised the same way as their lowercase
+/// counterparts.
+///
+/// Note: the `git://` -> `https://` rewrite assumes the remote host
+/// also serves the same path over HTTPS. This holds for GitHub, GitLab
+/// and Bitbucket (the overwhelming majority of package metadata), but
+/// is not guaranteed for self-hosted or legacy registries. Carryover
+/// from the previous per-registry helper, kept for compatibility.
 fn normalize_compound_scheme(input: &str) -> String {
-    let without_prefix = input.strip_prefix("git+").unwrap_or(input);
-    if let Some(rest) = without_prefix.strip_prefix("git://") {
+    let without_prefix = strip_prefix_ascii_case(input, "git+").unwrap_or(input);
+    if let Some(rest) = strip_prefix_ascii_case(without_prefix, "git://") {
         format!("https://{rest}")
     } else {
         without_prefix.to_string()
     }
+}
+
+/// Like `str::strip_prefix`, but matches the prefix case-insensitively
+/// across the ASCII range. The returned slice preserves the original
+/// case of the remainder.
+fn strip_prefix_ascii_case<'a>(input: &'a str, prefix: &str) -> Option<&'a str> {
+    input
+        .get(..prefix.len())
+        .filter(|head| head.eq_ignore_ascii_case(prefix))
+        .map(|_| &input[prefix.len()..])
 }
 
 /// Remove a trailing `.git` from the URL path, in place.
@@ -248,6 +269,37 @@ mod tests {
         assert_eq!(
             sanitize_repo_url("https://user:pass@github.com/user/repo"),
             None
+        );
+    }
+
+    #[test]
+    fn preserves_percent_encoding_when_stripping_dot_git() {
+        // Regression guard: `url::Url::set_path` must not double-encode
+        // pre-existing `%XX` sequences in the path (e.g. `my%20repo`
+        // must stay `my%20repo`, not become `my%2520repo`).
+        assert_eq!(
+            sanitize_repo_url("https://github.com/user/my%20repo.git"),
+            Some("https://github.com/user/my%20repo".to_string())
+        );
+    }
+
+    #[test]
+    fn accepts_uppercase_git_plus_prefix() {
+        // URL schemes are case-insensitive per RFC 3986; an upper-cased
+        // `GIT+https://` prefix must be normalised the same way as `git+`.
+        assert_eq!(
+            sanitize_repo_url("GIT+https://github.com/user/repo.git"),
+            Some("https://github.com/user/repo".to_string())
+        );
+    }
+
+    #[test]
+    fn accepts_uppercase_legacy_git_protocol() {
+        // Same case-insensitivity rule applies to the legacy `git://`
+        // scheme that we rewrite to `https://`.
+        assert_eq!(
+            sanitize_repo_url("GIT://github.com/user/repo"),
+            Some("https://github.com/user/repo".to_string())
         );
     }
 
