@@ -12,6 +12,7 @@ use std::time::SystemTime;
 use serde::{Deserialize, Serialize};
 
 pub use memory::{AdvisoryCacheStats, DEFAULT_ADVISORY_TTL, MemoryAdvisoryCache};
+pub use sqlite::{DEFAULT_ADVISORY_TTL_SECS, SqliteAdvisoryCache};
 
 /// Cached classification of a single OSV advisory.
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
