@@ -292,14 +292,21 @@ impl HybridCache {
                     );
                 }
 
-                if let Some(ref sqlite) = sqlite
-                    && let Ok(rows) = sqlite.cleanup_expired().await
-                    && rows > 0
-                {
-                    tracing::info!(
-                        "Background cleanup: removed {} expired entries from SQLite cache",
-                        rows
-                    );
+                if let Some(ref sqlite) = sqlite {
+                    match sqlite.cleanup_expired().await {
+                        Ok(rows) if rows > 0 => {
+                            tracing::info!(
+                                "Background cleanup: removed {} expired entries from SQLite cache",
+                                rows
+                            );
+                        }
+                        Ok(_) => {}
+                        Err(err) => {
+                            tracing::error!(
+                                "Background cleanup: SQLite cleanup_expired failed: {err}"
+                            );
+                        }
+                    }
                 }
             }
         });

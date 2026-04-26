@@ -1,6 +1,6 @@
 //! Code actions provider for updating dependencies
 
-use futures::future::join_all;
+use futures::stream::{self, StreamExt};
 use tower_lsp::lsp_types::*;
 
 use crate::cache::ReadCache;
@@ -270,22 +270,27 @@ async fn create_update_all_action(
     file_type: FileType,
     cache_key_fn: impl Fn(&str) -> String,
 ) -> Option<CodeActionOrCommand> {
-    // Fan out all cache reads concurrently, then process results in order.
+    // Fan out cache reads with bounded concurrency to avoid enqueuing an unbounded
+    // number of `spawn_blocking` SQLite jobs (which are not cancelable). Tag each
+    // future with its index so we can stitch results back to the right Dependency.
+    const PREFETCH_CONCURRENCY: usize = 8;
     let filtered: Vec<&Dependency> = dependencies
         .iter()
         .copied()
         .filter(|dep| !is_property_reference(dep))
         .collect();
 
-    let cache_lookups: Vec<_> = filtered
-        .iter()
-        .map(|dep| {
-            let key = cache_key_fn(&dep.name);
-            async move { cache.get(&key).await }
-        })
-        .collect();
+    let cache_keys: Vec<String> = filtered.iter().map(|dep| cache_key_fn(&dep.name)).collect();
 
-    let cache_results = join_all(cache_lookups).await;
+    let mut cache_results: Vec<Option<crate::registries::VersionInfo>> = vec![None; filtered.len()];
+    let lookups = cache_keys
+        .into_iter()
+        .enumerate()
+        .map(|(idx, key)| async move { (idx, cache.get(&key).await) });
+    let mut tagged = stream::iter(lookups).buffer_unordered(PREFETCH_CONCURRENCY);
+    while let Some((idx, value)) = tagged.next().await {
+        cache_results[idx] = value;
+    }
 
     let mut outdated_deps: Vec<(&Dependency, String)> = Vec::new();
     for (dep, version_info) in filtered.iter().zip(cache_results) {

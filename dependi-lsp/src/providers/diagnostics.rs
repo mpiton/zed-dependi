@@ -38,13 +38,18 @@ pub async fn create_diagnostics(
             continue;
         }
 
+        // Single cache lookup per dependency: reuse the result for the outdated,
+        // yanked, deprecated, and vulnerability checks below. Avoids two
+        // back-to-back `spawn_blocking` round-trips against `SqliteCache`.
+        let cache_key = cache_key_fn(&dep.name);
+        let cached = cache.get(&cache_key).await;
+
         // Add outdated version diagnostic
-        if let Some(diag) = create_outdated_diagnostic(dep, cache, &cache_key_fn).await {
+        if let Some(diag) = create_outdated_diagnostic(dep, cached.as_ref()) {
             diagnostics.push(diag);
         }
 
-        let cache_key = cache_key_fn(&dep.name);
-        if let Some(version_info) = cache.get(&cache_key).await {
+        if let Some(version_info) = cached {
             // Add yanked version diagnostic (highest priority)
             if version_info.is_version_yanked(dep.effective_version()) {
                 tracing::debug!(
@@ -111,16 +116,18 @@ fn meets_severity_threshold(severity: &VulnerabilitySeverity, min: &Vulnerabilit
     severity.meets_threshold(min)
 }
 
-/// Create a diagnostic for an outdated dependency
-async fn create_outdated_diagnostic(
+/// Create a diagnostic for an outdated dependency.
+///
+/// Takes the already-fetched `VersionInfo` to avoid an extra cache round-trip
+/// (the caller in `create_diagnostics` looks the value up once and reuses it
+/// for outdated, yanked, deprecated, and vulnerability checks).
+fn create_outdated_diagnostic(
     dep: &Dependency,
-    cache: &impl ReadCache,
-    cache_key_fn: impl Fn(&str) -> String,
+    version_info: Option<&VersionInfo>,
 ) -> Option<Diagnostic> {
-    let cache_key = cache_key_fn(&dep.name);
-    let version_info = cache.get(&cache_key).await?;
+    let version_info = version_info?;
 
-    match compare_versions(dep.effective_version(), &version_info) {
+    match compare_versions(dep.effective_version(), version_info) {
         VersionStatus::UpdateAvailable(new_version) => Some(Diagnostic {
             range: Range {
                 start: Position {

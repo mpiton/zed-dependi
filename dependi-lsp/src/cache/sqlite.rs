@@ -224,23 +224,57 @@ impl ReadCache for SqliteCache {
         .ok()
         .flatten()
     }
+
+    async fn contains(&self, key: &str) -> bool {
+        // Cheap existence check: avoid loading and deserializing the payload.
+        // Mirrors `get`'s expiration policy but only reads `inserted_at`/`ttl_secs`.
+        let pool = Arc::clone(&self.pool);
+        let key = key.to_string();
+        tokio::task::spawn_blocking(move || {
+            let Ok(conn) = pool.get() else {
+                return false;
+            };
+            let now = current_timestamp();
+            let result: Result<(i64, i64), _> = conn.query_row(
+                "SELECT inserted_at, ttl_secs FROM packages WHERE key = ? LIMIT 1",
+                [key.as_str()],
+                |row| Ok((row.get(0)?, row.get(1)?)),
+            );
+            match result {
+                Ok((inserted_at, ttl_secs)) => now <= inserted_at + ttl_secs,
+                Err(_) => false,
+            }
+        })
+        .await
+        .unwrap_or(false)
+    }
 }
 
 impl WriteCache for SqliteCache {
     async fn insert(&self, key: String, value: VersionInfo) {
         let pool = Arc::clone(&self.pool);
         let ttl_secs = self.ttl_secs;
+        // Compute the submission timestamp BEFORE handing off to spawn_blocking
+        // so concurrent inserts carry their actual submission time. The UPSERT
+        // below only overwrites when the new timestamp is at least as recent as
+        // the stored one, preventing late/older writes from clobbering newer
+        // values that completed first.
+        let now = current_timestamp();
         let _ = tokio::task::spawn_blocking(move || {
             let Some(conn) = pool.get().ok() else {
                 return;
             };
-            let now = current_timestamp();
             let data = match serde_json::to_string(&value) {
                 Ok(d) => d,
                 Err(_) => return,
             };
             let _ = conn.execute(
-                "INSERT OR REPLACE INTO packages (key, data, inserted_at, ttl_secs) VALUES (?, ?, ?, ?)",
+                "INSERT INTO packages (key, data, inserted_at, ttl_secs) VALUES (?, ?, ?, ?) \
+                 ON CONFLICT(key) DO UPDATE SET \
+                   data = excluded.data, \
+                   inserted_at = excluded.inserted_at, \
+                   ttl_secs = excluded.ttl_secs \
+                 WHERE excluded.inserted_at >= packages.inserted_at",
                 params![key, data, now, ttl_secs],
             );
         })

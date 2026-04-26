@@ -488,12 +488,17 @@ fn bench_memory_cache(c: &mut Criterion) {
             rt.block_on(cache.insert(format!("package_{i}"), info));
         }
 
+        // Use a key guaranteed to exist for the current parameter set so the
+        // benchmark always exercises the hit path (`package_500` is missing
+        // when `entry_count == 100`).
+        let hit_key = format!("package_{}", entry_count / 2);
+
         group.bench_with_input(
             BenchmarkId::new("get_hit", entry_count),
             &cache,
             |b, cache| {
                 b.iter(|| {
-                    black_box(rt.block_on(cache.get("package_500")));
+                    black_box(rt.block_on(cache.get(&hit_key)));
                 });
             },
         );
@@ -550,12 +555,16 @@ fn bench_sqlite_cache(c: &mut Criterion) {
             rt.block_on(cache.insert(format!("package_{i}"), info));
         }
 
+        // Use a key guaranteed to exist for the current parameter set so the
+        // benchmark always exercises the hit path.
+        let hit_key = format!("package_{}", entry_count / 2);
+
         group.bench_with_input(
             BenchmarkId::new("get_hit", entry_count),
             &entry_count,
             |b, _| {
                 b.iter(|| {
-                    black_box(rt.block_on(cache.get("package_500")));
+                    black_box(rt.block_on(cache.get(&hit_key)));
                 });
             },
         );

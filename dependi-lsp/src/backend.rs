@@ -1927,21 +1927,23 @@ impl LanguageServer for DependiBackend {
         };
 
         // Pre-fetch all cache values asynchronously before the sync iterator chain.
+        // Bound the fan-out so a large file or canceled inlay-hint request can't
+        // enqueue an unbounded number of `spawn_blocking` SQLite jobs (which are
+        // not cancelable: a dropped future may still complete the underlying op).
+        const PREFETCH_CONCURRENCY: usize = 8;
+        let cache_keys: Vec<String> = visible_deps
+            .iter()
+            .map(|dep| dep_cache_key(dep, file_type))
+            .collect();
         let cache_values: HashMap<String, Option<crate::registries::VersionInfo>> = {
-            let futures: Vec<_> = visible_deps
-                .iter()
-                .map(|dep| {
-                    let cache_key = dep_cache_key(dep, file_type);
-                    async move {
-                        let value = self.version_cache.get(&cache_key).await;
-                        (cache_key, value)
-                    }
-                })
-                .collect();
-            futures::future::join_all(futures)
-                .await
-                .into_iter()
-                .collect()
+            use futures::stream::{self, StreamExt};
+            stream::iter(cache_keys.into_iter().map(|cache_key| async move {
+                let value = self.version_cache.get(&cache_key).await;
+                (cache_key, value)
+            }))
+            .buffer_unordered(PREFETCH_CONCURRENCY)
+            .collect()
+            .await
         };
 
         let hints: Vec<InlayHint> = visible_deps
