@@ -214,12 +214,19 @@ impl HybridAdvisoryCache {
 
     /// Spawn a background task that periodically prunes expired entries from
     /// both layers. The default interval is [`ADVISORY_CLEANUP_INTERVAL`].
-    pub fn spawn_default_cleanup_task(self: &Arc<Self>) {
-        self.spawn_cleanup_task(ADVISORY_CLEANUP_INTERVAL);
+    ///
+    /// Returns the `JoinHandle` so callers (notably the LSP backend, which
+    /// rebuilds the cache trio inside `initialize`) can `abort()` the task
+    /// when the cache is replaced. Without this, the old cleanup task keeps
+    /// holding `Arc` clones of the previous memory/SQLite layers forever.
+    #[must_use = "abort the handle when the cache is replaced to avoid leaking the cleanup task"]
+    pub fn spawn_default_cleanup_task(self: &Arc<Self>) -> tokio::task::JoinHandle<()> {
+        self.spawn_cleanup_task(ADVISORY_CLEANUP_INTERVAL)
     }
 
     /// Spawn the cleanup task with a custom interval (used by tests).
-    pub fn spawn_cleanup_task(self: &Arc<Self>, interval: Duration) {
+    #[must_use = "abort the handle when the cache is replaced to avoid leaking the cleanup task"]
+    pub fn spawn_cleanup_task(self: &Arc<Self>, interval: Duration) -> tokio::task::JoinHandle<()> {
         let memory = self.memory.clone();
         let sqlite = self.sqlite.clone();
         tokio::spawn(async move {
@@ -250,7 +257,7 @@ impl HybridAdvisoryCache {
                     }
                 }
             }
-        });
+        })
     }
 }
 
@@ -486,7 +493,7 @@ mod tests {
             memory.clone(),
             Some(sqlite),
         ));
-        hybrid.spawn_cleanup_task(Duration::from_millis(40));
+        let _cleanup = hybrid.spawn_cleanup_task(Duration::from_millis(40));
 
         tokio::time::sleep(Duration::from_millis(120)).await;
         assert!(memory.get("RUSTSEC-2020-0036").await.is_none());

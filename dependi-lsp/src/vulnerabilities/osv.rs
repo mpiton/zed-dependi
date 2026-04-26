@@ -88,6 +88,23 @@ impl OsvClient {
         })
     }
 
+    /// Infallible constructor used by the LSP backend as a startup fallback
+    /// when [`OsvClient::new_with_caches`] fails (rare reqwest builder
+    /// errors). Uses `reqwest::Client::new()` directly — which never
+    /// panics — so the LSP can keep serving non-vulnerability features
+    /// instead of crashing during `initialize`.
+    pub fn with_default_client_and_caches(
+        positive_cache: Arc<dyn crate::cache::advisory::AdvisoryWriteCache>,
+        negative_cache: Arc<dyn crate::cache::advisory::AdvisoryWriteCache>,
+    ) -> Self {
+        Self {
+            client: Arc::new(Client::new()),
+            base_url: OSV_API_BASE.to_string(),
+            advisory_cache: positive_cache,
+            negative_cache,
+        }
+    }
+
     /// Build a client pointing at a custom OSV endpoint (no advisory cache).
     ///
     /// Used at runtime by the standalone scanner (`OSV_ENDPOINT` env var) and
