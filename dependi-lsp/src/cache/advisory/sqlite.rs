@@ -297,4 +297,26 @@ mod tests {
         let cache = SqliteAdvisoryCache::in_memory().unwrap();
         assert!(cache.get("RUSTSEC-2099-9999").await.is_none());
     }
+
+    #[tokio::test]
+    async fn expired_entries_are_dropped_on_read() {
+        let cache = SqliteAdvisoryCache::in_memory()
+            .expect("open in-memory cache")
+            .with_ttl_secs(0);
+        cache.insert(sample_found()).await;
+        // ttl_secs = 0 means any positive elapsed time expires the row.
+        tokio::time::sleep(Duration::from_millis(2)).await;
+        assert!(cache.get("RUSTSEC-2020-0036").await.is_none());
+
+        // Row should be deleted as a side effect of the previous get.
+        let conn = cache.pool.get().expect("conn");
+        let count: i64 = conn
+            .query_row(
+                "SELECT count(*) FROM advisories WHERE id = ?",
+                ["RUSTSEC-2020-0036"],
+                |row| row.get(0),
+            )
+            .expect("query");
+        assert_eq!(count, 0);
+    }
 }
