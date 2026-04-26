@@ -1,7 +1,7 @@
 use std::path::PathBuf;
 use std::process::Command;
 
-use wiremock::matchers::{method, path, path_regex};
+use wiremock::matchers::{body_json, method, path, path_regex};
 use wiremock::{Mock, MockServer, ResponseTemplate};
 
 fn dependi_lsp_bin() -> String {
@@ -13,6 +13,90 @@ fn fixture_path(rel: &str) -> PathBuf {
         .join("tests")
         .join("fixtures")
         .join(rel)
+}
+
+#[tokio::test]
+async fn test_scan_queries_osv_npm_ecosystem_and_reports_direct_vulnerabilities() {
+    let server = MockServer::start().await;
+
+    Mock::given(method("POST"))
+        .and(path("/querybatch"))
+        .and(body_json(serde_json::json!({
+            "queries": [
+                {
+                    "package": { "name": "react", "ecosystem": "npm" },
+                    "version": "18.2.0"
+                },
+                {
+                    "package": { "name": "scheduler", "ecosystem": "npm" },
+                    "version": "0.23.0"
+                }
+            ]
+        })))
+        .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
+            "results": [
+                {
+                    "vulns": [{
+                        "id": "CVE-NPM-DIRECT-001",
+                        "modified": "2024-01-01T00:00:00Z",
+                        "summary": "direct react vulnerability",
+                        "severity": [{ "type": "CVSS_V3", "score": "9.8" }],
+                        "references": [{ "type": "WEB", "url": "https://example.test/CVE-NPM-DIRECT-001" }]
+                    }]
+                },
+                { "vulns": [] }
+            ]
+        })))
+        .mount(&server)
+        .await;
+
+    Mock::given(method("GET"))
+        .and(path_regex(r"^/vulns/.+"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
+            "id": "CVE-NPM-DIRECT-001",
+            "summary": "direct react vulnerability",
+            "details": "test details",
+            "severity": [{ "type": "CVSS_V3", "score": "9.8" }],
+            "references": []
+        })))
+        .mount(&server)
+        .await;
+
+    let fixture = fixture_path("npm-project-with-lockfile/package.json");
+
+    let output = Command::new(dependi_lsp_bin())
+        .env("OSV_ENDPOINT", server.uri())
+        .args(["scan", "--output", "json", "--file"])
+        .arg(&fixture)
+        .output()
+        .expect("failed to run dependi-lsp");
+
+    assert_eq!(
+        output.status.code(),
+        Some(1),
+        "dependi-lsp must exit 1 when npm direct vulnerabilities are found\nstdout=\n{}\nstderr=\n{}",
+        String::from_utf8_lossy(&output.stdout),
+        String::from_utf8_lossy(&output.stderr),
+    );
+
+    let report: serde_json::Value =
+        serde_json::from_slice(&output.stdout).expect("scan output should be valid JSON");
+    let direct = report["direct"]
+        .as_array()
+        .expect("direct vulnerabilities should be an array");
+    assert_eq!(direct.len(), 1, "expected one direct vulnerability");
+    assert_eq!(direct[0]["package"], "react");
+    assert_eq!(direct[0]["version"], "18.2.0");
+    assert_eq!(direct[0]["id"], "CVE-NPM-DIRECT-001");
+    assert_eq!(direct[0]["severity"], "critical");
+    assert_eq!(
+        report["transitive"]
+            .as_array()
+            .expect("transitive vulnerabilities should be an array")
+            .len(),
+        0,
+        "direct npm vulnerability should not be reported as transitive",
+    );
 }
 
 #[tokio::test]

@@ -47,6 +47,7 @@ dependi-zed/extension.wasm
 
 # Claude Code
 .claude/
+.codex
 CLAUDE.md
 
 # Local scripts
