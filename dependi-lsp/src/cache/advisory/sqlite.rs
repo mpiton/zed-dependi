@@ -396,6 +396,31 @@ mod tests {
         assert_eq!(cache.get("RUSTSEC-2020-0036").await, Some(newer));
     }
 
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn dropped_get_future_does_not_corrupt_cache() {
+        let cache = Arc::new(SqliteAdvisoryCache::in_memory().unwrap());
+        cache.insert(sample_found()).await;
+
+        // Spawn many gets, abort half of them mid-flight.
+        let mut handles = Vec::new();
+        for _ in 0..32 {
+            let cache = Arc::clone(&cache);
+            handles.push(tokio::spawn(
+                async move { cache.get("RUSTSEC-2020-0036").await },
+            ));
+        }
+        for (i, h) in handles.into_iter().enumerate() {
+            if i % 2 == 0 {
+                h.abort();
+            } else {
+                let _ = h.await;
+            }
+        }
+
+        // Survivor reads still work.
+        assert!(cache.get("RUSTSEC-2020-0036").await.is_some());
+    }
+
     #[tokio::test]
     async fn corrupted_row_is_deleted_and_treated_as_miss() {
         let cache = SqliteAdvisoryCache::in_memory().unwrap();
