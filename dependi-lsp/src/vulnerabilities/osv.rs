@@ -680,6 +680,42 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn http_404_is_negatively_cached() {
+        let server = MockServer::start().await;
+        let counter = Arc::new(AtomicUsize::new(0));
+        {
+            let counter = Arc::clone(&counter);
+            Mock::given(method("GET"))
+                .and(path("/vulns/RUSTSEC-9999-0001"))
+                .respond_with(move |_req: &wiremock::Request| {
+                    counter.fetch_add(1, Ordering::SeqCst);
+                    ResponseTemplate::new(404)
+                })
+                .mount(&server)
+                .await;
+        }
+
+        let cache: Arc<dyn AdvisoryWriteCache> = Arc::new(MemoryAdvisoryCache::new());
+        let client = OsvClient::with_endpoint_and_cache(server.uri(), Arc::clone(&cache));
+
+        let first = client
+            .check_rustsec_unmaintained(&["RUSTSEC-9999-0001".to_string()])
+            .await;
+        let second = client
+            .check_rustsec_unmaintained(&["RUSTSEC-9999-0001".to_string()])
+            .await;
+
+        assert!(!first);
+        assert!(!second);
+        assert_eq!(counter.load(Ordering::SeqCst), 1);
+        let cached = cache
+            .get("RUSTSEC-9999-0001")
+            .await
+            .expect("negative cached");
+        assert_eq!(cached.kind, AdvisoryKind::NotFound);
+    }
+
+    #[tokio::test]
     async fn test_rustsec_advisory_lookup_limits_concurrency() {
         const EXPECTED_LIMIT: usize = RUSTSEC_ADVISORY_LOOKUP_CONCURRENCY;
 
