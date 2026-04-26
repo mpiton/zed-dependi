@@ -71,7 +71,7 @@ use reqwest::Client;
 use serde::Deserialize;
 
 use super::http_client::create_shared_client;
-use super::url_sanitizer::sanitize_repo_url;
+use super::url_sanitizer::{sanitize_external_url, sanitize_repo_url};
 use super::version_utils::is_prerelease_php;
 use super::{Registry, VersionInfo};
 
@@ -192,7 +192,9 @@ impl Registry for PackagistRegistry {
         let latest_entry = entries.first();
 
         let description = latest_entry.and_then(|e| e.description.clone());
-        let homepage = latest_entry.and_then(|e| e.homepage.clone());
+        let homepage = latest_entry
+            .and_then(|e| e.homepage.as_deref())
+            .and_then(sanitize_external_url);
         let license = latest_entry
             .and_then(|e| e.license.as_ref())
             .and_then(|l| l.first())

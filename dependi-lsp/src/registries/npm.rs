@@ -74,7 +74,7 @@ use super::version_utils::is_prerelease_npm;
 use super::{Registry, VersionInfo};
 use crate::auth::fmt_redact_token;
 use crate::config::NpmRegistryConfig;
-use crate::registries::url_sanitizer::sanitize_repo_url;
+use crate::registries::url_sanitizer::{sanitize_external_url, sanitize_repo_url};
 
 /// Client for the npm registry
 pub struct NpmRegistry {
@@ -355,7 +355,7 @@ impl Registry for NpmRegistry {
             latest_prerelease,
             versions,
             description: pkg.description,
-            homepage: pkg.homepage,
+            homepage: pkg.homepage.as_deref().and_then(sanitize_external_url),
             repository,
             license: pkg.license.and_then(|l| l.as_string()),
             vulnerabilities: vec![], // Filled by the shared OSV vulnerability scan.

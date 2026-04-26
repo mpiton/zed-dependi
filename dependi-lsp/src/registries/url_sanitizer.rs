@@ -21,19 +21,35 @@ const ALLOWED_SCHEMES: &[&str] = &["http", "https"];
 pub(crate) fn sanitize_repo_url(raw: &str) -> Option<String> {
     let normalized = normalize_compound_scheme(raw.trim());
     let mut parsed = url::Url::parse(&normalized).ok()?;
+    validate_external_url(&parsed)?;
+    strip_dot_git_suffix(&mut parsed)?;
+    Some(parsed.as_str().to_owned())
+}
 
+/// Sanitize a generic external URL from package metadata (e.g. `homepage`,
+/// `documentation`).
+///
+/// Same allowlist semantics as [`sanitize_repo_url`] — only `http` and
+/// `https` schemes are accepted, and embedded userinfo is rejected — but
+/// without the repository-specific `git+` prefix stripping or `.git`
+/// suffix removal. A homepage URL whose path legitimately ends in `.git`
+/// must not be rewritten.
+pub(crate) fn sanitize_external_url(raw: &str) -> Option<String> {
+    let parsed = url::Url::parse(raw.trim()).ok()?;
+    validate_external_url(&parsed)?;
+    Some(parsed.as_str().to_owned())
+}
+
+/// Apply the allowlist + userinfo rejection check shared by both
+/// `sanitize_repo_url` and `sanitize_external_url`.
+fn validate_external_url(parsed: &url::Url) -> Option<()> {
     if !ALLOWED_SCHEMES.contains(&parsed.scheme()) {
         return None;
     }
-
-    // Embedded credentials (`https://user:pass@host/...`) in package
-    // metadata are never legitimate and would leak via the IDE surface.
     if !parsed.username().is_empty() || parsed.password().is_some() {
         return None;
     }
-
-    strip_dot_git_suffix(&mut parsed)?;
-    Some(parsed.as_str().to_owned())
+    Some(())
 }
 
 /// Strip the `git+` prefix and rewrite legacy `git://` to `https://`.
@@ -233,5 +249,76 @@ mod tests {
             sanitize_repo_url("https://user:pass@github.com/user/repo"),
             None
         );
+    }
+
+    // sanitize_external_url — variant for non-repository fields (homepage,
+    // documentation links). Same allowlist, but no `git+` strip and no
+    // `.git` suffix removal because those are repository-specific.
+
+    #[test]
+    fn external_accepts_https() {
+        assert_eq!(
+            sanitize_external_url("https://example.com/"),
+            Some("https://example.com/".to_string())
+        );
+    }
+
+    #[test]
+    fn external_accepts_http() {
+        assert_eq!(
+            sanitize_external_url("http://example.com/docs"),
+            Some("http://example.com/docs".to_string())
+        );
+    }
+
+    #[test]
+    fn external_rejects_javascript() {
+        assert_eq!(sanitize_external_url("javascript:alert(1)"), None);
+    }
+
+    #[test]
+    fn external_rejects_file() {
+        assert_eq!(sanitize_external_url("file:///etc/passwd"), None);
+    }
+
+    #[test]
+    fn external_rejects_data_uri() {
+        assert_eq!(
+            sanitize_external_url("data:text/html,<script>alert(1)</script>"),
+            None
+        );
+    }
+
+    #[test]
+    fn external_rejects_ssh() {
+        assert_eq!(sanitize_external_url("ssh://git@example.com/x"), None);
+    }
+
+    #[test]
+    fn external_rejects_userinfo() {
+        assert_eq!(
+            sanitize_external_url("https://user:pass@example.com/"),
+            None
+        );
+    }
+
+    #[test]
+    fn external_does_not_strip_git_suffix() {
+        // unlike sanitize_repo_url, the homepage variant must not rewrite
+        // a path that happens to end in `.git`.
+        assert_eq!(
+            sanitize_external_url("https://example.com/foo.git"),
+            Some("https://example.com/foo.git".to_string())
+        );
+    }
+
+    #[test]
+    fn external_rejects_empty() {
+        assert_eq!(sanitize_external_url(""), None);
+    }
+
+    #[test]
+    fn external_rejects_garbage() {
+        assert_eq!(sanitize_external_url("not a url"), None);
     }
 }
