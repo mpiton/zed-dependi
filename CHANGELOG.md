@@ -9,6 +9,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- Cache RustSec advisory details fetched from OSV.dev with a hybrid
+  memory + SQLite layer. `check_rustsec_unmaintained` now consults the
+  cache before issuing per-advisory `GET /vulns/{id}` requests, with a
+  24-hour TTL for found advisories and a 1-hour TTL for negative entries
+  (404 from OSV). The cache lives in a separate SQLite database
+  (`~/.cache/dependi/advisory_cache.db`) and is configurable via the new
+  `AdvisoryCacheConfig`. Drastically reduces redundant network requests
+  during repeated Rust dependency scans
+  ([#237](https://github.com/mpiton/zed-dependi/issues/237))
 - `Ignore package "<name>"` quick-fix code action on every dependency. Adds
   the package to `lsp.dependi.initialization_options.ignore` in the workspace
   `.zed/settings.json`, creating the file if it does not exist, deduplicating
