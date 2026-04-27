@@ -1291,10 +1291,18 @@ packages:
             lock_path: lock.clone(),
             sub: super::NpmLockfileType::PackageLock,
         };
-        assert_eq!(resolver.find_lockfile(&manifest).await.as_deref(), Some(lock.as_path()));
+        assert_eq!(
+            resolver.find_lockfile(&manifest).await.as_deref(),
+            Some(lock.as_path())
+        );
         let content = std::fs::read_to_string(&lock).unwrap();
         let graph = resolver.parse_graph(&content);
-        assert!(graph.packages.iter().any(|p| p.name == "lodash" && p.version == "4.17.21"));
+        assert!(
+            graph
+                .packages
+                .iter()
+                .any(|p| p.name == "lodash" && p.version == "4.17.21")
+        );
     }
 
     #[test]

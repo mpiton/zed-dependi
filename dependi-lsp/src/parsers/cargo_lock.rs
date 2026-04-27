@@ -425,10 +425,14 @@ version = "0.16.1"
         let tmp = tempfile::tempdir().expect("tempdir");
         let manifest_path = tmp.path().join("Cargo.toml");
         let lock_path = tmp.path().join("Cargo.lock");
-        std::fs::write(&manifest_path, r#"[package]
+        std::fs::write(
+            &manifest_path,
+            r#"[package]
 name = "demo"
 version = "0.1.0"
-"#).expect("manifest");
+"#,
+        )
+        .expect("manifest");
         std::fs::write(
             &lock_path,
             r#"
@@ -442,13 +446,25 @@ version = "1.50.0"
 "#,
         )
         .expect("lockfile");
-        let resolver = super::CargoResolver { root_package: Some("demo".to_string()) };
+        let resolver = super::CargoResolver {
+            root_package: Some("demo".to_string()),
+        };
         let found = resolver.find_lockfile(&manifest_path).await;
         assert_eq!(found.as_deref(), Some(lock_path.as_path()));
         let content = std::fs::read_to_string(&lock_path).expect("read");
         let graph = resolver.parse_graph(&content);
-        assert!(graph.packages.iter().any(|p| p.name == "serde" && p.version == "1.0.230"));
-        assert!(graph.packages.iter().any(|p| p.name == "tokio" && p.version == "1.50.0"));
+        assert!(
+            graph
+                .packages
+                .iter()
+                .any(|p| p.name == "serde" && p.version == "1.0.230")
+        );
+        assert!(
+            graph
+                .packages
+                .iter()
+                .any(|p| p.name == "tokio" && p.version == "1.50.0")
+        );
     }
 
     #[test]
@@ -483,8 +499,16 @@ version = "1.0.0"
         let dep = Dependency {
             name: "multi".to_string(),
             version: "*".to_string(),
-            name_span: Span { line: 0, line_start: 0, line_end: 0 },
-            version_span: Span { line: 0, line_start: 0, line_end: 0 },
+            name_span: Span {
+                line: 0,
+                line_start: 0,
+                line_end: 0,
+            },
+            version_span: Span {
+                line: 0,
+                line_start: 0,
+                line_end: 0,
+            },
             dev: false,
             optional: false,
             registry: None,
@@ -517,8 +541,16 @@ version = "5.5.5"
         let dep = Dependency {
             name: "lonely".to_string(),
             version: "*".to_string(),
-            name_span: Span { line: 0, line_start: 0, line_end: 0 },
-            version_span: Span { line: 0, line_start: 0, line_end: 0 },
+            name_span: Span {
+                line: 0,
+                line_start: 0,
+                line_end: 0,
+            },
+            version_span: Span {
+                line: 0,
+                line_start: 0,
+                line_end: 0,
+            },
             dev: false,
             optional: false,
             registry: None,

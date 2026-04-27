@@ -575,14 +575,25 @@ BUNDLED WITH
         let dep = crate::parsers::Dependency {
             name: "Rails".to_string(),
             version: "*".to_string(),
-            name_span: crate::parsers::Span { line: 0, line_start: 0, line_end: 0 },
-            version_span: crate::parsers::Span { line: 0, line_start: 0, line_end: 0 },
+            name_span: crate::parsers::Span {
+                line: 0,
+                line_start: 0,
+                line_end: 0,
+            },
+            version_span: crate::parsers::Span {
+                line: 0,
+                line_start: 0,
+                line_end: 0,
+            },
             dev: false,
             optional: false,
             registry: None,
             resolved_version: None,
         };
-        assert_eq!(resolver.resolve_version(&dep, &graph), Some("7.1.0".to_string()));
+        assert_eq!(
+            resolver.resolve_version(&dep, &graph),
+            Some("7.1.0".to_string())
+        );
     }
 
     #[test]

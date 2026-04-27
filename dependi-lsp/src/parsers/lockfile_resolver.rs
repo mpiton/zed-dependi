@@ -52,8 +52,7 @@ pub async fn select_resolver(
 ) -> Option<Box<dyn LockfileResolver>> {
     match file_type {
         FileType::Cargo => {
-            let root_package =
-                crate::parsers::cargo::cargo_root_package_name(manifest_content);
+            let root_package = crate::parsers::cargo::cargo_root_package_name(manifest_content);
             Some(Box::new(crate::parsers::cargo_lock::CargoResolver {
                 root_package,
             }))
@@ -61,13 +60,19 @@ pub async fn select_resolver(
         FileType::Npm => {
             let (lock_path, sub) =
                 crate::parsers::npm_lock::find_npm_lockfile(manifest_path).await?;
-            Some(Box::new(crate::parsers::npm_lock::NpmResolver { lock_path, sub }))
+            Some(Box::new(crate::parsers::npm_lock::NpmResolver {
+                lock_path,
+                sub,
+            }))
         }
         FileType::Python => {
             let preferred = crate::parsers::python_lock::detect_python_tool(manifest_content);
             let (lock_path, sub) =
                 crate::parsers::python_lock::find_python_lockfile(manifest_path, preferred).await?;
-            Some(Box::new(crate::parsers::python_lock::PythonResolver { lock_path, sub }))
+            Some(Box::new(crate::parsers::python_lock::PythonResolver {
+                lock_path,
+                sub,
+            }))
         }
         FileType::Go => Some(Box::new(crate::parsers::go_sum::GoResolver)),
         FileType::Php => Some(Box::new(crate::parsers::composer_lock::PhpResolver)),
@@ -86,14 +91,11 @@ pub async fn resolve_versions_from_lockfile(
     manifest_path: &Path,
 ) -> Option<Arc<LockfileGraph>> {
     let lock_path = resolver.find_lockfile(manifest_path).await?;
-    let lock_content = match crate::parsers::lockfile_graph::read_lockfile_capped(&lock_path).await {
+    let lock_content = match crate::parsers::lockfile_graph::read_lockfile_capped(&lock_path).await
+    {
         Ok(c) => c,
         Err(e) => {
-            tracing::debug!(
-                "Could not read lockfile at {}: {}",
-                lock_path.display(),
-                e
-            );
+            tracing::debug!("Could not read lockfile at {}: {}", lock_path.display(), e);
             return None;
         }
     };
@@ -157,8 +159,16 @@ version = "0.0.1"
         Dependency {
             name: name.to_string(),
             version: version.to_string(),
-            name_span: crate::parsers::Span { line: 0, line_start: 0, line_end: 0 },
-            version_span: crate::parsers::Span { line: 0, line_start: 0, line_end: 0 },
+            name_span: crate::parsers::Span {
+                line: 0,
+                line_start: 0,
+                line_end: 0,
+            },
+            version_span: crate::parsers::Span {
+                line: 0,
+                line_start: 0,
+                line_end: 0,
+            },
             dev: false,
             optional: false,
             registry: None,
@@ -182,7 +192,8 @@ version = "0.0.1"
             graph: LockfileGraph { packages: vec![] },
         });
         let mut deps = vec![test_dep("serde", "1.0.0")];
-        let result = resolve_versions_from_lockfile(&mut deps, resolver, Path::new("/tmp/Cargo.toml")).await;
+        let result =
+            resolve_versions_from_lockfile(&mut deps, resolver, Path::new("/tmp/Cargo.toml")).await;
         assert!(result.is_none());
         assert_eq!(deps[0].resolved_version, None);
     }

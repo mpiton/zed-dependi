@@ -293,8 +293,16 @@ mod tests {
         let dep = crate::parsers::Dependency {
             name: "newtonsoft.json".to_string(),
             version: "*".to_string(),
-            name_span: crate::parsers::Span { line: 0, line_start: 0, line_end: 0 },
-            version_span: crate::parsers::Span { line: 0, line_start: 0, line_end: 0 },
+            name_span: crate::parsers::Span {
+                line: 0,
+                line_start: 0,
+                line_end: 0,
+            },
+            version_span: crate::parsers::Span {
+                line: 0,
+                line_start: 0,
+                line_end: 0,
+            },
             dev: false,
             optional: false,
             registry: None,

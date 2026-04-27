@@ -7,16 +7,22 @@ use std::path::Path;
 use dependi_lsp::file_types::FileType;
 use dependi_lsp::parsers::Dependency;
 use dependi_lsp::parsers::Span;
-use dependi_lsp::parsers::lockfile_resolver::{
-    resolve_versions_from_lockfile, select_resolver,
-};
+use dependi_lsp::parsers::lockfile_resolver::{resolve_versions_from_lockfile, select_resolver};
 
 fn dep(name: &str, version: &str) -> Dependency {
     Dependency {
         name: name.to_string(),
         version: version.to_string(),
-        name_span: Span { line: 0, line_start: 0, line_end: 0 },
-        version_span: Span { line: 0, line_start: 0, line_end: 0 },
+        name_span: Span {
+            line: 0,
+            line_start: 0,
+            line_end: 0,
+        },
+        version_span: Span {
+            line: 0,
+            line_start: 0,
+            line_end: 0,
+        },
         dev: false,
         optional: false,
         registry: None,
@@ -40,12 +46,16 @@ async fn run_resolver(
 async fn cargo_end_to_end() {
     let tmp = tempfile::tempdir().unwrap();
     let manifest = tmp.path().join("Cargo.toml");
-    std::fs::write(&manifest, r#"[package]
+    std::fs::write(
+        &manifest,
+        r#"[package]
 name = "demo"
 version = "0.1.0"
 [dependencies]
 serde = "1"
-"#).unwrap();
+"#,
+    )
+    .unwrap();
     std::fs::write(
         tmp.path().join("Cargo.lock"),
         r#"

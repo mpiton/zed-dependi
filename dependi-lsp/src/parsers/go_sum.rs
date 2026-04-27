@@ -270,8 +270,16 @@ github.com/foo/bar v1.0.0
         let dep_with_match = crate::parsers::Dependency {
             name: "github.com/foo/bar".to_string(),
             version: "v1.1.0".to_string(),
-            name_span: crate::parsers::Span { line: 0, line_start: 0, line_end: 0 },
-            version_span: crate::parsers::Span { line: 0, line_start: 0, line_end: 0 },
+            name_span: crate::parsers::Span {
+                line: 0,
+                line_start: 0,
+                line_end: 0,
+            },
+            version_span: crate::parsers::Span {
+                line: 0,
+                line_start: 0,
+                line_end: 0,
+            },
             dev: false,
             optional: false,
             registry: None,
