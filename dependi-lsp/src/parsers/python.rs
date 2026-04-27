@@ -323,20 +323,7 @@ fn parse_pyproject_toml(content: &str) -> Vec<Dependency> {
     if let Some(poetry_table) = poetry.as_table() {
         parse_poetry_main(&dom, &line_ranges, &mut dependencies);
 
-        // [tool.poetry.dev-dependencies] (Poetry < 1.2)
-        let dev_deps_node = poetry.get("dev-dependencies");
-        if let Some(deps_table) = dev_deps_node.as_table() {
-            let entries = deps_table.entries().read();
-            for (key, value) in entries.iter() {
-                let name = key.value().to_string();
-                if let Some((version, optional)) = extract_poetry_version_taplo(value)
-                    && let Some(dep) =
-                        find_poetry_dependency_position(content, &name, &version, true, optional)
-                {
-                    dependencies.push(dep);
-                }
-            }
-        }
+        parse_poetry_dev_legacy(&dom, &line_ranges, &mut dependencies);
 
         // [tool.poetry.group.dev.dependencies] (Poetry >= 1.2)
         let groups_node = poetry.get("group");
@@ -518,6 +505,41 @@ fn parse_poetry_main(dom: &Node, line_ranges: &[TextRange], deps: &mut Vec<Depen
             name_span,
             version_span,
             dev: false,
+            optional,
+            registry: None,
+            resolved_version: None,
+        });
+    }
+}
+
+/// Parse legacy `[tool.poetry.dev-dependencies]` (Poetry < 1.2). Sets dev=true.
+fn parse_poetry_dev_legacy(dom: &Node, line_ranges: &[TextRange], deps: &mut Vec<Dependency>) {
+    let deps_node = dom.get("tool").get("poetry").get("dev-dependencies");
+    let Some(deps_table) = deps_node.as_table() else {
+        return;
+    };
+    let entries = deps_table.entries().read();
+    for (key, value) in entries.iter() {
+        let name = key.value().to_string();
+        let Some((version, optional)) = extract_poetry_version_taplo(value) else {
+            continue;
+        };
+        let Some(name_span) = key
+            .syntax()
+            .map(SyntaxElement::text_range)
+            .and_then(|r| range_to_span(r, line_ranges))
+        else {
+            continue;
+        };
+        let Some(version_span) = node_to_span(value, line_ranges) else {
+            continue;
+        };
+        deps.push(Dependency {
+            name,
+            version,
+            name_span,
+            version_span,
+            dev: true,
             optional,
             registry: None,
             resolved_version: None,
