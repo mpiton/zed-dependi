@@ -291,28 +291,13 @@ fn parse_pyproject_toml(content: &str) -> Vec<Dependency> {
     }
 
     let dom = parsed.into_dom();
-    let _line_ranges = compute_line_ranges(content);
-    let _ = node_to_span;
+    let line_ranges = compute_line_ranges(content);
 
     // PEP 621: [project.dependencies] array of strings
     let project = dom.get("project");
     if let Some(project_table) = project.as_table() {
         // [project.dependencies]
-        let deps_node = project.get("dependencies");
-        if let Some(deps_array) = deps_node.as_array() {
-            let items = deps_array.items().read();
-            for item in items.iter() {
-                if let Some(dep_str) = item.as_str() {
-                    let dep_str = dep_str.value();
-                    if let Some((name, version)) = parse_pep508_dependency(dep_str)
-                        && let Some(dep) =
-                            find_dependency_position(content, &name, &version, false, false)
-                    {
-                        dependencies.push(dep);
-                    }
-                }
-            }
-        }
+        parse_pep621_deps(&dom, &line_ranges, &mut dependencies);
 
         // [project.optional-dependencies]
         let optional_node = project.get("optional-dependencies");
@@ -453,6 +438,38 @@ fn parse_pyproject_toml(content: &str) -> Vec<Dependency> {
     collect_hatch_env_deps(&hatch_envs, content, &mut dependencies);
 
     dependencies
+}
+
+/// Parse `[project.dependencies]` (PEP 621): an array of PEP 508 strings.
+fn parse_pep621_deps(dom: &Node, line_ranges: &[TextRange], deps: &mut Vec<Dependency>) {
+    let project = dom.get("project");
+    let deps_node = project.get("dependencies");
+    let Some(deps_array) = deps_node.as_array() else {
+        return;
+    };
+    let items = deps_array.items().read();
+    for item in items.iter() {
+        let Some(dep_str_node) = item.as_str() else {
+            continue;
+        };
+        let dep_str = dep_str_node.value();
+        let Some((name, version)) = parse_pep508_dependency(dep_str) else {
+            continue;
+        };
+        let Some(string_span) = node_to_span(item, line_ranges) else {
+            continue;
+        };
+        deps.push(Dependency {
+            name,
+            version,
+            name_span: string_span,
+            version_span: string_span,
+            dev: false,
+            optional: false,
+            registry: None,
+            resolved_version: None,
+        });
+    }
 }
 
 /// Parse a standalone `hatch.toml` file.
