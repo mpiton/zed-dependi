@@ -12,9 +12,9 @@ use dependi_lsp::registries::{
 ///
 /// # Examples
 ///
-/// ```no_run
-/// // Run the compiled binary to see registry outputs:
-/// // cargo run --bin registry_test
+/// ```text
+/// # Run the compiled binary to see registry outputs:
+/// cargo run --bin registry_test
 /// ```
 #[tokio::main]
 async fn main() {

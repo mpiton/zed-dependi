@@ -37,6 +37,11 @@ jobs:
           cd dependi-lsp
           cargo test
 
+      - name: Check rustdoc
+        run: |
+          cd dependi-lsp
+          cargo doc --no-deps
+
   security-audit:
     runs-on: ubuntu-latest
     permissions:

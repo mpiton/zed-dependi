@@ -154,7 +154,7 @@ impl HybridAdvisoryCache {
         Self { memory, sqlite }
     }
 
-    /// Build a hybrid cache from an [`AdvisoryCacheConfig`] (issue #237).
+    /// Build a hybrid cache from an [`crate::config::AdvisoryCacheConfig`] (issue #237).
     ///
     /// When `config.enabled` is `false`, returns a hybrid whose memory layer
     /// has a zero-second TTL and no SQLite backing. Every read therefore
@@ -189,7 +189,7 @@ impl HybridAdvisoryCache {
         Self::from_parts(memory, sqlite)
     }
 
-    /// Build a *negative* advisory cache from an [`AdvisoryCacheConfig`].
+    /// Build a *negative* advisory cache from an [`crate::config::AdvisoryCacheConfig`].
     ///
     /// 404 OSV responses live on a different freshness schedule than real
     /// `Found` entries: a missing advisory might just mean OSV has not yet

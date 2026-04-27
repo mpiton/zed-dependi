@@ -250,6 +250,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Documentation
 
+- Enforce rustdoc quality via `[lints.rustdoc]` in `dependi-lsp/Cargo.toml`
+  (`broken_intra_doc_links`, `invalid_codeblock_attributes`,
+  `invalid_html_tags`, `invalid_rust_codeblocks`, `bare_urls` set to `deny`)
+  and a `cargo doc --no-deps` step in the CI workflow. Fixes 5 pre-existing
+  rustdoc warnings (`AdvisoryCacheConfig` intra-doc links in
+  `cache/advisory/`, bare URL in `registries/npm.rs`, empty Rust code block
+  in `bin/test_dates.rs`).
 - Add comprehensive Rustdoc comments to `dependi-lsp` core modules
   (`lib.rs`, `backend.rs`, `parsers/`, `providers/`): every public item
   now has `///` docs covering summary, parameters, return value, errors,

@@ -80,7 +80,7 @@ use crate::registries::url_sanitizer::{sanitize_external_url, sanitize_repo_url}
 pub struct NpmRegistry {
     client: Arc<Client>,
     base_url: String,
-    /// Scope to URL mapping for scoped packages (e.g., "company" -> "https://npm.company.com")
+    /// Scope to URL mapping for scoped packages (e.g., `"company"` -> <https://npm.company.com>)
     scoped_registries: HashMap<String, String>,
     /// Authentication headers per registry URL (URL prefix -> headers)
     auth_headers: HashMap<String, HeaderMap>,

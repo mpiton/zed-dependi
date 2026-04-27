@@ -56,3 +56,11 @@ uninlined_format_args = "warn"
 unnecessary_debug_formatting = "warn"
 disallowed_types = "warn"
 disallowed_methods = "warn"
+
+[lints.rustdoc]
+broken_intra_doc_links = "deny"
+private_intra_doc_links = "warn"
+invalid_codeblock_attributes = "deny"
+invalid_html_tags = "deny"
+invalid_rust_codeblocks = "deny"
+bare_urls = "deny"
