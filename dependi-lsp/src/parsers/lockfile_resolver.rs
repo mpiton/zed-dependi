@@ -104,4 +104,84 @@ mod tests {
         let result = select_resolver(FileType::Maven, path, "").await;
         assert!(result.is_none(), "Maven should not produce a resolver");
     }
+
+    struct StubResolver {
+        lock_path: Option<PathBuf>,
+        graph: LockfileGraph,
+    }
+
+    #[async_trait]
+    impl LockfileResolver for StubResolver {
+        async fn find_lockfile(&self, _manifest_path: &Path) -> Option<PathBuf> {
+            self.lock_path.clone()
+        }
+        fn parse_graph(&self, _content: &str) -> LockfileGraph {
+            LockfileGraph {
+                packages: self.graph.packages.clone(),
+            }
+        }
+    }
+
+    fn test_dep(name: &str, version: &str) -> Dependency {
+        Dependency {
+            name: name.to_string(),
+            version: version.to_string(),
+            name_span: crate::parsers::Span { line: 0, line_start: 0, line_end: 0 },
+            version_span: crate::parsers::Span { line: 0, line_start: 0, line_end: 0 },
+            dev: false,
+            optional: false,
+            registry: None,
+            resolved_version: None,
+        }
+    }
+
+    fn test_pkg(name: &str, version: &str) -> crate::parsers::lockfile_graph::LockfilePackage {
+        crate::parsers::lockfile_graph::LockfilePackage {
+            name: name.to_string(),
+            version: version.to_string(),
+            dependencies: Vec::new(),
+            is_root: false,
+        }
+    }
+
+    #[tokio::test]
+    async fn helper_returns_none_when_resolver_finds_no_lockfile() {
+        let resolver: Box<dyn LockfileResolver> = Box::new(StubResolver {
+            lock_path: None,
+            graph: LockfileGraph { packages: vec![] },
+        });
+        let mut deps = vec![test_dep("serde", "1.0.0")];
+        let result = resolve_versions_from_lockfile(&mut deps, resolver, Path::new("/tmp/Cargo.toml")).await;
+        assert!(result.is_none());
+        assert_eq!(deps[0].resolved_version, None);
+    }
+
+    #[tokio::test]
+    async fn helper_resolves_versions_via_resolver() {
+        use std::io::Write;
+        let tmp = tempfile::tempdir().expect("tempdir");
+        let lock_path = tmp.path().join("Cargo.lock");
+        let mut file = std::fs::File::create(&lock_path).expect("create lockfile");
+        writeln!(file, "# stub lockfile content").expect("write lockfile");
+
+        let resolver: Box<dyn LockfileResolver> = Box::new(StubResolver {
+            lock_path: Some(lock_path.clone()),
+            graph: LockfileGraph {
+                packages: vec![test_pkg("serde", "1.0.230"), test_pkg("tokio", "1.50.0")],
+            },
+        });
+        let mut deps = vec![
+            test_dep("serde", "1.0"),
+            test_dep("tokio", "1.0"),
+            test_dep("absent", "0"),
+        ];
+        let manifest_path = tmp.path().join("Cargo.toml");
+        let arc = resolve_versions_from_lockfile(&mut deps, resolver, &manifest_path)
+            .await
+            .expect("expected Some(graph)");
+        assert_eq!(arc.packages.len(), 2);
+        assert_eq!(deps[0].resolved_version, Some("1.0.230".to_string()));
+        assert_eq!(deps[1].resolved_version, Some("1.50.0".to_string()));
+        assert_eq!(deps[2].resolved_version, None);
+    }
 }
