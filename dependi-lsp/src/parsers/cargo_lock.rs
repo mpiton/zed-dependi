@@ -145,6 +145,38 @@ pub async fn find_cargo_lock(cargo_toml_path: &Path) -> Option<PathBuf> {
     }
 }
 
+use async_trait::async_trait;
+
+use crate::parsers::Dependency;
+use crate::parsers::lockfile_resolver::LockfileResolver;
+
+/// Resolves versions from `Cargo.lock` for a Rust project.
+pub struct CargoResolver {
+    /// Captured at selection time from the manifest's `[package].name`.
+    /// Used by `parse_cargo_lock_graph` for multi-version disambiguation.
+    pub root_package: Option<String>,
+}
+
+#[async_trait]
+impl LockfileResolver for CargoResolver {
+    async fn find_lockfile(&self, manifest_path: &Path) -> Option<PathBuf> {
+        find_cargo_lock(manifest_path).await
+    }
+
+    fn parse_graph(&self, lock_content: &str) -> LockfileGraph {
+        parse_cargo_lock_graph(lock_content)
+    }
+
+    fn resolve_version(&self, dep: &Dependency, graph: &LockfileGraph) -> Option<String> {
+        // First-wins by name preserves existing semantics.
+        graph
+            .packages
+            .iter()
+            .find(|p| p.name == dep.name)
+            .map(|p| p.version.clone())
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -366,5 +398,37 @@ version = "0.16.1"
     fn test_parse_graph_invalid_toml() {
         let graph = parse_cargo_lock_graph("not valid ][ toml");
         assert!(graph.packages.is_empty());
+    }
+
+    #[tokio::test]
+    async fn cargo_resolver_finds_and_parses_cargo_lock() {
+        use crate::parsers::lockfile_resolver::LockfileResolver;
+        let tmp = tempfile::tempdir().expect("tempdir");
+        let manifest_path = tmp.path().join("Cargo.toml");
+        let lock_path = tmp.path().join("Cargo.lock");
+        std::fs::write(&manifest_path, r#"[package]
+name = "demo"
+version = "0.1.0"
+"#).expect("manifest");
+        std::fs::write(
+            &lock_path,
+            r#"
+[[package]]
+name = "serde"
+version = "1.0.230"
+
+[[package]]
+name = "tokio"
+version = "1.50.0"
+"#,
+        )
+        .expect("lockfile");
+        let resolver = super::CargoResolver { root_package: Some("demo".to_string()) };
+        let found = resolver.find_lockfile(&manifest_path).await;
+        assert_eq!(found.as_deref(), Some(lock_path.as_path()));
+        let content = std::fs::read_to_string(&lock_path).expect("read");
+        let graph = resolver.parse_graph(&content);
+        assert!(graph.packages.iter().any(|p| p.name == "serde" && p.version == "1.0.230"));
+        assert!(graph.packages.iter().any(|p| p.name == "tokio" && p.version == "1.50.0"));
     }
 }

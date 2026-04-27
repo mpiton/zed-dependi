@@ -50,10 +50,16 @@ pub async fn select_resolver(
     manifest_path: &Path,
     manifest_content: &str,
 ) -> Option<Box<dyn LockfileResolver>> {
-    let _ = (manifest_path, manifest_content);
+    let _ = manifest_path;
     match file_type {
+        FileType::Cargo => {
+            let root_package =
+                crate::parsers::cargo::cargo_root_package_name(manifest_content);
+            Some(Box::new(crate::parsers::cargo_lock::CargoResolver {
+                root_package,
+            }))
+        }
         FileType::Maven => None,
-        // Other variants implemented in subsequent tasks.
         _ => None,
     }
 }
@@ -97,6 +103,17 @@ pub async fn resolve_versions_from_lockfile(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[tokio::test]
+    async fn select_resolver_returns_cargo_resolver_for_cargo_filetype() {
+        let path = Path::new("/tmp/Cargo.toml");
+        let manifest = r#"[package]
+name = "demo"
+version = "0.0.1"
+"#;
+        let resolver = select_resolver(FileType::Cargo, path, manifest).await;
+        assert!(resolver.is_some(), "Cargo should yield a resolver");
+    }
 
     #[tokio::test]
     async fn select_resolver_returns_none_for_maven() {
