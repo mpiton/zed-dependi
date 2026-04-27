@@ -1242,4 +1242,17 @@ requests = { version = "^2.28.0", optional = true }
         let req = deps.iter().find(|d| d.name == "requests").expect("requests missing");
         assert_eq!(req.version, "^2.28.0");
     }
+
+    #[test]
+    fn test_pyproject_pep621_dynamic_safe() {
+        let content = r#"
+[project]
+name = "x"
+version = "0.1.0"
+dynamic = ["dependencies"]
+"#;
+        let parser = PythonParser::new();
+        let deps = parser.parse(content);
+        assert_eq!(deps.len(), 0, "dynamic deps should yield no Dependency items");
+    }
 }
