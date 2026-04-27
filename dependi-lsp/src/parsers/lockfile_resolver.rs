@@ -70,6 +70,7 @@ pub async fn select_resolver(
             Some(Box::new(crate::parsers::python_lock::PythonResolver { lock_path, sub }))
         }
         FileType::Go => Some(Box::new(crate::parsers::go_sum::GoResolver)),
+        FileType::Php => Some(Box::new(crate::parsers::composer_lock::PhpResolver)),
         FileType::Maven => None,
         _ => None,
     }
