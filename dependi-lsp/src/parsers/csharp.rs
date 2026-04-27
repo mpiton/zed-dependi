@@ -1,12 +1,41 @@
-//! Parser for C# .csproj files (NuGet PackageReference format)
+//! Parser for C# `.csproj` files (NuGet `PackageReference` format).
+//!
+//! Two XML formats are supported on the same line:
+//!
+//! ```xml
+//! <!-- Self-closing attribute form -->
+//! <PackageReference Include="Serilog" Version="3.1.1" />
+//!
+//! <!-- Expanded element form -->
+//! <PackageReference Include="Serilog"><Version>3.1.1</Version></PackageReference>
+//! ```
+//!
+//! `PackageReference` entries that have no `Version` attribute or element are
+//! silently skipped (typically managed centrally via `Directory.Packages.props`).
+//! NuGet does not have an explicit dev-dependency concept, so all parsed
+//! dependencies have `dev = false`.
 
 use super::{Dependency, Parser, Span};
 
-/// Parser for C# .csproj files
+/// Parser for C# `.csproj` files.
+///
+/// # Examples
+///
+/// ```
+/// use dependi_lsp::parsers::Parser;
+/// use dependi_lsp::parsers::csharp::CsharpParser;
+/// let parser = CsharpParser::new();
+/// let content = r#"<Project><ItemGroup><PackageReference Include="Serilog" Version="3.1.1" /></ItemGroup></Project>"#;
+/// let deps = parser.parse(content);
+/// assert_eq!(deps.len(), 1);
+/// assert_eq!(deps[0].name, "Serilog");
+/// assert_eq!(deps[0].version, "3.1.1");
+/// ```
 #[derive(Debug, Default)]
 pub struct CsharpParser;
 
 impl CsharpParser {
+    /// Creates a new [`CsharpParser`] instance.
     pub fn new() -> Self {
         Self
     }
@@ -35,7 +64,10 @@ impl Parser for CsharpParser {
     }
 }
 
-/// Parse a PackageReference XML element
+/// Parses a single `<PackageReference …>` line and returns the corresponding [`Dependency`].
+///
+/// Returns `None` when no `Include` attribute is found, or when no version can
+/// be extracted from either the `Version=""` attribute or a `<Version>` child element.
 fn parse_package_reference(line: &str, line_num: u32) -> Option<Dependency> {
     // Extract Include attribute (package name)
     let include_start = line.find("Include=\"")? + 9;
