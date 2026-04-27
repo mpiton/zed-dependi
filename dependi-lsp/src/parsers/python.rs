@@ -1189,11 +1189,17 @@ ruff = "^0.1.0"
 "#;
         let parser = PythonParser::new();
         let deps = parser.parse(content);
-        assert_eq!(deps.len(), 2, "expected 2 deps, got {:?}", deps);
-        let black = deps.iter().find(|d| d.name == "black").expect("black missing");
+        assert_eq!(deps.len(), 2, "expected 2 deps, got {deps:?}");
+        let black = deps
+            .iter()
+            .find(|d| d.name == "black")
+            .expect("black missing");
         assert!(black.dev, "black in [group.dev] must be dev=true");
         assert!(!black.optional);
-        let ruff = deps.iter().find(|d| d.name == "ruff").expect("ruff missing");
+        let ruff = deps
+            .iter()
+            .find(|d| d.name == "ruff")
+            .expect("ruff missing");
         assert!(ruff.dev);
     }
 
@@ -1209,7 +1215,10 @@ pytest = "^7.0.0"
 "#;
         let parser = PythonParser::new();
         let deps = parser.parse(content);
-        let pytest = deps.iter().find(|d| d.name == "pytest").expect("pytest missing");
+        let pytest = deps
+            .iter()
+            .find(|d| d.name == "pytest")
+            .expect("pytest missing");
         assert!(pytest.dev, "pytest in [group.test] must be dev=true");
     }
 
@@ -1225,7 +1234,10 @@ mkdocs = "^1.5.0"
 "#;
         let parser = PythonParser::new();
         let deps = parser.parse(content);
-        let mkdocs = deps.iter().find(|d| d.name == "mkdocs").expect("mkdocs missing");
+        let mkdocs = deps
+            .iter()
+            .find(|d| d.name == "mkdocs")
+            .expect("mkdocs missing");
         assert!(!mkdocs.dev, "mkdocs in [group.docs] must be dev=false");
         assert!(!mkdocs.optional);
     }
@@ -1239,7 +1251,10 @@ requests = { version = "^2.28.0", optional = true }
 "#;
         let parser = PythonParser::new();
         let deps = parser.parse(content);
-        let req = deps.iter().find(|d| d.name == "requests").expect("requests missing");
+        let req = deps
+            .iter()
+            .find(|d| d.name == "requests")
+            .expect("requests missing");
         assert_eq!(req.version, "^2.28.0");
     }
 
@@ -1253,7 +1268,11 @@ dynamic = ["dependencies"]
 "#;
         let parser = PythonParser::new();
         let deps = parser.parse(content);
-        assert_eq!(deps.len(), 0, "dynamic deps should yield no Dependency items");
+        assert_eq!(
+            deps.len(),
+            0,
+            "dynamic deps should yield no Dependency items"
+        );
     }
 
     #[test]
@@ -1268,7 +1287,10 @@ dependencies = [
 "#;
         let parser = PythonParser::new();
         let deps = parser.parse(content);
-        let pytest = deps.iter().find(|d| d.name == "pytest").expect("pytest missing");
+        let pytest = deps
+            .iter()
+            .find(|d| d.name == "pytest")
+            .expect("pytest missing");
         assert_eq!(pytest.version, ">=7.0", "marker must be stripped");
     }
 
@@ -1295,7 +1317,7 @@ dependencies = ["ruff>=0.1.0"]
         assert!(deps.iter().any(|d| d.name == "mkdocs" && d.optional));
         assert!(deps.iter().any(|d| d.name == "pytest"));
         assert!(deps.iter().any(|d| d.name == "ruff" && d.dev));
-        assert_eq!(deps.len(), 4, "expected 4 deps total, got {:?}", deps);
+        assert_eq!(deps.len(), 4, "expected 4 deps total, got {deps:?}");
     }
 
     #[test]
@@ -1307,7 +1329,10 @@ dependencies = ["ruff>=0.1.0"]
         let dep = &deps[0];
         assert_eq!(dep.name, "requests");
         assert_eq!(dep.version, ">=2.28.0");
-        assert_eq!(dep.name_span.line, 4, "name should be on the line containing the array item");
+        assert_eq!(
+            dep.name_span.line, 4,
+            "name should be on the line containing the array item"
+        );
         assert_eq!(dep.version_span.line, 4);
         assert!(dep.name_span.line_end > dep.name_span.line_start);
         assert!(dep.version_span.line_end > dep.version_span.line_start);
