@@ -310,9 +310,9 @@ fn parse_pyproject_toml(content: &str) -> Vec<Dependency> {
                 if name == "python" {
                     continue;
                 }
-                if let Some(version) = extract_poetry_version_taplo(value)
+                if let Some((version, optional)) = extract_poetry_version_taplo(value)
                     && let Some(dep) =
-                        find_poetry_dependency_position(content, &name, &version, false)
+                        find_poetry_dependency_position(content, &name, &version, false, optional)
                 {
                     dependencies.push(dep);
                 }
@@ -325,9 +325,9 @@ fn parse_pyproject_toml(content: &str) -> Vec<Dependency> {
             let entries = deps_table.entries().read();
             for (key, value) in entries.iter() {
                 let name = key.value().to_string();
-                if let Some(version) = extract_poetry_version_taplo(value)
+                if let Some((version, optional)) = extract_poetry_version_taplo(value)
                     && let Some(dep) =
-                        find_poetry_dependency_position(content, &name, &version, true)
+                        find_poetry_dependency_position(content, &name, &version, true, optional)
                 {
                     dependencies.push(dep);
                 }
@@ -347,9 +347,9 @@ fn parse_pyproject_toml(content: &str) -> Vec<Dependency> {
                         let entries = deps_table.entries().read();
                         for (key, value) in entries.iter() {
                             let name = key.value().to_string();
-                            if let Some(version) = extract_poetry_version_taplo(value)
+                            if let Some((version, optional)) = extract_poetry_version_taplo(value)
                                 && let Some(dep) = find_poetry_dependency_position(
-                                    content, &name, &version, is_dev,
+                                    content, &name, &version, is_dev, optional,
                                 )
                             {
                                 dependencies.push(dep);
@@ -540,19 +540,27 @@ fn parse_pep508_dependency(dep_str: &str) -> Option<(String, String)> {
     Some((name.to_string(), format!("{operator}{version_num}")))
 }
 
-/// Extract version from Poetry dependency value (using taplo Node)
-fn extract_poetry_version_taplo(value: &taplo::dom::Node) -> Option<String> {
+/// Extract version and optional flag from Poetry dependency value (using taplo Node)
+fn extract_poetry_version_taplo(value: &taplo::dom::Node) -> Option<(String, bool)> {
     // Simple string value: flask = "^2.0.0"
     if let Some(s) = value.as_str() {
-        return Some(s.value().to_string());
+        return Some((s.value().to_string(), false));
     }
 
-    // Table value: flask = { version = "^2.0.0", ... }
+    // Table value: flask = { version = "^2.0.0", optional = true, ... }
     if let Some(t) = value.as_table()
         && let Some(version_node) = t.get("version")
         && let Some(version_str) = version_node.as_str()
     {
-        return Some(version_str.value().to_string());
+        let version = version_str.value().to_string();
+        // Extract optional flag if present
+        let optional_node = t.get("optional");
+        let optional = if let Some(opt_node) = optional_node {
+            opt_node.as_bool().map(|b| b.value()).unwrap_or(false)
+        } else {
+            false
+        };
+        return Some((version, optional));
     }
 
     None
@@ -611,6 +619,7 @@ fn find_poetry_dependency_position(
     name: &str,
     version: &str,
     dev: bool,
+    optional: bool,
 ) -> Option<Dependency> {
     for (line_idx, line) in content.lines().enumerate() {
         let trimmed = line.trim();
@@ -643,7 +652,7 @@ fn find_poetry_dependency_position(
                         line_end: version_end,
                     },
                     dev,
-                    optional: false,
+                    optional,
                     registry: None,
                     resolved_version: None,
                 });
@@ -1201,6 +1210,7 @@ ruff = "^0.1.0"
             .find(|d| d.name == "ruff")
             .expect("ruff missing");
         assert!(ruff.dev);
+        assert!(!ruff.optional);
     }
 
     #[test]
@@ -1256,6 +1266,10 @@ requests = { version = "^2.28.0", optional = true }
             .find(|d| d.name == "requests")
             .expect("requests missing");
         assert_eq!(req.version, "^2.28.0");
+        assert!(
+            req.optional,
+            "optional=true must be propagated from inline table"
+        );
     }
 
     #[test]
@@ -1334,6 +1348,7 @@ dependencies = ["ruff>=0.1.0"]
             "name should be on the line containing the array item"
         );
         assert_eq!(dep.version_span.line, 4);
+        // column checks: end > start is enough; exact offsets depend on taplo quote resolution
         assert!(dep.name_span.line_end > dep.name_span.line_start);
         assert!(dep.version_span.line_end > dep.version_span.line_start);
     }
@@ -1349,6 +1364,7 @@ dependencies = ["ruff>=0.1.0"]
         assert_eq!(dep.version, "^2.28.0");
         assert_eq!(dep.name_span.line, 2);
         assert_eq!(dep.version_span.line, 2);
+        // column checks: end > start is enough; exact offsets depend on taplo quote resolution
         assert!(dep.name_span.line_end > dep.name_span.line_start);
         assert!(dep.version_span.line_end > dep.version_span.line_start);
     }
