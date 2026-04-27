@@ -636,8 +636,8 @@ fn split_name_version(spec: &str) -> Option<(&str, &str)> {
 
 /// Resolves versions from npm/yarn/pnpm/bun lockfiles. Sub-format is captured at selection time.
 pub struct NpmResolver {
-    pub lock_path: PathBuf,
-    pub sub: NpmLockfileType,
+    pub(crate) lock_path: PathBuf,
+    pub(crate) sub: NpmLockfileType,
 }
 
 #[async_trait]

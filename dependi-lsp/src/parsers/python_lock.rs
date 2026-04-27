@@ -375,8 +375,8 @@ pub fn parse_uv_lock_graph(content: &str) -> LockfileGraph {
 /// Resolves versions from Python lockfiles (Poetry/uv/PDM/Pipfile).
 /// Sub-format is captured at selection time; PEP 503 normalization applied on lookup.
 pub struct PythonResolver {
-    pub lock_path: PathBuf,
-    pub sub: PythonLockfileType,
+    pub(crate) lock_path: PathBuf,
+    pub(crate) sub: PythonLockfileType,
 }
 
 #[async_trait]

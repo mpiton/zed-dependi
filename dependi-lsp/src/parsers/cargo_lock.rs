@@ -155,7 +155,7 @@ pub struct CargoResolver {
     /// root package depends on a specific version of a crate (Cargo writes
     /// `"crate_name version"` in its dependencies array), that version takes
     /// precedence over the first-found entry.
-    pub root_package: Option<String>,
+    pub(crate) root_package: Option<String>,
 }
 
 #[async_trait]
