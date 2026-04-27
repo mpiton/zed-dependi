@@ -72,6 +72,7 @@ pub async fn select_resolver(
         FileType::Go => Some(Box::new(crate::parsers::go_sum::GoResolver)),
         FileType::Php => Some(Box::new(crate::parsers::composer_lock::PhpResolver)),
         FileType::Dart => Some(Box::new(crate::parsers::pubspec_lock::DartResolver)),
+        FileType::Csharp => Some(Box::new(crate::parsers::packages_lock_json::CsharpResolver)),
         FileType::Maven => None,
         _ => None,
     }

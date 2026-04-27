@@ -2,7 +2,11 @@
 
 use std::path::{Path, PathBuf};
 
+use async_trait::async_trait;
 use hashbrown::HashMap;
+
+use crate::parsers::lockfile_graph::{LockfileGraph, LockfilePackage};
+use crate::parsers::lockfile_resolver::LockfileResolver;
 
 /// Normalize a NuGet package name to lowercase.
 ///
@@ -80,6 +84,42 @@ pub async fn find_packages_lock(manifest_path: &Path) -> Option<PathBuf> {
         }
 
         current = current.parent()?.to_path_buf();
+    }
+}
+
+/// Resolves versions from `packages.lock.json` for C# / NuGet projects.
+/// NuGet normalizes package names to lowercase for lookup.
+/// No graph parser exists for C#; a flat graph (no edges, no is_root) is used —
+/// transitive analysis is a no-op until a real graph parser lands. Matches pre-refactor.
+///
+/// `parse_packages_lock` already normalizes names internally, so the default
+/// `resolve_version` (which calls `normalize_name` before lookup) works correctly
+/// without override.
+pub struct CsharpResolver;
+
+#[async_trait]
+impl LockfileResolver for CsharpResolver {
+    async fn find_lockfile(&self, manifest_path: &Path) -> Option<PathBuf> {
+        find_packages_lock(manifest_path).await
+    }
+
+    fn parse_graph(&self, lock_content: &str) -> LockfileGraph {
+        let lock_versions = parse_packages_lock(lock_content);
+        LockfileGraph {
+            packages: lock_versions
+                .into_iter()
+                .map(|(name, version)| LockfilePackage {
+                    name,
+                    version,
+                    dependencies: Vec::new(),
+                    is_root: false,
+                })
+                .collect(),
+        }
+    }
+
+    fn normalize_name(&self, name: &str) -> String {
+        normalize_nuget_name(name)
     }
 }
 
@@ -226,6 +266,44 @@ mod tests {
         let map = parse_packages_lock(content);
         assert!(map.contains_key("newtonsoft.json"));
         assert!(!map.contains_key("Newtonsoft.Json"));
+    }
+
+    #[tokio::test]
+    async fn csharp_resolver_normalizes_nuget_names() {
+        use crate::parsers::lockfile_resolver::LockfileResolver;
+        let tmp = tempfile::tempdir().expect("tempdir");
+        let manifest = tmp.path().join("Demo.csproj");
+        let lock = tmp.path().join("packages.lock.json");
+        std::fs::write(&manifest, "<Project></Project>").unwrap();
+        std::fs::write(
+            &lock,
+            r#"{
+          "version": 1,
+          "dependencies": {
+            "net8.0": {
+              "Newtonsoft.Json": { "type": "Direct", "resolved": "13.0.3" }
+            }
+          }
+        }"#,
+        )
+        .unwrap();
+        let resolver = super::CsharpResolver;
+        let content = std::fs::read_to_string(&lock).unwrap();
+        let graph = resolver.parse_graph(&content);
+        let dep = crate::parsers::Dependency {
+            name: "newtonsoft.json".to_string(),
+            version: "*".to_string(),
+            name_span: crate::parsers::Span { line: 0, line_start: 0, line_end: 0 },
+            version_span: crate::parsers::Span { line: 0, line_start: 0, line_end: 0 },
+            dev: false,
+            optional: false,
+            registry: None,
+            resolved_version: None,
+        };
+        assert_eq!(
+            resolver.resolve_version(&dep, &graph),
+            Some("13.0.3".to_string())
+        );
     }
 
     #[test]
