@@ -338,7 +338,7 @@ fn parse_pyproject_toml(content: &str) -> Vec<Dependency> {
     // Matrix overrides (e.g. [tool.hatch.envs.test.overrides.matrix.*.dependencies])
     // use a different inline-table value format and are out of scope.
     let hatch_envs = dom.get("tool").get("hatch").get("envs");
-    collect_hatch_env_deps(&hatch_envs, content, &mut dependencies);
+    parse_hatch_envs(&hatch_envs, &line_ranges, &mut dependencies);
 
     dependencies
 }
@@ -575,6 +575,50 @@ fn parse_pep735_groups(dom: &Node, line_ranges: &[TextRange], deps: &mut Vec<Dep
     }
 }
 
+/// Parse `[tool.hatch.envs.<ENV_NAME>]` blocks for `dependencies` and
+/// `extra-dependencies` (PEP 508 string arrays). Always sets dev=true,
+/// optional=false (hatch envs are dev/test tooling).
+///
+/// `envs_node` may be either `dom["tool"]["hatch"]["envs"]` (pyproject) or
+/// `dom["envs"]` (standalone hatch.toml). Caller passes the appropriate node.
+fn parse_hatch_envs(envs_node: &Node, line_ranges: &[TextRange], deps: &mut Vec<Dependency>) {
+    let Some(envs_table) = envs_node.as_table() else {
+        return;
+    };
+    let env_entries = envs_table.entries().read();
+    for (_env_name, env_value) in env_entries.iter() {
+        for key in ["dependencies", "extra-dependencies"] {
+            let arr_node = env_value.get(key);
+            let Some(deps_array) = arr_node.as_array() else {
+                continue;
+            };
+            let items = deps_array.items().read();
+            for item in items.iter() {
+                let Some(dep_str_node) = item.as_str() else {
+                    continue;
+                };
+                let dep_str = dep_str_node.value();
+                let Some((name, version)) = parse_pep508_dependency(dep_str) else {
+                    continue;
+                };
+                let Some(string_span) = node_to_span(item, line_ranges) else {
+                    continue;
+                };
+                deps.push(Dependency {
+                    name,
+                    version,
+                    name_span: string_span,
+                    version_span: string_span,
+                    dev: true,
+                    optional: false,
+                    registry: None,
+                    resolved_version: None,
+                });
+            }
+        }
+    }
+}
+
 /// Parse a standalone `hatch.toml` file.
 ///
 /// The project-level Hatch config is always stored in a file named `hatch.toml`.
@@ -589,8 +633,9 @@ fn parse_hatch_toml(content: &str) -> Vec<Dependency> {
     }
 
     let dom = parsed.into_dom();
+    let line_ranges = compute_line_ranges(content);
     let envs_node = dom.get("envs");
-    collect_hatch_env_deps(&envs_node, content, &mut dependencies);
+    parse_hatch_envs(&envs_node, &line_ranges, &mut dependencies);
 
     dependencies
 }
