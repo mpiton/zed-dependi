@@ -75,12 +75,25 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   this the old tasks kept ticking forever holding `Arc` clones of the
   replaced memory/SQLite layers
   ([#237](https://github.com/mpiton/zed-dependi/issues/237))
+- Fall through to the negative cache and network when the positive
+  advisory cache returns `NotFound`, instead of treating it as
+  authoritative. Pre-split builds wrote 404s to the same SQLite layer with
+  the long positive TTL; without this fall-through, an upgrading user
+  would otherwise be stuck with 24 h-stale `NotFound` rows that never
+  retry. Refreshing 200 responses overwrite the stale row via the
+  existing UPSERT
+  ([#237](https://github.com/mpiton/zed-dependi/issues/237))
+- Make `OsvClient::with_endpoint` fallible (`anyhow::Result<Self>`) and
+  drop its `reqwest::Client::new()` fallback. `Client::new()` is itself
+  `Client::builder().build().expect(...)` and panics under the same
+  conditions as the failing `build()`, so the fallback was an illusion.
+  The scan CLI handler logs and returns a non-zero exit code instead of
+  panicking ([#237](https://github.com/mpiton/zed-dependi/issues/237))
 - Reuse the LSP's shared `reqwest::Client` for the `OsvClient` instead of
   building a second one. The new `OsvClient::with_shared_client_and_caches`
   takes the already-verified `Arc<Client>` so there is no second TLS
   builder failure point at startup, and `build_advisory_runtime` is
-  genuinely infallible (the previous "fallback" via `reqwest::Client::new()`
-  could itself panic, since `Client::new()` is `Client::builder().build().expect(...)`)
+  genuinely infallible
   ([#237](https://github.com/mpiton/zed-dependi/issues/237))
 - Reconfigure the advisory cache trio (`advisory_cache`,
   `negative_advisory_cache`, `osv_client`) inside `LanguageServer::initialize`

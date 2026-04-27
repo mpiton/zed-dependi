@@ -436,7 +436,13 @@ async fn run_scan(
 
     // Allow tests to inject a custom OSV endpoint
     let osv_client = match std::env::var("OSV_ENDPOINT") {
-        Ok(url) => OsvClient::with_endpoint(url),
+        Ok(url) => match OsvClient::with_endpoint(url) {
+            Ok(client) => client,
+            Err(e) => {
+                eprintln!("Error building OSV client for OSV_ENDPOINT: {e}");
+                return ExitCode::FAILURE;
+            }
+        },
         Err(_) => OsvClient::default(),
     };
     let results = match osv_client.query_batch(&queries).await {

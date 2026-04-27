@@ -113,22 +113,21 @@ impl OsvClient {
     /// Build a client pointing at a custom OSV endpoint (no advisory cache).
     ///
     /// Used at runtime by the standalone scanner (`OSV_ENDPOINT` env var) and
-    /// by tests to point the client at a mock HTTP server. Falls back to a
-    /// minimally-configured `reqwest::Client` if the builder rejects the
-    /// timeout we request — `reqwest::Client::new()` itself never panics.
-    pub fn with_endpoint(endpoint: String) -> Self {
-        let client = Client::builder()
-            .timeout(Duration::from_secs(30))
-            .build()
-            .unwrap_or_else(|_| Client::new());
+    /// by tests to point the client at a mock HTTP server. Returns
+    /// `Err` if `reqwest` cannot build a `Client` (rare TLS/cert issue) —
+    /// previously this fell back to `reqwest::Client::new()`, but that is
+    /// itself `Client::builder().build().expect(...)` and panics under the
+    /// same conditions, so the fallback was an illusion.
+    pub fn with_endpoint(endpoint: String) -> anyhow::Result<Self> {
+        let client = Client::builder().timeout(Duration::from_secs(30)).build()?;
         let null: Arc<dyn crate::cache::advisory::AdvisoryWriteCache> =
             Arc::new(crate::cache::advisory::NullAdvisoryCache);
-        Self {
+        Ok(Self {
             base_url: endpoint,
             client: Arc::new(client),
             advisory_cache: Arc::clone(&null),
             negative_cache: null,
-        }
+        })
     }
 
     /// Test-only constructor: explicit endpoint **and** advisory cache.
@@ -327,16 +326,21 @@ impl OsvClient {
                         return false;
                     }
 
-                    // Positive cache wins over negative: if a real `Found`
-                    // entry exists, it cannot also be `NotFound`. Check it
-                    // first to avoid the (cheap) negative-cache lookup.
-                    if let Some(cached) = positive_cache.get(&id).await {
-                        return match cached.kind {
-                            crate::cache::advisory::AdvisoryKind::Found {
-                                unmaintained, ..
-                            } => unmaintained,
-                            crate::cache::advisory::AdvisoryKind::NotFound => false,
-                        };
+                    // Positive cache wins over negative for `Found` entries.
+                    // We deliberately do NOT short-circuit on `NotFound` from
+                    // the positive cache: pre-split builds wrote 404s into
+                    // the same SQLite layer with the long positive TTL, so a
+                    // user upgrading would otherwise be stuck with 24-h-stale
+                    // 404 rows that never get a chance to retry. Falling
+                    // through lets the short-TTL negative cache handle the
+                    // 404 path; if the network now returns 200, the
+                    // subsequent `positive_cache.insert` (UPSERT) overwrites
+                    // the stale row.
+                    if let Some(cached) = positive_cache.get(&id).await
+                        && let crate::cache::advisory::AdvisoryKind::Found { unmaintained, .. } =
+                            cached.kind
+                    {
+                        return unmaintained;
                     }
                     if let Some(cached) = negative_cache.get(&id).await
                         && matches!(cached.kind, crate::cache::advisory::AdvisoryKind::NotFound)
@@ -694,7 +698,8 @@ mod tests {
 
     #[tokio::test]
     async fn test_osv_client_with_endpoint_uses_custom_url() {
-        let client = OsvClient::with_endpoint("http://127.0.0.1:1".to_string());
+        let client = OsvClient::with_endpoint("http://127.0.0.1:1".to_string())
+            .expect("with_endpoint builds in test");
         // Port 1 is not listening; a real query must error, proving the client
         // actually attempted to reach the custom URL (and not fallen back to
         // api.osv.dev).
@@ -956,6 +961,64 @@ mod tests {
         assert!(hybrid.get("RUSTSEC-9999-0001").await.is_none());
     }
 
+    /// Regression: pre-split builds wrote 404s to the positive cache. After
+    /// the split, those rows linger for the full positive TTL (24 h). A
+    /// `NotFound` returned from the *positive* cache must therefore NOT be
+    /// treated as authoritative; the lookup must fall through so the
+    /// short-TTL negative cache or the network can refresh the answer.
+    #[tokio::test]
+    async fn positive_cache_not_found_falls_through_to_network() {
+        let server = MockServer::start().await;
+        let hits = Arc::new(AtomicUsize::new(0));
+        {
+            let hits = Arc::clone(&hits);
+            Mock::given(method("GET"))
+                .and(path("/vulns/RUSTSEC-2020-0036"))
+                .respond_with(move |_req: &wiremock::Request| {
+                    hits.fetch_add(1, Ordering::SeqCst);
+                    ResponseTemplate::new(200).set_body_json(sample_response_body())
+                })
+                .mount(&server)
+                .await;
+        }
+
+        let positive: Arc<dyn AdvisoryWriteCache> = Arc::new(MemoryAdvisoryCache::new());
+        let negative: Arc<dyn AdvisoryWriteCache> = Arc::new(MemoryAdvisoryCache::new());
+
+        // Pre-seed the positive cache with a stale `NotFound` (as a pre-split
+        // build would have done for a 404). The new lookup logic must not
+        // short-circuit on it.
+        positive
+            .insert(CachedAdvisory {
+                id: "RUSTSEC-2020-0036".to_string(),
+                kind: AdvisoryKind::NotFound,
+                fetched_at: SystemTime::now(),
+            })
+            .await;
+
+        let client = OsvClient::with_endpoint_and_caches(
+            server.uri(),
+            Arc::clone(&positive),
+            Arc::clone(&negative),
+        );
+
+        let _ = client
+            .check_rustsec_unmaintained(&["RUSTSEC-2020-0036".to_string()])
+            .await;
+
+        assert_eq!(
+            hits.load(Ordering::SeqCst),
+            1,
+            "stale NotFound on positive cache must not short-circuit the network call"
+        );
+        // The fresh 200 must overwrite the stale row via UPSERT semantics.
+        let cached = positive
+            .get("RUSTSEC-2020-0036")
+            .await
+            .expect("positive cache must hold the refreshed Found entry");
+        assert!(matches!(cached.kind, AdvisoryKind::Found { .. }));
+    }
+
     #[tokio::test]
     async fn http_500_is_not_cached_and_retries() {
         let server = MockServer::start().await;
@@ -994,7 +1057,7 @@ mod tests {
         let max_seen = Arc::new(AtomicUsize::new(0));
         let endpoint =
             spawn_counting_osv_server(Arc::clone(&active_requests), Arc::clone(&max_seen)).await;
-        let client = OsvClient::with_endpoint(endpoint);
+        let client = OsvClient::with_endpoint(endpoint).expect("with_endpoint builds in test");
         let ids: Vec<String> = (0..(EXPECTED_LIMIT * 2 + 3))
             .map(|index| format!("RUSTSEC-2099-{index:04}"))
             .collect();
