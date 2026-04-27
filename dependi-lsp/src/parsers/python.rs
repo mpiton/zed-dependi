@@ -1196,4 +1196,20 @@ ruff = "^0.1.0"
         let ruff = deps.iter().find(|d| d.name == "ruff").expect("ruff missing");
         assert!(ruff.dev);
     }
+
+    #[test]
+    fn test_pyproject_poetry_groups_test() {
+        let content = r#"
+[tool.poetry]
+name = "x"
+version = "0.1.0"
+
+[tool.poetry.group.test.dependencies]
+pytest = "^7.0.0"
+"#;
+        let parser = PythonParser::new();
+        let deps = parser.parse(content);
+        let pytest = deps.iter().find(|d| d.name == "pytest").expect("pytest missing");
+        assert!(pytest.dev, "pytest in [group.test] must be dev=true");
+    }
 }
