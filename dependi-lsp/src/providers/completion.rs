@@ -1,4 +1,10 @@
-//! Completion provider for version suggestions
+//! Completion provider for dependency version suggestions.
+//!
+//! When the cursor is positioned inside a version field, [`get_completions`]
+//! returns up to ten recent versions as [`CompletionItem`] entries, ordered
+//! newest-first.  Each item includes the version string, an optional release
+//! age computed by [`fmt_release_age`], and a Markdown documentation block
+//! that marks the latest stable version.
 
 use core::fmt::{self, Write};
 
@@ -71,7 +77,24 @@ pub fn fmt_release_age(released_at: DateTime<Utc>) -> impl fmt::Display + fmt::D
     })
 }
 
-/// Get completions for a position in the document
+/// Return version completions for the dependency whose `version_span` contains `position`.
+///
+/// Looks up the dependency name in `cache` using a key produced by
+/// `cache_key_fn`, then maps the most-recent versions (up to ten) to
+/// [`CompletionItem`] values.  Returns `None` when the cursor is not inside a
+/// version field or when no cached version data is available.
+///
+/// # Parameters
+///
+/// - `dependencies` — all parsed dependencies for the current document.
+/// - `position` — cursor position sent by the LSP client.
+/// - `cache` — read-only cache handle.
+/// - `cache_key_fn` — maps a package name to its cache lookup key.
+///
+/// # Returns
+///
+/// `Some(items)` with items ordered newest-first, or `None` when completion
+/// is not applicable at the given position.
 pub async fn get_completions(
     dependencies: &[Dependency],
     position: Position,
