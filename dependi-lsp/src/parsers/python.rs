@@ -325,33 +325,7 @@ fn parse_pyproject_toml(content: &str) -> Vec<Dependency> {
 
         parse_poetry_dev_legacy(&dom, &line_ranges, &mut dependencies);
 
-        // [tool.poetry.group.dev.dependencies] (Poetry >= 1.2)
-        let groups_node = poetry.get("group");
-        if let Some(groups) = groups_node.as_table() {
-            let group_entries = groups.entries().read();
-            for (group_key, group_value) in group_entries.iter() {
-                let group_name = group_key.value();
-                let is_dev = group_name == "dev" || group_name == "test";
-                if let Some(group_table) = group_value.as_table() {
-                    let deps_node = group_value.get("dependencies");
-                    if let Some(deps_table) = deps_node.as_table() {
-                        let entries = deps_table.entries().read();
-                        for (key, value) in entries.iter() {
-                            let name = key.value().to_string();
-                            if let Some((version, optional)) = extract_poetry_version_taplo(value)
-                                && let Some(dep) = find_poetry_dependency_position(
-                                    content, &name, &version, is_dev, optional,
-                                )
-                            {
-                                dependencies.push(dep);
-                            }
-                        }
-                    }
-                    // Suppress unused variable warning
-                    let _ = group_table;
-                }
-            }
-        }
+        parse_poetry_groups(&dom, &line_ranges, &mut dependencies);
 
         // Suppress unused variable warning
         let _ = poetry_table;
@@ -544,6 +518,54 @@ fn parse_poetry_dev_legacy(dom: &Node, line_ranges: &[TextRange], deps: &mut Vec
             registry: None,
             resolved_version: None,
         });
+    }
+}
+
+/// Parse `[tool.poetry.group.<NAME>.dependencies]` (Poetry >= 1.2).
+/// Group named `dev` or `test` produces dev=true; otherwise dev=false.
+fn parse_poetry_groups(dom: &Node, line_ranges: &[TextRange], deps: &mut Vec<Dependency>) {
+    let groups_node = dom.get("tool").get("poetry").get("group");
+    let Some(groups) = groups_node.as_table() else {
+        return;
+    };
+    let group_entries = groups.entries().read();
+    for (group_key, group_value) in group_entries.iter() {
+        let group_name = group_key.value();
+        let is_dev = group_name == "dev" || group_name == "test";
+        let Some(_group_table) = group_value.as_table() else {
+            continue;
+        };
+        let deps_node = group_value.get("dependencies");
+        let Some(deps_table) = deps_node.as_table() else {
+            continue;
+        };
+        let entries = deps_table.entries().read();
+        for (key, value) in entries.iter() {
+            let name = key.value().to_string();
+            let Some((version, optional)) = extract_poetry_version_taplo(value) else {
+                continue;
+            };
+            let Some(name_span) = key
+                .syntax()
+                .map(SyntaxElement::text_range)
+                .and_then(|r| range_to_span(r, line_ranges))
+            else {
+                continue;
+            };
+            let Some(version_span) = node_to_span(value, line_ranges) else {
+                continue;
+            };
+            deps.push(Dependency {
+                name,
+                version,
+                name_span,
+                version_span,
+                dev: is_dev,
+                optional,
+                registry: None,
+                resolved_version: None,
+            });
+        }
     }
 }
 
