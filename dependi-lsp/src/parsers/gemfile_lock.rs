@@ -50,22 +50,39 @@ fn strip_platform_suffix(version: &str) -> &str {
 }
 
 /// Normalize a Ruby gem name to lowercase for case-insensitive matching.
+///
+/// # Examples
+///
+/// ```
+/// use dependi_lsp::parsers::gemfile_lock::normalize_gem_name;
+/// assert_eq!(normalize_gem_name("ActiveRecord"), "activerecord");
+/// assert_eq!(normalize_gem_name("rails"), "rails");
+/// ```
 pub fn normalize_gem_name(name: &str) -> String {
     name.to_lowercase()
 }
 
-/// Parse a Gemfile.lock file and return a map of gem name → resolved version.
+/// Parse a `Gemfile.lock` file and return a map of gem name → resolved version.
 ///
 /// Only `GEM` (registry) sections are resolved. `PATH` and `GIT` sourced
-/// gems are intentionally excluded — they are also skipped by the Gemfile manifest
-/// parser (`ruby.rs`) and do not need version resolution against a registry.
+/// gems are intentionally excluded — they are also skipped by the Gemfile
+/// manifest parser and do not need version resolution against a registry.
 ///
-/// Extracts versions from the GEM specs section where each gem appears as:
-///   `    gem_name (VERSION)`
-/// with exactly 4 spaces of indentation.
+/// Extracts versions from the `GEM specs:` section where each gem appears as
+/// `    gem_name (VERSION)` with exactly 4 spaces of indentation.
 ///
 /// Gem names are stored in lowercase for case-insensitive matching.
 /// Platform suffixes (e.g., `-x86_64-linux`) are stripped from versions.
+///
+/// # Examples
+///
+/// ```
+/// use dependi_lsp::parsers::gemfile_lock::parse_gemfile_lock;
+///
+/// let lock = "GEM\n  remote: https://rubygems.org/\n  specs:\n    rails (7.0.4)\n\nPLATFORMS\n  ruby\n";
+/// let map = parse_gemfile_lock(lock);
+/// assert_eq!(map.get("rails").map(String::as_str), Some("7.0.4"));
+/// ```
 pub fn parse_gemfile_lock(content: &str) -> HashMap<String, String> {
     let mut map = HashMap::new();
 
