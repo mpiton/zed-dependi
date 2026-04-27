@@ -1271,4 +1271,30 @@ dependencies = [
         let pytest = deps.iter().find(|d| d.name == "pytest").expect("pytest missing");
         assert_eq!(pytest.version, ">=7.0", "marker must be stripped");
     }
+
+    #[test]
+    fn test_pyproject_mixed_all_sections() {
+        let content = r#"
+[project]
+name = "x"
+version = "0.1.0"
+dependencies = ["requests>=2.28.0"]
+
+[project.optional-dependencies]
+docs = ["mkdocs>=1.5.0"]
+
+[dependency-groups]
+test = ["pytest>=7.0.0"]
+
+[tool.hatch.envs.lint]
+dependencies = ["ruff>=0.1.0"]
+"#;
+        let parser = PythonParser::new();
+        let deps = parser.parse(content);
+        assert!(deps.iter().any(|d| d.name == "requests"));
+        assert!(deps.iter().any(|d| d.name == "mkdocs" && d.optional));
+        assert!(deps.iter().any(|d| d.name == "pytest"));
+        assert!(deps.iter().any(|d| d.name == "ruff" && d.dev));
+        assert_eq!(deps.len(), 4, "expected 4 deps total, got {:?}", deps);
+    }
 }
