@@ -1,8 +1,10 @@
 //! Diagnostic provider for dependency manifests.
 //!
-//! [`create_diagnostics`] is the main entry point.  It iterates over a parsed
-//! dependency list and, for each non-ignored entry, emits at most one LSP
-//! [`Diagnostic`] chosen by the following priority order:
+//! [`crate::providers::diagnostics::create_diagnostics`] is the main entry
+//! point.  It iterates over a parsed dependency list and, for each
+//! non-ignored entry, emits at most one LSP
+//! [`tower_lsp::lsp_types::Diagnostic`] chosen by the following priority
+//! order:
 //!
 //! 1. **Local/path dependency** — informational `→ Local` hint.
 //! 2. **Yanked version** — warning with a link to the registry page.
@@ -10,8 +12,9 @@
 //! 4. **Vulnerability summary** — error/warning/hint depending on max severity.
 //! 5. **Outdated version** — hint `Update available: X → Y`.
 //!
-//! Helper functions [`build_transitive_summary_message`] is public so the
-//! vulnerability report generator can reuse the formatting logic.
+//! Helper function
+//! [`crate::providers::diagnostics::build_transitive_summary_message`] is
+//! public so the vulnerability report generator can reuse the formatting logic.
 
 use core::fmt;
 

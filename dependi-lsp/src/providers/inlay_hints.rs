@@ -1,8 +1,9 @@
 //! Inlay hint provider — displays version status inline next to dependency declarations.
 //!
-//! The central function [`create_inlay_hint`] constructs an [`InlayHint`] for
-//! one dependency using metadata from the version cache.  Status labels follow
-//! a strict priority order:
+//! The central function [`crate::providers::inlay_hints::create_inlay_hint`]
+//! constructs an [`tower_lsp::lsp_types::InlayHint`] for one dependency using
+//! metadata from the version cache.  Status labels follow a strict priority
+//! order:
 //!
 //! 1. **Local/path dependency** — `→ Local` (no registry lookup performed).
 //! 2. **Yanked version** — `⊘ Yanked [→ latest]`.
@@ -12,8 +13,11 @@
 //! 6. **Update available** — `→ X.Y.Z`.
 //! 7. **Unknown** — `? Unknown` (registry unreachable, package not found, etc.).
 //!
-//! Pure helper functions [`is_local_dependency`], [`compare_versions`], and
-//! [`normalize_version`] are public so other providers and tests can reuse them.
+//! Pure helper functions
+//! [`crate::providers::inlay_hints::is_local_dependency`],
+//! [`crate::providers::inlay_hints::compare_versions`], and
+//! [`crate::providers::inlay_hints::normalize_version`] are public so other
+//! providers and tests can reuse them.
 
 use core::fmt::{self, Write};
 

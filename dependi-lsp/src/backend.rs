@@ -1,18 +1,19 @@
 //! LSP backend — the central [`LanguageServer`](tower_lsp::LanguageServer) implementation.
 //!
-//! [`DependiBackend`] owns all shared state and routes LSP notifications and
-//! requests to the appropriate parsers, registry clients, and providers. The
-//! public surface is intentionally small: callers construct the backend with
-//! [`DependiBackend::new`] (or [`DependiBackend::with_http_client`] for tests)
-//! and hand it to [`tower_lsp::LspService::new`].
+//! [`crate::backend::DependiBackend`] owns all shared state and routes LSP
+//! notifications and requests to the appropriate parsers, registry clients,
+//! and providers. The public surface is intentionally small: callers construct
+//! the backend with [`crate::backend::DependiBackend::new`] (or
+//! [`crate::backend::DependiBackend::with_http_client`] for tests) and hand it
+//! to [`tower_lsp::LspService::new`].
 //!
 //! # Concurrency model
 //!
 //! All mutable state is shared via `Arc`. Most collections use
 //! [`dashmap::DashMap`] for lock-free concurrent access. Fields that require
 //! full replacement at runtime (e.g. `osv_client`, `advisory_cache`) are
-//! wrapped in [`tokio::sync::RwLock`] so [`DependiBackend`]`::initialize` can
-//! atomically swap in a reconfigured instance. The backend itself is `Clone`
+//! wrapped in [`tokio::sync::RwLock`] so [`crate::backend::DependiBackend`]`::initialize`
+//! can atomically swap in a reconfigured instance. The backend itself is `Clone`
 //! only in the sense that tower-lsp clones the handler type; each clone shares
 //! the same underlying `Arc` handles — there is no deep copy.
 //!

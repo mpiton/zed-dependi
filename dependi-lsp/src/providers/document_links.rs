@@ -1,8 +1,9 @@
 //! Document link provider — returns clickable links on dependency names.
 //!
-//! [`create_document_links`] maps each parsed [`Dependency`] to an LSP
-//! [`DocumentLink`] whose target URL points to the package page on the
-//! appropriate registry (crates.io, npm, PyPI, etc.).
+//! [`crate::providers::document_links::create_document_links`] maps each
+//! parsed [`crate::parsers::Dependency`] to an LSP
+//! [`tower_lsp::lsp_types::DocumentLink`] whose target URL points to the
+//! package page on the appropriate registry (crates.io, npm, PyPI, etc.).
 //! Dependencies from alternative/private registries are skipped because their
 //! registry URL is not reliably known.
 

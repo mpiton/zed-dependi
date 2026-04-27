@@ -1,10 +1,11 @@
 //! Completion provider for dependency version suggestions.
 //!
-//! When the cursor is positioned inside a version field, [`get_completions`]
-//! returns up to ten recent versions as [`CompletionItem`] entries, ordered
+//! When the cursor is positioned inside a version field,
+//! [`crate::providers::completion::get_completions`] returns up to ten recent
+//! versions as [`tower_lsp::lsp_types::CompletionItem`] entries, ordered
 //! newest-first.  Each item includes the version string, an optional release
-//! age computed by [`fmt_release_age`], and a Markdown documentation block
-//! that marks the latest stable version.
+//! age computed by [`crate::providers::completion::fmt_release_age`], and a
+//! Markdown documentation block that marks the latest stable version.
 
 use core::fmt::{self, Write};
 

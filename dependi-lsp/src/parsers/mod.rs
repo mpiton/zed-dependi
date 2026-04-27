@@ -1,25 +1,25 @@
-//! Shared types and the [`Parser`] trait used by all manifest parsers.
+//! Shared types and the [`crate::parsers::Parser`] trait used by all manifest parsers.
 //!
 //! Each ecosystem parser lives in its own sub-module and produces a
-//! `Vec<`[`Dependency`]`>` from the raw file content.  Span information
-//! (`name_span` / `version_span`) is always anchored to the *inner* text of
-//! each token so that LSP quick-fix [`tower_lsp::lsp_types::TextEdit`]s
-//! replace just the package name or version literal without touching
-//! surrounding quotes or syntax.
+//! `Vec<`[`crate::parsers::Dependency`]`>` from the raw file content.  Span
+//! information (`name_span` / `version_span`) is always anchored to the *inner*
+//! text of each token so that LSP quick-fix
+//! [`tower_lsp::lsp_types::TextEdit`]s replace just the package name or
+//! version literal without touching surrounding quotes or syntax.
 //!
 //! # Supported ecosystems
 //!
 //! | Module | File | Registry |
 //! |--------|------|----------|
-//! | [`cargo`] | `Cargo.toml` | crates.io |
-//! | [`npm`] | `package.json` | npm |
-//! | [`python`] | `requirements.txt`, `pyproject.toml`, `hatch.toml` | PyPI |
-//! | [`go`] | `go.mod` | proxy.golang.org |
-//! | [`php`] | `composer.json` | Packagist |
-//! | [`dart`] | `pubspec.yaml` | pub.dev |
-//! | [`csharp`] | `*.csproj` | NuGet |
-//! | [`ruby`] | `Gemfile` | RubyGems |
-//! | [`maven`] | `pom.xml` | Maven Central |
+//! | [`crate::parsers::cargo`] | `Cargo.toml` | crates.io |
+//! | [`crate::parsers::npm`] | `package.json` | npm |
+//! | [`crate::parsers::python`] | `requirements.txt`, `pyproject.toml`, `hatch.toml` | PyPI |
+//! | [`crate::parsers::go`] | `go.mod` | proxy.golang.org |
+//! | [`crate::parsers::php`] | `composer.json` | Packagist |
+//! | [`crate::parsers::dart`] | `pubspec.yaml` | pub.dev |
+//! | [`crate::parsers::csharp`] | `*.csproj` | NuGet |
+//! | [`crate::parsers::ruby`] | `Gemfile` | RubyGems |
+//! | [`crate::parsers::maven`] | `pom.xml` | Maven Central |
 
 use tower_lsp::lsp_types;
 

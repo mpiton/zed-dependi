@@ -1,8 +1,9 @@
 //! Code actions provider for updating dependencies.
 //!
-//! Exposes [`create_code_actions`] which produces LSP [`CodeActionOrCommand`]
-//! items for a cursor range in a dependency manifest.  Three kinds of actions
-//! are possible:
+//! Exposes [`crate::providers::code_actions::create_code_actions`] which
+//! produces LSP [`tower_lsp::lsp_types::CodeActionOrCommand`] items for a
+//! cursor range in a dependency manifest.  Three kinds of actions are
+//! possible:
 //!
 //! - **Update to X.Y.Z** — one per outdated, non-ignored, non-property-reference
 //!   dependency whose version span overlaps the requested range.
