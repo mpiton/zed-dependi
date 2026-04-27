@@ -59,6 +59,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- Refactored `process_document` lockfile resolution into a new
+  `LockfileResolver` trait + 8 ecosystem implementations (Cargo, npm,
+  Python, Go, PHP, Dart, C#, Ruby). Removes ~440 lines of duplicated
+  code from `backend.rs` and routes all ecosystems through a single
+  `select_resolver` + `resolve_versions_from_lockfile` code path. Behavior is preserved (silent failure on parse error, identical
+  `tracing::debug!` logs, `lockfile_graph` still populated for downstream
+  vulnerability attribution) and Cargo multi-version disambiguation via
+  `[package].name` is upheld through a dedicated `CargoResolver::resolve_version`
+  override. Adds 9 end-to-end integration tests covering all ecosystems plus
+  Maven (returns `None` as expected)
+  ([#239](https://github.com/mpiton/zed-dependi/issues/239))
 - Cache traits (`ReadCache`, `WriteCache`) are now async (AFIT). The SQLite cache offloads blocking `rusqlite` work to `tokio::task::spawn_blocking`, keeping the LSP event loop responsive under load. Reduces tail latency on operations that hit the persistent cache. (#235)
 - Bump `hashbrown` from 0.16.1 to 0.17.0 (purely additive release, hashbrown MSRV 1.85 ≤ project MSRV 1.94)
 - Bump `tokio` constraint from 1.50 to 1.52 in `dependi-lsp/Cargo.toml` (lockfile resolves 1.52.1; patch + minor, backwards compatible)
