@@ -244,15 +244,6 @@ async fn run_scan(
         }
     }
 
-    fn cargo_root_package_name(manifest_content: &str) -> Option<String> {
-        let value: toml::Value = toml::from_str(manifest_content).ok()?;
-        value
-            .get("package")?
-            .get("name")?
-            .as_str()
-            .map(|s| s.to_string())
-    }
-
     // Read file (capped at 50 MiB to prevent hostile large inputs)
     let content = match read_lockfile_capped(&file).await {
         Ok(c) => c,
@@ -366,7 +357,7 @@ async fn run_scan(
     // For Cargo, use parse_cargo_lock (HashMap) which correctly disambiguates multi-version
     // crates via the root package's dep list.  For other ecosystems, derive from the graph.
     let version_map: HashMap<String, String> = if let Some(ref lock_content) = cargo_lock_content {
-        let root_name = cargo_root_package_name(&content);
+        let root_name = dependi_lsp::parsers::cargo::cargo_root_package_name(&content);
         cargo_lock::parse_cargo_lock(lock_content, root_name.as_deref())
     } else {
         lockfile_graph

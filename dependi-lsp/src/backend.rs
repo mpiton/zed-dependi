@@ -73,17 +73,6 @@ async fn find_workspace_root(file_path: &std::path::Path) -> Option<std::path::P
     None
 }
 
-/// Extract the `[package].name` field from a Cargo.toml manifest.
-/// Used to pass the root package name to `parse_cargo_lock` for multi-version disambiguation.
-fn cargo_root_package_name(manifest_content: &str) -> Option<String> {
-    let value: toml::Value = toml::from_str(manifest_content).ok()?;
-    value
-        .get("package")?
-        .get("name")?
-        .as_str()
-        .map(|s| s.to_string())
-}
-
 /// Compute cache key for a dependency, including registry for Cargo alternative registries.
 ///
 /// For Cargo deps with `registry = "name"`, the key is `crates:{registry}:{name}` to avoid
@@ -170,7 +159,7 @@ impl ProcessingContext {
                     // Use parse_cargo_lock (HashMap) for resolution: it correctly
                     // disambiguates multi-version crates via the root package's dep list.
                     // parse_cargo_lock_graph is kept for the transitive walk below.
-                    let root_name = cargo_root_package_name(content);
+                    let root_name = crate::parsers::cargo::cargo_root_package_name(content);
                     let version_map = crate::parsers::cargo_lock::parse_cargo_lock(
                         &lock_content,
                         root_name.as_deref(),
