@@ -1,8 +1,18 @@
-//! Parser for PHP Composer files (composer.json)
+//! Parser for PHP Composer files (`composer.json`).
 //!
 //! Uses `json-spanned-value` for span tracking; the PHP-specific filter rules
 //! (skip `php` and `ext-*` keys) are applied before any work is done with the
 //! span info.
+//!
+//! The following sections are recognised:
+//!
+//! | JSON key | `dev` |
+//! |----------|-------|
+//! | `require` | `false` |
+//! | `require-dev` | `true` |
+//!
+//! Platform requirements (`"php"` key and any key starting with `"ext-"`) are
+//! silently ignored as they do not correspond to Packagist packages.
 
 use json_spanned_value as jsv;
 use json_spanned_value::spanned;
@@ -10,11 +20,25 @@ use json_spanned_value::spanned;
 use super::json_spans::{LineIndex, string_inner_to_span};
 use super::{Dependency, Parser};
 
-/// Parser for PHP composer.json dependency files.
+/// Parser for PHP `composer.json` dependency files.
+///
+/// # Examples
+///
+/// ```
+/// use dependi_lsp::parsers::Parser;
+/// use dependi_lsp::parsers::php::PhpParser;
+/// let parser = PhpParser::new();
+/// let content = r#"{"require": {"laravel/framework": "^10.0"}}"#;
+/// let deps = parser.parse(content);
+/// assert_eq!(deps.len(), 1);
+/// assert_eq!(deps[0].name, "laravel/framework");
+/// assert_eq!(deps[0].version, "^10.0");
+/// ```
 #[derive(Debug, Default)]
 pub struct PhpParser;
 
 impl PhpParser {
+    /// Creates a new [`PhpParser`] instance.
     pub fn new() -> Self {
         Self
     }
@@ -36,6 +60,10 @@ impl Parser for PhpParser {
     }
 }
 
+/// Looks up `section_name` in `root` and appends each entry to `dependencies`.
+///
+/// Keys equal to `"php"` or starting with `"ext-"` are skipped.
+/// Entries whose name and version spans fall on different lines are also skipped.
 fn parse_section(
     root: &spanned::Object,
     section_name: &str,
