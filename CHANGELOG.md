@@ -248,6 +248,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   collapse to a bare host after stripping a trailing `.git`
   ([#230](https://github.com/mpiton/zed-dependi/issues/230), CWE-20).
 
+### Documentation
+
+- Add comprehensive Rustdoc comments to `dependi-lsp` core modules
+  (`lib.rs`, `backend.rs`, `parsers/`, `providers/`): every public item
+  now has `///` docs covering summary, parameters, return value, errors,
+  and panics where applicable; every module file has a `//!` header; 43
+  doctests added on pure functions across manifest parsers, lockfile
+  parsers, and provider helpers
+  ([#231](https://github.com/mpiton/zed-dependi/issues/231)).
+
 ## [1.7.0] - 2026-04-07
 
 ### Added
