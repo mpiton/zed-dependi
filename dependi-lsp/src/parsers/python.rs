@@ -278,6 +278,19 @@ fn node_to_span(node: &Node, line_ranges: &[TextRange]) -> Option<Span> {
     })
 }
 
+/// Convert an arbitrary `TextRange` to a `Span`. Used for raw key ranges.
+fn range_to_span(range: TextRange, line_ranges: &[TextRange]) -> Option<Span> {
+    let line_idx = line_ranges
+        .binary_search_by(|line_range| line_range.ordering(range))
+        .ok()?;
+    let line_range = line_ranges[line_idx];
+    Some(Span {
+        line: line_idx as u32,
+        line_start: (range.start() - line_range.start()).into(),
+        line_end: (range.end() - line_range.start()).into(),
+    })
+}
+
 /// Parse pyproject.toml format (PEP 621 + Poetry + Hatch)
 fn parse_pyproject_toml(content: &str) -> Vec<Dependency> {
     let mut dependencies = Vec::new();
@@ -308,24 +321,7 @@ fn parse_pyproject_toml(content: &str) -> Vec<Dependency> {
     let tool = dom.get("tool");
     let poetry = tool.get("poetry");
     if let Some(poetry_table) = poetry.as_table() {
-        // [tool.poetry.dependencies]
-        let deps_node = poetry.get("dependencies");
-        if let Some(deps_table) = deps_node.as_table() {
-            let entries = deps_table.entries().read();
-            for (key, value) in entries.iter() {
-                let name = key.value().to_string();
-                // Skip python itself
-                if name == "python" {
-                    continue;
-                }
-                if let Some((version, optional)) = extract_poetry_version_taplo(value)
-                    && let Some(dep) =
-                        find_poetry_dependency_position(content, &name, &version, false, optional)
-                {
-                    dependencies.push(dep);
-                }
-            }
-        }
+        parse_poetry_main(&dom, &line_ranges, &mut dependencies);
 
         // [tool.poetry.dev-dependencies] (Poetry < 1.2)
         let dev_deps_node = poetry.get("dev-dependencies");
@@ -487,6 +483,45 @@ fn parse_pep621_optional(dom: &Node, line_ranges: &[TextRange], deps: &mut Vec<D
                 resolved_version: None,
             });
         }
+    }
+}
+
+/// Parse `[tool.poetry.dependencies]` table.
+/// Skips the `python` key (Python interpreter constraint, not a dependency).
+fn parse_poetry_main(dom: &Node, line_ranges: &[TextRange], deps: &mut Vec<Dependency>) {
+    let deps_node = dom.get("tool").get("poetry").get("dependencies");
+    let Some(deps_table) = deps_node.as_table() else {
+        return;
+    };
+    let entries = deps_table.entries().read();
+    for (key, value) in entries.iter() {
+        let name = key.value().to_string();
+        if name == "python" {
+            continue;
+        }
+        let Some((version, optional)) = extract_poetry_version_taplo(value) else {
+            continue;
+        };
+        let Some(name_span) = key
+            .syntax()
+            .map(SyntaxElement::text_range)
+            .and_then(|r| range_to_span(r, line_ranges))
+        else {
+            continue;
+        };
+        let Some(version_span) = node_to_span(value, line_ranges) else {
+            continue;
+        };
+        deps.push(Dependency {
+            name,
+            version,
+            name_span,
+            version_span,
+            dev: false,
+            optional,
+            registry: None,
+            resolved_version: None,
+        });
     }
 }
 
