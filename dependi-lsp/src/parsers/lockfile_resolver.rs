@@ -69,6 +69,7 @@ pub async fn select_resolver(
                 crate::parsers::python_lock::find_python_lockfile(manifest_path, preferred).await?;
             Some(Box::new(crate::parsers::python_lock::PythonResolver { lock_path, sub }))
         }
+        FileType::Go => Some(Box::new(crate::parsers::go_sum::GoResolver)),
         FileType::Maven => None,
         _ => None,
     }
