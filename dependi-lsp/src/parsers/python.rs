@@ -1,6 +1,9 @@
 //! Parser for Python dependency files (requirements.txt, constraints.txt, pyproject.toml, hatch.toml)
 
+use taplo::dom::Node;
+use taplo::dom::node::DomNode;
 use taplo::rowan::TextRange;
+use taplo::syntax::SyntaxElement;
 
 use super::{Dependency, Parser, Span};
 
@@ -257,6 +260,24 @@ fn compute_line_ranges(content: &str) -> Box<[TextRange]> {
         .collect::<Box<[_]>>()
 }
 
+/// Convert a taplo DOM node's byte range into a 0-indexed line/column `Span`.
+///
+/// Returns `None` when the node lacks syntax info (synthetic/detached) or when
+/// the byte range straddles multiple lines (should not occur for the value
+/// nodes we resolve, but guards against malformed input).
+fn node_to_span(node: &Node, line_ranges: &[TextRange]) -> Option<Span> {
+    let range = node.syntax().map(SyntaxElement::text_range)?;
+    let line_idx = line_ranges
+        .binary_search_by(|line_range| line_range.ordering(range))
+        .ok()?;
+    let line_range = line_ranges[line_idx];
+    Some(Span {
+        line: line_idx as u32,
+        line_start: (range.start() - line_range.start()).into(),
+        line_end: (range.end() - line_range.start()).into(),
+    })
+}
+
 /// Parse pyproject.toml format (PEP 621 + Poetry + Hatch)
 fn parse_pyproject_toml(content: &str) -> Vec<Dependency> {
     let mut dependencies = Vec::new();
@@ -271,6 +292,7 @@ fn parse_pyproject_toml(content: &str) -> Vec<Dependency> {
 
     let dom = parsed.into_dom();
     let _line_ranges = compute_line_ranges(content);
+    let _ = node_to_span;
 
     // PEP 621: [project.dependencies] array of strings
     let project = dom.get("project");
@@ -1402,5 +1424,22 @@ dependencies = ["ruff>=0.1.0"]
         assert_eq!(u32::from(ranges[1].end()), 7); // "de\n" = 3 bytes
         assert_eq!(u32::from(ranges[2].start()), 7);
         assert_eq!(u32::from(ranges[2].end()), 11); // "fghi" = 4 bytes
+    }
+
+    #[test]
+    fn test_node_to_span_resolves_string_value() {
+        let content = "[tool.poetry.dependencies]\nrequests = \"^2.0.0\"\n";
+        let parsed = taplo::parser::parse(content);
+        let dom = parsed.into_dom();
+        let line_ranges = compute_line_ranges(content);
+
+        let value_node = dom
+            .get("tool")
+            .get("poetry")
+            .get("dependencies")
+            .get("requests");
+        let span = node_to_span(&value_node, &line_ranges).expect("span");
+        assert_eq!(span.line, 1, "value lives on second line");
+        assert!(span.line_end > span.line_start);
     }
 }
