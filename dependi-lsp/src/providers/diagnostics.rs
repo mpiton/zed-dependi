@@ -1,16 +1,18 @@
 //! Diagnostic provider for dependency manifests.
 //!
 //! [`crate::providers::diagnostics::create_diagnostics`] is the main entry
-//! point.  It iterates over a parsed dependency list and, for each
-//! non-ignored entry, emits at most one LSP
-//! [`tower_lsp::lsp_types::Diagnostic`] chosen by the following priority
-//! order:
+//! point. For each non-ignored dependency it consults the version cache once
+//! and may push one or two LSP
+//! [`tower_lsp::lsp_types::Diagnostic`] entries: an optional **outdated**
+//! hint (`Update available: X → Y`) plus, when applicable, exactly one of the
+//! higher-severity diagnostics below — picked in this priority order:
 //!
-//! 1. **Local/path dependency** — informational `→ Local` hint.
-//! 2. **Yanked version** — warning with a link to the registry page.
-//! 3. **Deprecated package** — warning with optional homepage / repository links.
-//! 4. **Vulnerability summary** — error/warning/hint depending on max severity.
-//! 5. **Outdated version** — hint `Update available: X → Y`.
+//! 1. **Yanked version** — warning with a link to the registry page.
+//! 2. **Deprecated package** — warning with optional homepage / repository links.
+//! 3. **Vulnerability summary** — error/warning/hint depending on max severity.
+//!
+//! Local / path dependencies short-circuit the whole pipeline and contribute
+//! no diagnostic (only an inlay hint, handled elsewhere).
 //!
 //! Helper function
 //! [`crate::providers::diagnostics::build_transitive_summary_message`] is
@@ -30,8 +32,9 @@ use crate::utils::fmt_truncate_string;
 /// Build LSP diagnostics for the given dependency list.
 ///
 /// For each non-ignored dependency the function performs a single cache lookup
-/// and produces at most one [`Diagnostic`] following the priority order
-/// documented in the [module level docs](self).
+/// and may emit an outdated-version hint plus, when applicable, one
+/// higher-severity diagnostic (yanked, deprecated, or vulnerability summary)
+/// following the priority order documented in the [module level docs](self).
 ///
 /// # Parameters
 ///

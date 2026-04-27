@@ -14,7 +14,9 @@ use crate::parsers::lockfile_resolver::LockfileResolver;
 /// `go.sum` format: `<module> <version>[/go.mod] <hash>`
 ///
 /// Lines whose version string ends with `/go.mod` are skipped to avoid
-/// duplicates — only the `h1:` (tree hash) lines contribute a version entry.
+/// duplicates with the matching tree-hash line; every other entry contributes
+/// a version regardless of its hash prefix (typically `h1:`, but the parser
+/// does not inspect or validate the hash type).
 ///
 /// Go 1.17+ with lazy module loading may record multiple versions of the same
 /// module (direct + transitive at different versions). All non-`/go.mod`
@@ -28,7 +30,7 @@ use crate::parsers::lockfile_resolver::LockfileResolver;
 /// let sum = "github.com/pkg/errors v0.9.1 h1:abc=\n\
 ///            github.com/pkg/errors v0.9.1/go.mod h1:def=\n";
 /// let map = parse_go_sum(sum);
-/// // /go.mod line is skipped; only the h1: line contributes.
+/// // /go.mod line is skipped; the tree-hash line contributes the version.
 /// assert_eq!(map.get("github.com/pkg/errors").unwrap().as_slice(), &["v0.9.1"]);
 /// ```
 pub fn parse_go_sum(content: &str) -> HashMap<String, Vec<String>> {

@@ -32,7 +32,8 @@ pub fn normalize_nuget_name(name: &str) -> String {
 /// package names to objects with a `"resolved"` version field. Both `"Direct"`
 /// and `"Transitive"` entries are included. Names are normalized to lowercase
 /// since NuGet is case-insensitive. When a package appears in multiple target
-/// frameworks, the first entry is kept.
+/// frameworks, the first entry encountered during JSON object iteration order
+/// is kept.
 ///
 /// # Examples
 ///

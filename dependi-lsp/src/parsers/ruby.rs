@@ -93,8 +93,14 @@ impl Parser for RubyParser {
 
 /// Parses a `gem` declaration line and returns the corresponding [`Dependency`].
 ///
-/// Handles both `gem 'name', 'version'` and `gem('name', 'version')` forms.
-/// Returns `None` when the line does not start with `gem` or has no version string.
+/// Single-line declarations only: the line must start (after trimming) with
+/// the exact prefix `gem(` or `gem ` (one ASCII space). Variants such as
+/// `gem ('name', ...)` (space before `(`) or `gem\t'name'` (tab after `gem`)
+/// are not recognised. The argument list is then parsed by
+/// [`parse_gem_args`] / [`parse_quoted_string`].
+///
+/// Returns `None` when the line does not match either prefix or has no
+/// version string.
 fn parse_gem_declaration(line: &str, line_num: u32, dev: bool) -> Option<Dependency> {
     let trimmed = line.trim();
 

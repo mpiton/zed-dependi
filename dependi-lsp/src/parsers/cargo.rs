@@ -24,9 +24,15 @@ use super::{Dependency, Parser, Span};
 
 /// Extracts the `[package].name` field from a `Cargo.toml` manifest.
 ///
-/// Returns `None` for virtual workspaces (manifests with no `[package]` section)
-/// or when the TOML is malformed.  The value is forwarded to the lock-file
-/// resolver for multi-version disambiguation.
+/// Returns `None` when:
+///
+/// - The TOML is malformed and cannot be parsed.
+/// - The manifest is a virtual workspace (no `[package]` section).
+/// - `[package]` exists but `name` is missing.
+/// - `[package].name` is present but not a string (e.g. an array).
+///
+/// The value is forwarded to the lock-file resolver for multi-version
+/// disambiguation.
 ///
 /// # Examples
 ///

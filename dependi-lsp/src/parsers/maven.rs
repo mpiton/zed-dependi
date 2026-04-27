@@ -85,6 +85,11 @@ fn line_offsets(content: &str) -> Vec<usize> {
 /// Converts a flat `byte_offset` to `(line, column)`, both 0-indexed.
 ///
 /// Uses a binary search over the `offsets` table produced by [`line_offsets`].
+///
+/// **Precondition:** `offsets` must be non-empty and `byte_offset` must be a
+/// valid index into the same buffer that produced `offsets` (i.e. `0 ..=
+/// content.len()`). Out-of-bounds offsets are clamped via `saturating_sub` and
+/// will return the last known line, but the resulting column is meaningless.
 fn offset_to_position(offsets: &[usize], byte_offset: usize) -> (u32, u32) {
     let line_idx = match offsets.binary_search(&byte_offset) {
         Ok(i) => i,

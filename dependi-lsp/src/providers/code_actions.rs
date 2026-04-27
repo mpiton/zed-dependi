@@ -443,7 +443,9 @@ async fn create_update_all_action(
 fn format_version(version: &str, file_type: FileType) -> String {
     match file_type {
         FileType::Cargo | FileType::Npm | FileType::Php => {
-            // Keep the version as-is - the range already includes the quotes in these formats
+            // Keep the version as-is. version_span covers the inner token text
+            // only (no surrounding quotes), so callers replace just the version
+            // literal and the existing quote pair is preserved.
             version.to_string()
         }
         FileType::Python => {

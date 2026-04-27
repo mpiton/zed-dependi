@@ -84,7 +84,10 @@ fn is_tool_section(line: &str, tool: &str) -> bool {
 /// manifest-derived tool detection to override the static priority list.
 ///
 /// Uses async I/O to avoid blocking the Tokio executor on slow or networked filesystems.
-/// Stops after 10 levels to prevent infinite traversal on unusual file systems.
+///
+/// Walks at most `MAX_DEPTH = 10` directories — the manifest's parent counts as
+/// the first level, so the search inspects the start directory plus up to 9
+/// ancestor directories before giving up.
 pub async fn find_python_lockfile(
     manifest_path: &Path,
     preferred: Option<PythonLockfileType>,

@@ -129,8 +129,11 @@ pub async fn select_resolver(
 ///
 /// # Returns
 ///
-/// `Some(Arc<LockfileGraph>)` on success so that downstream consumers (e.g.,
-/// vulnerability attribution) can reuse the already-parsed graph.
+/// `Some(Arc<LockfileGraph>)` whenever the lockfile is located and read
+/// successfully, so downstream consumers (e.g., vulnerability attribution) can
+/// reuse the already-parsed graph. The wrapped graph may still be empty — most
+/// resolvers swallow parse failures silently and return an empty
+/// [`LockfileGraph`] rather than propagating the error.
 /// Returns `None` when no lockfile is found or the lockfile cannot be read.
 pub async fn resolve_versions_from_lockfile(
     dependencies: &mut [Dependency],

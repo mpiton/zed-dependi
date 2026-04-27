@@ -63,6 +63,7 @@ impl Parser for PhpParser {
 /// Looks up `section_name` in `root` and appends each entry to `dependencies`.
 ///
 /// Keys equal to `"php"` or starting with `"ext-"` are skipped.
+/// Entries whose version is not a JSON string are skipped.
 /// Entries whose name and version spans fall on different lines are also skipped.
 fn parse_section(
     root: &spanned::Object,

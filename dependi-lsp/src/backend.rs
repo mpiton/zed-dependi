@@ -10,12 +10,15 @@
 //! # Concurrency model
 //!
 //! All mutable state is shared via `Arc`. Most collections use
-//! [`dashmap::DashMap`] for lock-free concurrent access. Fields that require
-//! full replacement at runtime (e.g. `osv_client`, `advisory_cache`) are
-//! wrapped in [`tokio::sync::RwLock`] so [`crate::backend::DependiBackend`]`::initialize`
-//! can atomically swap in a reconfigured instance. The backend itself is `Clone`
-//! only in the sense that tower-lsp clones the handler type; each clone shares
-//! the same underlying `Arc` handles — there is no deep copy.
+//! [`dashmap::DashMap`] — a sharded `RwLock`-backed concurrent hashmap that
+//! lets disjoint shards proceed in parallel without locking the whole map.
+//! Fields that require full replacement at runtime (e.g. `osv_client`,
+//! `advisory_cache`) are wrapped in [`tokio::sync::RwLock`]; each is swapped
+//! atomically on its own when [`crate::backend::DependiBackend`]`::initialize`
+//! reconfigures the server, but the swaps happen sequentially — there is no
+//! single global atomic replacement of the runtime. The backend itself is
+//! `Clone` only in the sense that tower-lsp clones the handler type; each
+//! clone shares the same underlying `Arc` handles — there is no deep copy.
 //!
 //! Document processing is debounced: `did_change` spawns a [`tokio`] task that
 //! waits for a configurable idle period before calling the full

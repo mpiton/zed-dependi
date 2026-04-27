@@ -58,16 +58,18 @@ pub struct Dependency {
 
 /// A half-open byte range within a single source line.
 ///
-/// Both `line_start` and `line_end` are 0-indexed character offsets measured
-/// from the beginning of the line (not the file), and the range is end-exclusive:
-/// `line[line_start..line_end]` yields the covered text.
+/// `line_start` and `line_end` are 0-indexed **byte** offsets measured from the
+/// beginning of the line (not the file). The range is end-exclusive:
+/// `line[line_start..line_end]` yields the covered text. ASCII input therefore
+/// maps 1:1 to LSP UTF-16 character offsets, but non-ASCII content is not
+/// transcoded — callers that need exact LSP character columns must convert.
 #[derive(Debug, Clone, Copy)]
 pub struct Span {
     /// 0-indexed line number within the file.
     pub line: u32,
-    /// 0-indexed column of the first character (inclusive).
+    /// 0-indexed byte offset of the first byte (inclusive).
     pub line_start: u32,
-    /// 0-indexed column one past the last character (exclusive).
+    /// 0-indexed byte offset one past the last byte (exclusive).
     pub line_end: u32,
 }
 

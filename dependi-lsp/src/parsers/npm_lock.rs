@@ -577,9 +577,8 @@ fn split_pnpm_key(key: &str) -> Option<(String, String)> {
 
 /// Parse a `yarn.lock` (Yarn Classic v1 format) into a [`LockfileGraph`].
 ///
-/// Yarn Berry v2+ uses a different YAML-based format and is not handled here.
-/// For version-only extraction that also covers Berry, use the private
-/// `parse_yarn_lock` helper (called internally by `NpmResolver::parse_graph`).
+/// Yarn Berry v2+ uses a different YAML-based format and is not handled by
+/// this entry point.
 ///
 /// # Examples
 ///
