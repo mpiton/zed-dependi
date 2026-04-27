@@ -233,12 +233,16 @@ mod tests {
     #[test]
     fn test_same_name_in_require_and_require_dev() {
         let parser = PhpParser::new();
+        // Same name AND same version pinned in both sections — worst case
+        // for the legacy string scan: version-based disambiguation cannot
+        // tell the two entries apart when both versions match. Span-aware
+        // parsing must still place each entry on its own line.
         let content = r#"{
   "require": {
     "vendor/foo": "1.0.0"
   },
   "require-dev": {
-    "vendor/foo": "2.0.0"
+    "vendor/foo": "1.0.0"
   }
 }"#;
         let deps = parser.parse(content);
@@ -247,7 +251,7 @@ mod tests {
         let prod = deps.iter().find(|d| !d.dev).unwrap();
         let dev = deps.iter().find(|d| d.dev).unwrap();
         assert_eq!(prod.version, "1.0.0");
-        assert_eq!(dev.version, "2.0.0");
+        assert_eq!(dev.version, "1.0.0");
         assert_ne!(prod.name_span.line, dev.name_span.line);
     }
 
