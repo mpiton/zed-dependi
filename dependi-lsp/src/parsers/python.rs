@@ -1212,4 +1212,21 @@ pytest = "^7.0.0"
         let pytest = deps.iter().find(|d| d.name == "pytest").expect("pytest missing");
         assert!(pytest.dev, "pytest in [group.test] must be dev=true");
     }
+
+    #[test]
+    fn test_pyproject_poetry_groups_custom() {
+        let content = r#"
+[tool.poetry]
+name = "x"
+version = "0.1.0"
+
+[tool.poetry.group.docs.dependencies]
+mkdocs = "^1.5.0"
+"#;
+        let parser = PythonParser::new();
+        let deps = parser.parse(content);
+        let mkdocs = deps.iter().find(|d| d.name == "mkdocs").expect("mkdocs missing");
+        assert!(!mkdocs.dev, "mkdocs in [group.docs] must be dev=false");
+        assert!(!mkdocs.optional);
+    }
 }
