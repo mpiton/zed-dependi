@@ -1,7 +1,23 @@
-//! Parser for package.json files
+//! Parser for npm `package.json` files.
 //!
 //! Uses `json-spanned-value` to obtain dependency name/version spans directly
 //! from the parser output, removing the need for a manual string scan.
+//! This approach correctly handles packages whose name or version appears more
+//! than once in the file (e.g. a package pinned to the same version in both
+//! `dependencies` and `devDependencies`).
+//!
+//! The following sections are recognised:
+//!
+//! | JSON key | `dev` | `optional` |
+//! |----------|-------|------------|
+//! | `dependencies` | `false` | `false` |
+//! | `devDependencies` | `true` | `false` |
+//! | `peerDependencies` | `false` | `true` |
+//! | `optionalDependencies` | `false` | `true` |
+//!
+//! Both plain string values (`"^1.0"`) and single-field object values
+//! (`{ "version": "^1.0" }`) are supported as long as the `"version"` key
+//! appears on the same line as the surrounding package-name key.
 
 use json_spanned_value as jsv;
 use json_spanned_value::spanned;
@@ -9,11 +25,25 @@ use json_spanned_value::spanned;
 use super::json_spans::{LineIndex, string_inner_to_span};
 use super::{Dependency, Parser, Span};
 
-/// Parser for npm package.json dependency files.
+/// Parser for npm `package.json` dependency files.
+///
+/// # Examples
+///
+/// ```
+/// use dependi_lsp::parsers::Parser;
+/// use dependi_lsp::parsers::npm::NpmParser;
+/// let parser = NpmParser::new();
+/// let pkg = r#"{"dependencies": {"lodash": "^4.0.0"}}"#;
+/// let deps = parser.parse(pkg);
+/// assert_eq!(deps.len(), 1);
+/// assert_eq!(deps[0].name, "lodash");
+/// assert_eq!(deps[0].version, "^4.0.0");
+/// ```
 #[derive(Debug, Default)]
 pub struct NpmParser;
 
 impl NpmParser {
+    /// Creates a new [`NpmParser`] instance.
     pub fn new() -> Self {
         Self
     }
@@ -65,7 +95,11 @@ impl Parser for NpmParser {
     }
 }
 
-/// Look up a section in the root object and parse each entry into a `Dependency`.
+/// Looks up a section in the root object and appends each entry to `dependencies`.
+///
+/// Entries whose name and version spans fall on different lines are silently
+/// skipped (multi-line object values that cannot be attributed to a single
+/// source line are out of scope for quick-fix editing).
 fn parse_section(
     root: &spanned::Object,
     section_name: &str,
