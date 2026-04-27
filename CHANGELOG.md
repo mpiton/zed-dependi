@@ -9,6 +9,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- Cache RustSec advisory details fetched from OSV.dev with a hybrid
+  memory + SQLite layer. `check_rustsec_unmaintained` now consults the
+  cache before issuing per-advisory `GET /vulns/{id}` requests, with a
+  24-hour TTL for found advisories and a 1-hour TTL for negative entries
+  (404 from OSV). The cache lives in a separate SQLite database
+  (`~/.cache/dependi/advisory_cache.db`) and is configurable via the new
+  `AdvisoryCacheConfig`. Drastically reduces redundant network requests
+  during repeated Rust dependency scans
+  ([#237](https://github.com/mpiton/zed-dependi/issues/237))
 - `Ignore package "<name>"` quick-fix code action on every dependency. Adds
   the package to `lsp.dependi.initialization_options.ignore` in the workspace
   `.zed/settings.json`, creating the file if it does not exist, deduplicating
@@ -59,6 +68,84 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- Abort the previous advisory cache cleanup tasks when `initialize` rebuilds
+  the runtime, instead of leaking them. `spawn_default_cleanup_task` now
+  returns the `JoinHandle`, the backend tracks the handles in a `Mutex`, and
+  reconfiguration drains-and-aborts before installing the new caches; without
+  this the old tasks kept ticking forever holding `Arc` clones of the
+  replaced memory/SQLite layers
+  ([#237](https://github.com/mpiton/zed-dependi/issues/237))
+- Fall through to the negative cache and network when the positive
+  advisory cache returns `NotFound`, instead of treating it as
+  authoritative. Pre-split builds wrote 404s to the same SQLite layer with
+  the long positive TTL; without this fall-through, an upgrading user
+  would otherwise be stuck with 24 h-stale `NotFound` rows that never
+  retry. Refreshing 200 responses overwrite the stale row via the
+  existing UPSERT
+  ([#237](https://github.com/mpiton/zed-dependi/issues/237))
+- Make `OsvClient::with_endpoint` fallible (`anyhow::Result<Self>`) and
+  drop its `reqwest::Client::new()` fallback. `Client::new()` is itself
+  `Client::builder().build().expect(...)` and panics under the same
+  conditions as the failing `build()`, so the fallback was an illusion.
+  The scan CLI handler logs and returns a non-zero exit code instead of
+  panicking ([#237](https://github.com/mpiton/zed-dependi/issues/237))
+- Reuse the LSP's shared `reqwest::Client` for the `OsvClient` instead of
+  building a second one. The new `OsvClient::with_shared_client_and_caches`
+  takes the already-verified `Arc<Client>` so there is no second TLS
+  builder failure point at startup, and `build_advisory_runtime` is
+  genuinely infallible
+  ([#237](https://github.com/mpiton/zed-dependi/issues/237))
+- Reconfigure the advisory cache trio (`advisory_cache`,
+  `negative_advisory_cache`, `osv_client`) inside `LanguageServer::initialize`
+  once the LSP receives client settings. Previously the caches were built
+  from `Config::default()` at struct-construction time and never replaced,
+  so user overrides for `db_path`, `ttl_secs`, `negative_ttl_secs`, or
+  `enabled` had no runtime effect even though the wiring through
+  `HybridAdvisoryCache::from_config` itself was correct
+  ([#237](https://github.com/mpiton/zed-dependi/issues/237))
+- Create parent directories for a user-supplied `AdvisoryCacheConfig.db_path`
+  before opening SQLite. Without this, a nested override silently degraded
+  to the in-memory layer because `SqliteConnectionManager` could not find
+  the directory ([#237](https://github.com/mpiton/zed-dependi/issues/237))
+- Drop writes when the advisory memory cache is configured with a zero TTL
+  (i.e. `enabled = false`). Previously disabled-cache mode still inserted
+  entries that were immediately expired but kept occupying memory until
+  the cleanup task ran ([#237](https://github.com/mpiton/zed-dependi/issues/237))
+- Offload `MemoryAdvisoryCache::cleanup_expired` from the cleanup loop
+  through `tokio::task::spawn_blocking` so a `DashMap::retain` over a very
+  large cache cannot stall the runtime
+  ([#237](https://github.com/mpiton/zed-dependi/issues/237))
+- Replace the flaky unwritable-path advisory cache test with a deterministic
+  blocker file inside a `tempdir`, removing the dependency on
+  `/this/path/should/not/exist/...` succeeding to fail
+  ([#237](https://github.com/mpiton/zed-dependi/issues/237))
+- Isolate the advisory cache wiring smoke test behind a `tempdir`-scoped
+  `db_path` so a previously persisted `RUSTSEC-2020-0036` row in the user's
+  default cache cannot turn the miss assertion into a flake
+  ([#237](https://github.com/mpiton/zed-dependi/issues/237))
+- Wire `AdvisoryCacheConfig` through `HybridAdvisoryCache::from_config` so
+  user settings (`enabled`, `ttl_secs`, `negative_ttl_secs`, `db_path`)
+  actually take effect; previously the backend instantiated the cache via
+  `HybridAdvisoryCache::new()` and ignored every config field
+  ([#237](https://github.com/mpiton/zed-dependi/issues/237))
+- Apply `negative_ttl_secs` (default 1 h) to OSV 404 responses; they were
+  previously cached on the same 24 h schedule as positive entries, so a
+  brand-new RUSTSEC ID that OSV had not yet ingested stayed hidden for a
+  full day. 404s now live in a separate memory-only negative cache
+  ([#237](https://github.com/mpiton/zed-dependi/issues/237))
+- Preserve the remaining TTL when backfilling the L1 advisory cache from
+  L2: previously every L2 hit re-stamped the memory entry with
+  `Instant::now()` and the full TTL, doubling the effective lifetime for
+  entries already near SQLite expiry
+  ([#237](https://github.com/mpiton/zed-dependi/issues/237))
+- Validate advisory IDs with an ASCII-alphanumeric/`-` whitelist (≤64 chars)
+  before interpolation into URLs and use as cache keys, blocking malformed
+  values returned in OSV responses
+  ([#237](https://github.com/mpiton/zed-dependi/issues/237))
+- Drop the unusable `idx_advisory_expiry` index from the advisory schema:
+  the cleanup query (`WHERE inserted_at + ttl_secs * ? < ?`) cannot use a
+  composite index because of the arithmetic expression
+  ([#237](https://github.com/mpiton/zed-dependi/issues/237))
 - `dependi-lsp scan` now uses `effective_version()` (the resolved lockfile
   version when available) instead of the declared version specifier when
   querying OSV — previously the CLI queried using the specifier string (e.g.

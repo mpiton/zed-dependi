@@ -19,9 +19,15 @@ use dashmap::DashMap;
 
 use crate::registries::VersionInfo;
 
+pub mod advisory;
 pub mod sqlite;
 pub(crate) mod sqlite_manager;
 
+pub use advisory::{
+    ADVISORY_CLEANUP_INTERVAL, AdvisoryCacheStats, AdvisoryKind, AdvisoryReadCache,
+    AdvisoryWriteCache, CachedAdvisory, DEFAULT_ADVISORY_TTL, HybridAdvisoryCache,
+    MemoryAdvisoryCache, NullAdvisoryCache,
+};
 pub use sqlite::SqliteCache;
 
 /// Trait for read-only cache operations

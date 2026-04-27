@@ -7,6 +7,13 @@ use std::path::{Path, PathBuf};
 
 use rusqlite::Connection;
 
+/// Nanoseconds in one second — used to convert `ttl_secs` to the same unit as
+/// `inserted_at` when computing expiration in SQL queries.
+///
+/// Centralised here so both the version cache (`cache::sqlite`) and the
+/// advisory cache (`cache::advisory::sqlite`) share the same definition.
+pub(crate) const NANOS_PER_SEC: i64 = 1_000_000_000;
+
 /// Connection manager for SQLite databases used with r2d2 connection pooling.
 pub struct SqliteConnectionManager {
     path: PathBuf,
@@ -128,5 +135,10 @@ mod tests {
             .query_row("PRAGMA busy_timeout", [], |row| row.get(0))
             .unwrap();
         assert_eq!(busy_timeout, 3000);
+    }
+
+    #[test]
+    fn nanos_per_sec_is_one_billion() {
+        assert_eq!(super::NANOS_PER_SEC, 1_000_000_000);
     }
 }

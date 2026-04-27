@@ -16,6 +16,21 @@ use crate::registries::{Vulnerability, VulnerabilitySeverity};
 const OSV_API_BASE: &str = "https://api.osv.dev/v1";
 const RUSTSEC_ADVISORY_LOOKUP_CONCURRENCY: usize = 5;
 
+/// Maximum length for an OSV advisory ID. Real RUSTSEC IDs are 16 characters
+/// (`RUSTSEC-YYYY-NNNN`); 64 is generous head-room for related schemes.
+const MAX_ADVISORY_ID_LEN: usize = 64;
+
+/// Whitelist sanity check for advisory IDs returned by OSV.
+///
+/// `check_rustsec_unmaintained` interpolates the ID directly into a URL and
+/// uses it as a cache key, so we constrain the alphabet up-front.
+/// Accepts only ASCII alphanumerics and the `-` separator.
+fn is_valid_advisory_id(id: &str) -> bool {
+    !id.is_empty()
+        && id.len() <= MAX_ADVISORY_ID_LEN
+        && id.chars().all(|c| c.is_ascii_alphanumeric() || c == '-')
+}
+
 /// Result of a vulnerability query
 #[derive(Debug, Clone, Default)]
 pub struct QueryResult {
@@ -24,13 +39,42 @@ pub struct QueryResult {
 }
 
 /// OSV.dev API client
+///
+/// Holds two caches because positive and negative OSV results have different
+/// freshness needs: a real RUSTSEC entry is stable for a long time (hours),
+/// but a 404 might just mean OSV has not yet ingested a brand-new advisory,
+/// so we cache it for a much shorter window controlled by
+/// `AdvisoryCacheConfig::negative_ttl_secs`.
 pub struct OsvClient {
     client: Arc<Client>,
     base_url: String,
+    /// Cache used for `Found` advisory entries (long TTL).
+    advisory_cache: Arc<dyn crate::cache::advisory::AdvisoryWriteCache>,
+    /// Cache used for `NotFound` advisory entries (short TTL).
+    negative_cache: Arc<dyn crate::cache::advisory::AdvisoryWriteCache>,
 }
 
 impl OsvClient {
     pub fn new() -> anyhow::Result<Self> {
+        let null: Arc<dyn crate::cache::advisory::AdvisoryWriteCache> =
+            Arc::new(crate::cache::advisory::NullAdvisoryCache);
+        Self::new_with_caches(Arc::clone(&null), null)
+    }
+
+    /// Backwards-compatible constructor: uses the same cache for positive
+    /// and negative entries. Prefer [`OsvClient::new_with_caches`] when the
+    /// caller has separate positive/negative caches with different TTLs.
+    pub fn new_with_cache(
+        advisory_cache: Arc<dyn crate::cache::advisory::AdvisoryWriteCache>,
+    ) -> anyhow::Result<Self> {
+        Self::new_with_caches(Arc::clone(&advisory_cache), advisory_cache)
+    }
+
+    /// Build a client with explicit positive and negative caches.
+    pub fn new_with_caches(
+        positive_cache: Arc<dyn crate::cache::advisory::AdvisoryWriteCache>,
+        negative_cache: Arc<dyn crate::cache::advisory::AdvisoryWriteCache>,
+    ) -> anyhow::Result<Self> {
         let client = Client::builder()
             .user_agent("dependi-lsp (https://github.com/mathieu/zed-dependi)")
             .timeout(Duration::from_secs(30))
@@ -39,20 +83,101 @@ impl OsvClient {
         Ok(Self {
             client: Arc::new(client),
             base_url: OSV_API_BASE.to_string(),
+            advisory_cache: positive_cache,
+            negative_cache,
         })
     }
 
-    /// Constructor used in tests to point the client at a mock server.
-    pub fn with_endpoint(endpoint: String) -> Self {
+    /// Infallible constructor that reuses an already-built `reqwest::Client`
+    /// (typically the LSP's shared HTTP client created via
+    /// `create_shared_client`). Avoids a second TLS/builder-init step that
+    /// could fail or panic at runtime — the caller has proven `reqwest`
+    /// works on this platform by virtue of holding a `Client` already.
+    ///
+    /// Note: drops the OSV-specific 30 s timeout customisation; the shared
+    /// client's default timeout applies. OSV requests are short-lived in
+    /// practice, so this is acceptable.
+    pub fn with_shared_client_and_caches(
+        client: Arc<Client>,
+        positive_cache: Arc<dyn crate::cache::advisory::AdvisoryWriteCache>,
+        negative_cache: Arc<dyn crate::cache::advisory::AdvisoryWriteCache>,
+    ) -> Self {
+        Self {
+            client,
+            base_url: OSV_API_BASE.to_string(),
+            advisory_cache: positive_cache,
+            negative_cache,
+        }
+    }
+
+    /// Build a client pointing at a custom OSV endpoint (no advisory cache).
+    ///
+    /// Used at runtime by the standalone scanner (`OSV_ENDPOINT` env var) and
+    /// by tests to point the client at a mock HTTP server. Returns
+    /// `Err` if `reqwest` cannot build a `Client` (rare TLS/cert issue) —
+    /// previously this fell back to `reqwest::Client::new()`, but that is
+    /// itself `Client::builder().build().expect(...)` and panics under the
+    /// same conditions, so the fallback was an illusion.
+    pub fn with_endpoint(endpoint: String) -> anyhow::Result<Self> {
+        let client = Client::builder().timeout(Duration::from_secs(30)).build()?;
+        let null: Arc<dyn crate::cache::advisory::AdvisoryWriteCache> =
+            Arc::new(crate::cache::advisory::NullAdvisoryCache);
+        Ok(Self {
+            base_url: endpoint,
+            client: Arc::new(client),
+            advisory_cache: Arc::clone(&null),
+            negative_cache: null,
+        })
+    }
+
+    /// Test-only constructor: explicit endpoint **and** advisory cache.
+    ///
+    /// Gated to `#[cfg(test)]` so production code paths cannot accidentally
+    /// inject a `NullAdvisoryCache` here. Runtime callers that need cache
+    /// injection should use [`OsvClient::new_with_cache`] instead.
+    ///
+    /// Reuses `advisory_cache` for both the positive and negative layers;
+    /// tests that need to assert separate behaviour should use
+    /// [`OsvClient::with_endpoint_and_caches`] instead.
+    #[cfg(test)]
+    pub fn with_endpoint_and_cache(
+        endpoint: String,
+        advisory_cache: Arc<dyn crate::cache::advisory::AdvisoryWriteCache>,
+    ) -> Self {
+        Self::with_endpoint_and_caches(endpoint, Arc::clone(&advisory_cache), advisory_cache)
+    }
+
+    /// Test-only constructor: explicit endpoint, positive cache, and
+    /// negative cache. Mirrors [`OsvClient::new_with_caches`] but lets the
+    /// caller pin the URL to a wiremock server.
+    #[cfg(test)]
+    pub fn with_endpoint_and_caches(
+        endpoint: String,
+        positive_cache: Arc<dyn crate::cache::advisory::AdvisoryWriteCache>,
+        negative_cache: Arc<dyn crate::cache::advisory::AdvisoryWriteCache>,
+    ) -> Self {
+        let client = Client::builder()
+            .timeout(Duration::from_secs(30))
+            .build()
+            .unwrap_or_else(|_| Client::new());
         Self {
             base_url: endpoint,
-            client: Arc::new(
-                Client::builder()
-                    .timeout(Duration::from_secs(30))
-                    .build()
-                    .expect("reqwest client should build"),
-            ),
+            client: Arc::new(client),
+            advisory_cache: positive_cache,
+            negative_cache,
         }
+    }
+
+    /// Accessor used by integration tests to verify positive cache state.
+    #[cfg(test)]
+    pub fn advisory_cache(&self) -> &Arc<dyn crate::cache::advisory::AdvisoryWriteCache> {
+        &self.advisory_cache
+    }
+
+    /// Accessor used by integration tests to verify negative cache state.
+    #[cfg(test)]
+    pub fn negative_cache(&self) -> &Arc<dyn crate::cache::advisory::AdvisoryWriteCache> {
+        &self.negative_cache
     }
 
     fn convert_vulnerability(osv: &OsvVulnerability) -> Vulnerability {
@@ -176,7 +301,7 @@ impl OsvClient {
         Ok(results)
     }
 
-    async fn check_rustsec_unmaintained(&self, ids: &[String]) -> bool {
+    pub(crate) async fn check_rustsec_unmaintained(&self, ids: &[String]) -> bool {
         if ids.is_empty() {
             return false;
         }
@@ -186,12 +311,43 @@ impl OsvClient {
             ids.len()
         );
 
+        let positive_cache = Arc::clone(&self.advisory_cache);
+        let negative_cache = Arc::clone(&self.negative_cache);
         let results: Vec<bool> = stream::iter(ids.iter().cloned())
             .map(|id| {
                 let url = format!("{}/vulns/{id}", self.base_url);
                 let client = Arc::clone(&self.client);
+                let positive_cache = Arc::clone(&positive_cache);
+                let negative_cache = Arc::clone(&negative_cache);
 
                 async move {
+                    if !is_valid_advisory_id(&id) {
+                        tracing::warn!("Skipping advisory with unexpected ID format: {:?}", id);
+                        return false;
+                    }
+
+                    // Positive cache wins over negative for `Found` entries.
+                    // We deliberately do NOT short-circuit on `NotFound` from
+                    // the positive cache: pre-split builds wrote 404s into
+                    // the same SQLite layer with the long positive TTL, so a
+                    // user upgrading would otherwise be stuck with 24-h-stale
+                    // 404 rows that never get a chance to retry. Falling
+                    // through lets the short-TTL negative cache handle the
+                    // 404 path; if the network now returns 200, the
+                    // subsequent `positive_cache.insert` (UPSERT) overwrites
+                    // the stale row.
+                    if let Some(cached) = positive_cache.get(&id).await
+                        && let crate::cache::advisory::AdvisoryKind::Found { unmaintained, .. } =
+                            cached.kind
+                    {
+                        return unmaintained;
+                    }
+                    if let Some(cached) = negative_cache.get(&id).await
+                        && matches!(cached.kind, crate::cache::advisory::AdvisoryKind::NotFound)
+                    {
+                        return false;
+                    }
+
                     let response = match client.get(&url).send().await {
                         Ok(r) => r,
                         Err(e) => {
@@ -199,6 +355,28 @@ impl OsvClient {
                             return false;
                         }
                     };
+
+                    if response.status().as_u16() == 404 {
+                        // 404s land in the negative cache so they expire on
+                        // the shorter `negative_ttl_secs` schedule.
+                        negative_cache
+                            .insert(crate::cache::advisory::CachedAdvisory {
+                                id: id.clone(),
+                                kind: crate::cache::advisory::AdvisoryKind::NotFound,
+                                fetched_at: std::time::SystemTime::now(),
+                            })
+                            .await;
+                        return false;
+                    }
+
+                    if !response.status().is_success() {
+                        tracing::warn!(
+                            "OSV /vulns/{} returned {}, not caching",
+                            id,
+                            response.status()
+                        );
+                        return false;
+                    }
 
                     let details: Option<OsvVulnerabilityDetails> = match response.json().await {
                         Ok(d) => d,
@@ -208,14 +386,13 @@ impl OsvClient {
                         }
                     };
 
+                    let summary = details.as_ref().and_then(|v| v.summary.clone());
+
                     let is_unmaintained = details.as_ref().is_some_and(|v| {
-                        // Check summary for "maintained" or "deprecated" keywords
                         let summary_match = v.summary.as_ref().is_some_and(|s| {
                             let lower = s.to_lowercase();
                             lower.contains("maintained") || lower.contains("deprecated")
                         });
-
-                        // Check database_specific.informational for "unmaintained"
                         let informational_match = v.affected.as_ref().is_some_and(|affected| {
                             affected.iter().any(|a| {
                                 a.database_specific.as_ref().is_some_and(|db| {
@@ -225,19 +402,22 @@ impl OsvClient {
                                 })
                             })
                         });
-
                         summary_match || informational_match
                     });
 
+                    positive_cache
+                        .insert(crate::cache::advisory::CachedAdvisory {
+                            id: id.clone(),
+                            kind: crate::cache::advisory::AdvisoryKind::Found {
+                                summary,
+                                unmaintained: is_unmaintained,
+                            },
+                            fetched_at: std::time::SystemTime::now(),
+                        })
+                        .await;
+
                     if is_unmaintained {
-                        tracing::info!(
-                            "Advisory {} indicates unmaintained package: {}",
-                            id,
-                            details
-                                .as_ref()
-                                .and_then(|v| v.summary.as_ref())
-                                .unwrap_or(&String::new())
-                        );
+                        tracing::info!("Advisory {} indicates unmaintained package", id,);
                     }
 
                     is_unmaintained
@@ -375,6 +555,41 @@ mod tests {
     }
 
     #[test]
+    fn is_valid_advisory_id_accepts_canonical_rustsec_format() {
+        assert!(is_valid_advisory_id("RUSTSEC-2020-0036"));
+        assert!(is_valid_advisory_id("RUSTSEC-2099-9999"));
+        // Non-RUSTSEC alphanumerics + `-` are also fine; OSV exposes
+        // GHSA / CVE / OSV IDs through the same endpoint.
+        assert!(is_valid_advisory_id("GHSA-xxxx-yyyy-zzzz"));
+        assert!(is_valid_advisory_id("CVE-2024-0001"));
+    }
+
+    #[test]
+    fn is_valid_advisory_id_rejects_dangerous_characters() {
+        // Empty string is rejected.
+        assert!(!is_valid_advisory_id(""));
+        // Path traversal attempts.
+        assert!(!is_valid_advisory_id("../etc/passwd"));
+        assert!(!is_valid_advisory_id("RUSTSEC/2020/0036"));
+        // URL-injection attempts.
+        assert!(!is_valid_advisory_id("RUSTSEC-2020-0036?evil=1"));
+        assert!(!is_valid_advisory_id("RUSTSEC-2020-0036#frag"));
+        // Whitespace and control chars.
+        assert!(!is_valid_advisory_id("RUSTSEC-2020 0036"));
+        assert!(!is_valid_advisory_id("RUSTSEC-2020-0036\n"));
+        // Unicode is rejected — OSV IDs are ASCII.
+        assert!(!is_valid_advisory_id("RUSTSEC-é"));
+    }
+
+    #[test]
+    fn is_valid_advisory_id_rejects_oversized_ids() {
+        let long = "A".repeat(65);
+        assert!(!is_valid_advisory_id(&long));
+        let just_at_limit = "A".repeat(64);
+        assert!(is_valid_advisory_id(&just_at_limit));
+    }
+
+    #[test]
     fn test_parse_cvss_severity() {
         assert_eq!(parse_cvss_severity("9.8"), VulnerabilitySeverity::Critical);
         assert_eq!(parse_cvss_severity("9.0"), VulnerabilitySeverity::Critical);
@@ -483,7 +698,8 @@ mod tests {
 
     #[tokio::test]
     async fn test_osv_client_with_endpoint_uses_custom_url() {
-        let client = OsvClient::with_endpoint("http://127.0.0.1:1".to_string());
+        let client = OsvClient::with_endpoint("http://127.0.0.1:1".to_string())
+            .expect("with_endpoint builds in test");
         // Port 1 is not listening; a real query must error, proving the client
         // actually attempted to reach the custom URL (and not fallen back to
         // api.osv.dev).
@@ -499,6 +715,340 @@ mod tests {
         );
     }
 
+    use crate::cache::advisory::{AdvisoryReadCache, AdvisoryWriteCache, NullAdvisoryCache};
+
+    #[tokio::test]
+    async fn with_endpoint_accepts_advisory_cache() {
+        let cache: Arc<dyn AdvisoryWriteCache> = Arc::new(NullAdvisoryCache);
+        let client =
+            OsvClient::with_endpoint_and_cache("http://example.invalid".to_string(), cache);
+        // Smoke-test: cache is reachable through the public accessor.
+        assert!(
+            client
+                .advisory_cache()
+                .get("RUSTSEC-2020-0036")
+                .await
+                .is_none()
+        );
+    }
+
+    use std::time::SystemTime;
+
+    use wiremock::{
+        Mock, MockServer, ResponseTemplate,
+        matchers::{method, path},
+    };
+
+    use crate::cache::advisory::{AdvisoryKind, CachedAdvisory, MemoryAdvisoryCache};
+
+    fn sample_response_body() -> serde_json::Value {
+        serde_json::json!({
+            "summary": "test crate is unmaintained",
+            "affected": [{
+                "database_specific": {
+                    "informational": "unmaintained"
+                }
+            }]
+        })
+    }
+
+    #[tokio::test]
+    async fn cache_hit_skips_http_for_known_advisory() {
+        let server = MockServer::start().await;
+        let counter = Arc::new(AtomicUsize::new(0));
+        {
+            let counter = Arc::clone(&counter);
+            Mock::given(method("GET"))
+                .and(path("/vulns/RUSTSEC-2020-0036"))
+                .respond_with(move |_req: &wiremock::Request| {
+                    counter.fetch_add(1, Ordering::SeqCst);
+                    ResponseTemplate::new(200).set_body_json(sample_response_body())
+                })
+                .mount(&server)
+                .await;
+        }
+
+        let cache: Arc<dyn AdvisoryWriteCache> = Arc::new(MemoryAdvisoryCache::new());
+        // Pre-populate the cache so the first call hits the L1 layer.
+        cache
+            .insert(CachedAdvisory {
+                id: "RUSTSEC-2020-0036".to_string(),
+                kind: AdvisoryKind::Found {
+                    summary: Some("cached".to_string()),
+                    unmaintained: true,
+                },
+                fetched_at: SystemTime::now(),
+            })
+            .await;
+
+        let client = OsvClient::with_endpoint_and_cache(server.uri(), Arc::clone(&cache));
+        let result = client
+            .check_rustsec_unmaintained(&["RUSTSEC-2020-0036".to_string()])
+            .await;
+
+        assert!(
+            result,
+            "cached advisory marked unmaintained must short-circuit"
+        );
+        assert_eq!(counter.load(Ordering::SeqCst), 0, "no HTTP call expected");
+    }
+
+    #[tokio::test]
+    async fn first_call_populates_cache_and_second_call_skips_http() {
+        let server = MockServer::start().await;
+        let counter = Arc::new(AtomicUsize::new(0));
+        {
+            let counter = Arc::clone(&counter);
+            Mock::given(method("GET"))
+                .and(path("/vulns/RUSTSEC-2020-0036"))
+                .respond_with(move |_req: &wiremock::Request| {
+                    counter.fetch_add(1, Ordering::SeqCst);
+                    ResponseTemplate::new(200).set_body_json(sample_response_body())
+                })
+                .mount(&server)
+                .await;
+        }
+
+        let cache: Arc<dyn AdvisoryWriteCache> = Arc::new(MemoryAdvisoryCache::new());
+        let client = OsvClient::with_endpoint_and_cache(server.uri(), Arc::clone(&cache));
+
+        let first = client
+            .check_rustsec_unmaintained(&["RUSTSEC-2020-0036".to_string()])
+            .await;
+        let second = client
+            .check_rustsec_unmaintained(&["RUSTSEC-2020-0036".to_string()])
+            .await;
+
+        assert!(first);
+        assert!(second);
+        assert_eq!(
+            counter.load(Ordering::SeqCst),
+            1,
+            "second call should be cached"
+        );
+        let cached = cache.get("RUSTSEC-2020-0036").await.expect("entry stored");
+        assert!(matches!(
+            cached.kind,
+            AdvisoryKind::Found {
+                unmaintained: true,
+                ..
+            }
+        ));
+    }
+
+    #[tokio::test]
+    async fn http_404_is_negatively_cached() {
+        let server = MockServer::start().await;
+        let counter = Arc::new(AtomicUsize::new(0));
+        {
+            let counter = Arc::clone(&counter);
+            Mock::given(method("GET"))
+                .and(path("/vulns/RUSTSEC-9999-0001"))
+                .respond_with(move |_req: &wiremock::Request| {
+                    counter.fetch_add(1, Ordering::SeqCst);
+                    ResponseTemplate::new(404)
+                })
+                .mount(&server)
+                .await;
+        }
+
+        let cache: Arc<dyn AdvisoryWriteCache> = Arc::new(MemoryAdvisoryCache::new());
+        let client = OsvClient::with_endpoint_and_cache(server.uri(), Arc::clone(&cache));
+
+        let first = client
+            .check_rustsec_unmaintained(&["RUSTSEC-9999-0001".to_string()])
+            .await;
+        let second = client
+            .check_rustsec_unmaintained(&["RUSTSEC-9999-0001".to_string()])
+            .await;
+
+        assert!(!first);
+        assert!(!second);
+        assert_eq!(counter.load(Ordering::SeqCst), 1);
+        let cached = cache
+            .get("RUSTSEC-9999-0001")
+            .await
+            .expect("negative cached");
+        assert_eq!(cached.kind, AdvisoryKind::NotFound);
+    }
+
+    #[tokio::test]
+    async fn http_404_lands_on_negative_cache_only() {
+        let server = MockServer::start().await;
+        Mock::given(method("GET"))
+            .and(path("/vulns/RUSTSEC-9999-0001"))
+            .respond_with(ResponseTemplate::new(404))
+            .mount(&server)
+            .await;
+
+        let positive: Arc<dyn AdvisoryWriteCache> = Arc::new(MemoryAdvisoryCache::new());
+        let negative: Arc<dyn AdvisoryWriteCache> = Arc::new(MemoryAdvisoryCache::new());
+        let client = OsvClient::with_endpoint_and_caches(
+            server.uri(),
+            Arc::clone(&positive),
+            Arc::clone(&negative),
+        );
+
+        let _ = client
+            .check_rustsec_unmaintained(&["RUSTSEC-9999-0001".to_string()])
+            .await;
+
+        assert!(
+            positive.get("RUSTSEC-9999-0001").await.is_none(),
+            "404 must NOT land on the positive cache"
+        );
+        let cached = negative
+            .get("RUSTSEC-9999-0001")
+            .await
+            .expect("404 should land on negative cache");
+        assert_eq!(cached.kind, AdvisoryKind::NotFound);
+    }
+
+    #[tokio::test]
+    async fn http_200_lands_on_positive_cache_only() {
+        let server = MockServer::start().await;
+        Mock::given(method("GET"))
+            .and(path("/vulns/RUSTSEC-2020-0036"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(sample_response_body()))
+            .mount(&server)
+            .await;
+
+        let positive: Arc<dyn AdvisoryWriteCache> = Arc::new(MemoryAdvisoryCache::new());
+        let negative: Arc<dyn AdvisoryWriteCache> = Arc::new(MemoryAdvisoryCache::new());
+        let client = OsvClient::with_endpoint_and_caches(
+            server.uri(),
+            Arc::clone(&positive),
+            Arc::clone(&negative),
+        );
+
+        let _ = client
+            .check_rustsec_unmaintained(&["RUSTSEC-2020-0036".to_string()])
+            .await;
+
+        let cached = positive
+            .get("RUSTSEC-2020-0036")
+            .await
+            .expect("200 should land on positive cache");
+        assert!(matches!(cached.kind, AdvisoryKind::Found { .. }));
+        assert!(
+            negative.get("RUSTSEC-2020-0036").await.is_none(),
+            "200 must NOT land on the negative cache"
+        );
+    }
+
+    /// Confirm `negative_from_config` produces a memory-only hybrid that
+    /// honours `negative_ttl_secs` instead of `ttl_secs`.
+    #[tokio::test]
+    async fn negative_from_config_uses_negative_ttl() {
+        // ttl_secs would keep the entry alive a long time; negative_ttl_secs
+        // is short. After the short TTL expires, the entry must be gone.
+        let config = crate::config::AdvisoryCacheConfig {
+            enabled: true,
+            ttl_secs: 86_400,
+            negative_ttl_secs: 0,
+            db_path: None,
+        };
+        let hybrid = crate::cache::HybridAdvisoryCache::negative_from_config(&config);
+        hybrid
+            .insert(CachedAdvisory {
+                id: "RUSTSEC-9999-0001".to_string(),
+                kind: AdvisoryKind::NotFound,
+                fetched_at: SystemTime::now(),
+            })
+            .await;
+        // ttl=0 expires immediately on read.
+        tokio::time::sleep(std::time::Duration::from_millis(2)).await;
+        assert!(hybrid.get("RUSTSEC-9999-0001").await.is_none());
+    }
+
+    /// Regression: pre-split builds wrote 404s to the positive cache. After
+    /// the split, those rows linger for the full positive TTL (24 h). A
+    /// `NotFound` returned from the *positive* cache must therefore NOT be
+    /// treated as authoritative; the lookup must fall through so the
+    /// short-TTL negative cache or the network can refresh the answer.
+    #[tokio::test]
+    async fn positive_cache_not_found_falls_through_to_network() {
+        let server = MockServer::start().await;
+        let hits = Arc::new(AtomicUsize::new(0));
+        {
+            let hits = Arc::clone(&hits);
+            Mock::given(method("GET"))
+                .and(path("/vulns/RUSTSEC-2020-0036"))
+                .respond_with(move |_req: &wiremock::Request| {
+                    hits.fetch_add(1, Ordering::SeqCst);
+                    ResponseTemplate::new(200).set_body_json(sample_response_body())
+                })
+                .mount(&server)
+                .await;
+        }
+
+        let positive: Arc<dyn AdvisoryWriteCache> = Arc::new(MemoryAdvisoryCache::new());
+        let negative: Arc<dyn AdvisoryWriteCache> = Arc::new(MemoryAdvisoryCache::new());
+
+        // Pre-seed the positive cache with a stale `NotFound` (as a pre-split
+        // build would have done for a 404). The new lookup logic must not
+        // short-circuit on it.
+        positive
+            .insert(CachedAdvisory {
+                id: "RUSTSEC-2020-0036".to_string(),
+                kind: AdvisoryKind::NotFound,
+                fetched_at: SystemTime::now(),
+            })
+            .await;
+
+        let client = OsvClient::with_endpoint_and_caches(
+            server.uri(),
+            Arc::clone(&positive),
+            Arc::clone(&negative),
+        );
+
+        let _ = client
+            .check_rustsec_unmaintained(&["RUSTSEC-2020-0036".to_string()])
+            .await;
+
+        assert_eq!(
+            hits.load(Ordering::SeqCst),
+            1,
+            "stale NotFound on positive cache must not short-circuit the network call"
+        );
+        // The fresh 200 must overwrite the stale row via UPSERT semantics.
+        let cached = positive
+            .get("RUSTSEC-2020-0036")
+            .await
+            .expect("positive cache must hold the refreshed Found entry");
+        assert!(matches!(cached.kind, AdvisoryKind::Found { .. }));
+    }
+
+    #[tokio::test]
+    async fn http_500_is_not_cached_and_retries() {
+        let server = MockServer::start().await;
+        let counter = Arc::new(AtomicUsize::new(0));
+        {
+            let counter = Arc::clone(&counter);
+            Mock::given(method("GET"))
+                .and(path("/vulns/RUSTSEC-2020-0036"))
+                .respond_with(move |_req: &wiremock::Request| {
+                    counter.fetch_add(1, Ordering::SeqCst);
+                    ResponseTemplate::new(500)
+                })
+                .mount(&server)
+                .await;
+        }
+
+        let cache: Arc<dyn AdvisoryWriteCache> = Arc::new(MemoryAdvisoryCache::new());
+        let client = OsvClient::with_endpoint_and_cache(server.uri(), Arc::clone(&cache));
+
+        let _ = client
+            .check_rustsec_unmaintained(&["RUSTSEC-2020-0036".to_string()])
+            .await;
+        let _ = client
+            .check_rustsec_unmaintained(&["RUSTSEC-2020-0036".to_string()])
+            .await;
+
+        assert_eq!(counter.load(Ordering::SeqCst), 2, "no caching on 5xx");
+        assert!(cache.get("RUSTSEC-2020-0036").await.is_none());
+    }
+
     #[tokio::test]
     async fn test_rustsec_advisory_lookup_limits_concurrency() {
         const EXPECTED_LIMIT: usize = RUSTSEC_ADVISORY_LOOKUP_CONCURRENCY;
@@ -507,7 +1057,7 @@ mod tests {
         let max_seen = Arc::new(AtomicUsize::new(0));
         let endpoint =
             spawn_counting_osv_server(Arc::clone(&active_requests), Arc::clone(&max_seen)).await;
-        let client = OsvClient::with_endpoint(endpoint);
+        let client = OsvClient::with_endpoint(endpoint).expect("with_endpoint builds in test");
         let ids: Vec<String> = (0..(EXPECTED_LIMIT * 2 + 3))
             .map(|index| format!("RUSTSEC-2099-{index:04}"))
             .collect();
