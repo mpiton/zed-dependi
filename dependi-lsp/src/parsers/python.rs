@@ -276,6 +276,13 @@ fn range_to_span(range: TextRange, line_ranges: &[TextRange]) -> Option<Span> {
         .binary_search_by(|line_range| line_range.ordering(range))
         .ok()?;
     let line_range = line_ranges[line_idx];
+    // Guard: range must be fully contained within the found line range.
+    // binary_search_by may return Ok for a range that straddles two adjacent
+    // line ranges (multi-line nodes); without this check the subtraction
+    // below would underflow on debug (panic) or wrap on release (bogus span).
+    if range.start() < line_range.start() || range.end() > line_range.end() {
+        return None;
+    }
     Some(Span {
         line: line_idx as u32,
         line_start: (range.start() - line_range.start()).into(),
@@ -1443,5 +1450,18 @@ dependencies = ["ruff>=0.1.0"]
         let span = node_to_span(&value_node, &line_ranges).expect("span");
         assert_eq!(span.line, 1, "value lives on second line");
         assert!(span.line_end > span.line_start);
+    }
+
+    #[test]
+    fn test_range_to_span_returns_none_for_multiline_range() {
+        let content = "abc\ndef\nghi";
+        let line_ranges = compute_line_ranges(content);
+        // Build a range that straddles line 0 and line 1: bytes [2..6) covers
+        // "c\nde" — crosses the newline at byte 3.
+        let straddle = TextRange::new(2u32.into(), 6u32.into());
+        assert!(
+            range_to_span(straddle, &line_ranges).is_none(),
+            "multi-line range must yield None to prevent underflow"
+        );
     }
 }
