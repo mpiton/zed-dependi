@@ -1,11 +1,15 @@
 //! Parser for package.json files
 //!
-//! Uses serde_json for fast parsing with position tracking via byte offset calculation.
+//! Uses `json-spanned-value` to obtain dependency name/version spans directly
+//! from the parser output, removing the need for a manual string scan.
 
+use json_spanned_value as jsv;
+use json_spanned_value::spanned;
+
+use super::json_spans::{LineIndex, inner_string_span, span_to_span};
 use super::{Dependency, Parser, Span};
-use serde_json::Value;
 
-/// Parser for npm package.json dependency files
+/// Parser for npm package.json dependency files.
 #[derive(Debug, Default)]
 pub struct NpmParser;
 
@@ -17,50 +21,43 @@ impl NpmParser {
 
 impl Parser for NpmParser {
     fn parse(&self, content: &str) -> Vec<Dependency> {
-        let Ok(value) = serde_json::from_str::<Value>(content) else {
+        let Ok(root) = jsv::from_str::<spanned::Object>(content) else {
             return Vec::new();
         };
 
-        // Pre-compute line start offsets for position calculation
-        let line_offsets = compute_line_offsets(content);
-
+        let line_index = LineIndex::new(content);
         let mut dependencies = Vec::with_capacity(64);
 
-        // Parse all dependency sections
-        parse_dependency_section(
-            &value,
+        parse_section(
+            &root,
             "dependencies",
-            content,
-            &line_offsets,
             false,
             false,
+            &line_index,
             &mut dependencies,
         );
-        parse_dependency_section(
-            &value,
+        parse_section(
+            &root,
             "devDependencies",
-            content,
-            &line_offsets,
             true,
             false,
+            &line_index,
             &mut dependencies,
         );
-        parse_dependency_section(
-            &value,
+        parse_section(
+            &root,
             "peerDependencies",
-            content,
-            &line_offsets,
             false,
             true,
+            &line_index,
             &mut dependencies,
         );
-        parse_dependency_section(
-            &value,
+        parse_section(
+            &root,
             "optionalDependencies",
-            content,
-            &line_offsets,
             false,
             true,
+            &line_index,
             &mut dependencies,
         );
 
@@ -68,138 +65,69 @@ impl Parser for NpmParser {
     }
 }
 
-/// Compute byte offsets for each line start (for position calculation)
-fn compute_line_offsets(content: &str) -> Vec<usize> {
-    let mut offsets = vec![0];
-    for (i, byte) in content.bytes().enumerate() {
-        if byte == b'\n' {
-            offsets.push(i + 1);
-        }
-    }
-    offsets
-}
-
-/// Convert byte offset to (line, column) - both 0-indexed
-fn offset_to_position(offset: usize, line_offsets: &[usize]) -> (u32, u32) {
-    let line = line_offsets
-        .iter()
-        .rposition(|&start| start <= offset)
-        .unwrap_or(0);
-    let col = offset - line_offsets[line];
-    (line as u32, col as u32)
-}
-
-/// Parse a dependency section (dependencies, devDependencies, etc.)
-fn parse_dependency_section(
-    root: &Value,
+/// Look up a section in the root object and parse each entry into a `Dependency`.
+fn parse_section(
+    root: &spanned::Object,
     section_name: &str,
-    content: &str,
-    line_offsets: &[usize],
     dev: bool,
     optional: bool,
+    line_index: &LineIndex,
     dependencies: &mut Vec<Dependency>,
 ) {
-    let Some(section) = root.get(section_name) else {
+    let Some(section_value) = root.get_ref().get(section_name) else {
         return;
     };
-    let Some(deps_obj) = section.as_object() else {
+    let Some(section_obj) = section_value.as_span_object() else {
         return;
     };
 
-    for (name, version_val) in deps_obj {
-        let Some(version) = extract_version(version_val) else {
+    for (name_spanned, value_spanned) in section_obj.get_ref().iter() {
+        let Some(name_span) =
+            string_inner_to_span(line_index, name_spanned.start(), name_spanned.end())
+        else {
             continue;
         };
 
-        // Find the dependency in the original content for position tracking
-        if let Some(dep) =
-            find_dependency_position(content, line_offsets, name, &version, dev, optional)
-        {
-            dependencies.push(dep);
+        let Some((version, version_span)) = extract_version(value_spanned, line_index) else {
+            continue;
+        };
+
+        if name_span.line != version_span.line {
+            continue;
         }
+
+        dependencies.push(Dependency {
+            name: name_spanned.get_ref().clone(),
+            version,
+            name_span,
+            version_span,
+            dev,
+            optional,
+            registry: None,
+            resolved_version: None,
+        });
     }
 }
 
-/// Extract version string from various npm formats
-fn extract_version(value: &Value) -> Option<String> {
-    match value {
-        Value::String(s) => Some(s.clone()),
-        Value::Object(obj) => {
-            // Handle: { "version": "1.0.0" } or complex specs
-            obj.get("version")
-                .and_then(|v| v.as_str())
-                .map(|v| v.to_string())
-        }
-        _ => None,
-    }
+/// Convert outer (quote-inclusive) byte bounds of a JSON string to an inner-content `Span`.
+fn string_inner_to_span(line_index: &LineIndex, start: usize, end: usize) -> Option<Span> {
+    let (inner_start, inner_end) = inner_string_span(start, end);
+    span_to_span(line_index, inner_start, inner_end)
 }
 
-/// Find the position of a dependency in the content
-fn find_dependency_position(
-    content: &str,
-    line_offsets: &[usize],
-    name: &str,
-    version: &str,
-    dev: bool,
-    optional: bool,
-) -> Option<Dependency> {
-    // Search for the quoted name pattern: "name": "version"
-    let search_pattern = format!(r#""{name}""#);
-
-    // Find all occurrences and pick the one followed by a colon and the version
-    let mut search_start = 0;
-    while let Some(name_offset) = content[search_start..].find(&search_pattern) {
-        let abs_offset = search_start + name_offset;
-        let after_name = abs_offset + search_pattern.len();
-
-        // Check if this looks like a key (followed by colon)
-        let rest = &content[after_name..];
-        let trimmed = rest.trim_start();
-
-        if trimmed.starts_with(':') {
-            // This is a key, now find the version
-            if let Some(version_offset) = rest.find(&format!(r#""{version}""#)) {
-                let version_abs = after_name + version_offset;
-
-                // Calculate positions
-                let (line, name_start_col) = offset_to_position(abs_offset + 1, line_offsets); // +1 to skip opening quote
-                let name_end_col = name_start_col + name.len() as u32;
-
-                let (version_line, version_start_col) =
-                    offset_to_position(version_abs + 1, line_offsets); // +1 to skip opening quote
-
-                // Ensure name and version are on the same line
-                if version_line != line {
-                    search_start = abs_offset + 1;
-                    continue;
-                }
-
-                let version_end_col = version_start_col + version.len() as u32;
-
-                return Some(Dependency {
-                    name: name.to_string(),
-                    version: version.to_string(),
-                    name_span: Span {
-                        line,
-                        line_start: name_start_col,
-                        line_end: name_end_col,
-                    },
-                    version_span: Span {
-                        line: version_line,
-                        line_start: version_start_col,
-                        line_end: version_end_col,
-                    },
-                    dev,
-                    optional,
-                    registry: None,
-                    resolved_version: None,
-                });
-            }
-        }
-
-        search_start = abs_offset + 1;
+/// Extract a version string and its inner-content span from a value that is
+/// either a JSON string or an object containing `"version": <string>`.
+fn extract_version(value: &spanned::Value, line_index: &LineIndex) -> Option<(String, Span)> {
+    if let Some(s) = value.as_span_string() {
+        let span = string_inner_to_span(line_index, s.start(), s.end())?;
+        return Some((s.get_ref().to_string(), span));
     }
-
+    if let Some(obj) = value.as_span_object() {
+        let version_value = obj.get_ref().get("version")?;
+        let version_str = version_value.as_span_string()?;
+        let span = string_inner_to_span(line_index, version_str.start(), version_str.end())?;
+        return Some((version_str.get_ref().to_string(), span));
+    }
     None
 }
 
@@ -400,5 +328,85 @@ mod tests {
         let content = "not valid json";
         let deps = parser.parse(content);
         assert_eq!(deps.len(), 0);
+    }
+
+    #[test]
+    fn test_same_name_in_two_sections() {
+        let parser = NpmParser::new();
+        // Same name AND same version pinned in both sections — this is the
+        // worst-case for the legacy string scan: the version-disambiguation
+        // trick that handles distinct versions cannot disambiguate when both
+        // versions match. Span-aware parsing must still place each entry on
+        // its own line.
+        let content = r#"{
+  "dependencies": {
+    "foo": "1.0.0"
+  },
+  "devDependencies": {
+    "foo": "1.0.0"
+  }
+}"#;
+        let deps = parser.parse(content);
+        assert_eq!(deps.len(), 2);
+
+        let prod = deps.iter().find(|d| !d.dev).unwrap();
+        let dev = deps.iter().find(|d| d.dev).unwrap();
+        assert_eq!(prod.version, "1.0.0");
+        assert_eq!(dev.version, "1.0.0");
+        // Spans must be on different lines (the bug we are fixing: string
+        // search may match the same line for both).
+        assert_ne!(prod.name_span.line, dev.name_span.line);
+    }
+
+    #[test]
+    fn test_substring_false_match_in_value() {
+        // The "description" field contains a literal that looks like a
+        // dependency entry. The parser must not pick it up as a dep.
+        let parser = NpmParser::new();
+        let content = r#"{
+  "description": "looks like \"react\": \"99.0.0\" but is text",
+  "dependencies": {
+    "react": "1.0.0"
+  }
+}"#;
+        let deps = parser.parse(content);
+        assert_eq!(deps.len(), 1);
+        assert_eq!(deps[0].version, "1.0.0");
+    }
+
+    #[test]
+    fn test_whitespace_variations() {
+        let parser = NpmParser::new();
+        let content =
+            "{\n  \"dependencies\": {\n    \"a\":\t\t\"1.0.0\",\n    \"b\"  :   \"2.0.0\"\n  }\n}";
+        let deps = parser.parse(content);
+        assert_eq!(deps.len(), 2);
+        let a = deps.iter().find(|d| d.name == "a").unwrap();
+        let b = deps.iter().find(|d| d.name == "b").unwrap();
+        assert_eq!(a.version, "1.0.0");
+        assert_eq!(b.version, "2.0.0");
+        // Sanity: each version span lies inside its declared line range.
+        assert!(a.version_span.line_start < a.version_span.line_end);
+        assert!(b.version_span.line_start < b.version_span.line_end);
+    }
+
+    #[test]
+    fn test_large_file_smoke() {
+        let mut content = String::from("{\n  \"dependencies\": {\n");
+        for i in 0..1000 {
+            let comma = if i == 999 { "" } else { "," };
+            content.push_str(&format!("    \"pkg{i}\": \"1.0.{i}\"{comma}\n"));
+        }
+        content.push_str("  }\n}");
+        let parser = NpmParser::new();
+        let start = std::time::Instant::now();
+        let deps = parser.parse(&content);
+        let elapsed = start.elapsed();
+        assert_eq!(deps.len(), 1000);
+        // Generous bound — purely a smoke check that we are not quadratic.
+        assert!(
+            elapsed < std::time::Duration::from_millis(500),
+            "parse took {elapsed:?}"
+        );
     }
 }
