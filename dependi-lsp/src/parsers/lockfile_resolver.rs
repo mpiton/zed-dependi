@@ -63,6 +63,12 @@ pub async fn select_resolver(
                 crate::parsers::npm_lock::find_npm_lockfile(manifest_path).await?;
             Some(Box::new(crate::parsers::npm_lock::NpmResolver { lock_path, sub }))
         }
+        FileType::Python => {
+            let preferred = crate::parsers::python_lock::detect_python_tool(manifest_content);
+            let (lock_path, sub) =
+                crate::parsers::python_lock::find_python_lockfile(manifest_path, preferred).await?;
+            Some(Box::new(crate::parsers::python_lock::PythonResolver { lock_path, sub }))
+        }
         FileType::Maven => None,
         _ => None,
     }
