@@ -59,6 +59,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- Refactored `process_document` lockfile resolution into a new
+  `LockfileResolver` trait + 8 ecosystem implementations (Cargo, npm,
+  Python, Go, PHP, Dart, C#, Ruby). Removes ~440 lines of duplicated
+  code from `backend.rs` and routes all ecosystems through a single
+  `select_resolver` + `resolve_versions_from_lockfile` code path. Behavior is preserved (silent failure on parse error, identical
+  `tracing::debug!` logs, `lockfile_graph` still populated for downstream
+  vulnerability attribution) and Cargo multi-version disambiguation via
+  `[package].name` is upheld through a dedicated `CargoResolver::resolve_version`
+  override. Adds 9 end-to-end integration tests covering all ecosystems plus
+  Maven (returns `None` as expected)
+  ([#239](https://github.com/mpiton/zed-dependi/issues/239))
 - Cache traits (`ReadCache`, `WriteCache`) are now async (AFIT). The SQLite cache offloads blocking `rusqlite` work to `tokio::task::spawn_blocking`, keeping the LSP event loop responsive under load. Reduces tail latency on operations that hit the persistent cache. (#235)
 - Bump `hashbrown` from 0.16.1 to 0.17.0 (purely additive release, hashbrown MSRV 1.85 ≤ project MSRV 1.94)
 - Bump `tokio` constraint from 1.50 to 1.52 in `dependi-lsp/Cargo.toml` (lockfile resolves 1.52.1; patch + minor, backwards compatible)
@@ -68,6 +79,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- `parse_package_lock_graph` no longer surfaces nested `node_modules/<a>/node_modules/<b>`
+  copies. With the new graph-based resolver path, transitive nested entries
+  could shadow the top-level direct dependency on a first-wins lookup and
+  return the wrong version. The graph parser now reuses the same
+  `extract_name_from_node_modules_path` helper as the flat parser, which
+  skips nested entries
+  ([#239](https://github.com/mpiton/zed-dependi/issues/239))
+- `LockfileResolver::resolve_version` (default impl) now applies
+  `normalize_name` to BOTH the dependency name and each `LockfilePackage.name`
+  so resolvers whose `parse_graph` does not pre-normalize entries (e.g.,
+  Composer, NuGet, Ruby) still match correctly
+- `GoResolver::resolve_version` deduplicates identical version strings before
+  the ambiguity check; repeated entries no longer force the result to `None`
+  when only a single unique version is present
 - Abort the previous advisory cache cleanup tasks when `initialize` rebuilds
   the runtime, instead of leaking them. `spawn_default_cleanup_task` now
   returns the `JoinHandle`, the backend tracks the handles in a `Mutex`, and

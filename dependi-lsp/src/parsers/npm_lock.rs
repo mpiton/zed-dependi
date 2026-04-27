@@ -8,9 +8,11 @@
 
 use std::path::{Path, PathBuf};
 
+use async_trait::async_trait;
 use hashbrown::HashMap;
 
 use crate::parsers::lockfile_graph::{LockfileGraph, LockfilePackage};
+use crate::parsers::lockfile_resolver::LockfileResolver;
 
 /// Type of Node.js lockfile detected.
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -406,10 +408,11 @@ pub fn parse_package_lock_graph(content: &str) -> LockfileGraph {
         if key.is_empty() {
             continue; // root entry represents the manifest itself
         }
-        // Key form "node_modules/<name>" or "node_modules/@scope/name"
-        let name = match key.rsplit_once("node_modules/") {
-            Some((_, rest)) => rest.to_string(),
-            None => continue,
+        // Skip nested node_modules entries (transitive dependencies of dependencies).
+        // Surfacing them lets resolve_version pick a transitive copy over the
+        // top-level one, regressing direct-dep version reporting.
+        let Some(name) = extract_name_from_node_modules_path(key) else {
+            continue;
         };
         let Some(version) = entry.get("version").and_then(|v| v.as_str()) else {
             continue;
@@ -421,7 +424,7 @@ pub fn parse_package_lock_graph(content: &str) -> LockfileGraph {
             .unwrap_or_default();
 
         graph.packages.push(LockfilePackage {
-            name,
+            name: name.to_string(),
             version: version.to_string(),
             dependencies,
             is_root: false,
@@ -630,6 +633,46 @@ fn split_name_version(spec: &str) -> Option<(&str, &str)> {
     }
 
     Some((name, version))
+}
+
+/// Resolves versions from npm/yarn/pnpm/bun lockfiles. Sub-format is captured at selection time.
+pub struct NpmResolver {
+    pub(crate) lock_path: PathBuf,
+    pub(crate) sub: NpmLockfileType,
+}
+
+#[async_trait]
+impl LockfileResolver for NpmResolver {
+    async fn find_lockfile(&self, _manifest_path: &Path) -> Option<PathBuf> {
+        // Path was probed at selection time; return the cached value.
+        Some(self.lock_path.clone())
+    }
+
+    fn parse_graph(&self, lock_content: &str) -> LockfileGraph {
+        match self.sub {
+            NpmLockfileType::PackageLock => parse_package_lock_graph(lock_content),
+            NpmLockfileType::PnpmLock => parse_pnpm_lock_graph(lock_content),
+            NpmLockfileType::YarnLock => parse_yarn_lock_graph(lock_content),
+            NpmLockfileType::BunLock => {
+                // No dedicated graph parser for bun.lock yet — build a flat
+                // graph (no edges, no is_root) from the name→version map.
+                // Transitive analysis is therefore a no-op for Bun until a
+                // real graph parser lands. Matches pre-refactor behavior.
+                let lock_versions = parse_npm_lockfile(lock_content, self.sub);
+                LockfileGraph {
+                    packages: lock_versions
+                        .into_iter()
+                        .map(|(name, version)| LockfilePackage {
+                            name,
+                            version,
+                            dependencies: Vec::new(),
+                            is_root: false,
+                        })
+                        .collect(),
+                }
+            }
+        }
+    }
 }
 
 #[cfg(test)]
@@ -1225,6 +1268,44 @@ packages:
         assert!(react.dependencies.contains(&"react-dom".to_string()));
     }
 
+    #[tokio::test]
+    async fn npm_resolver_handles_package_lock() {
+        use crate::parsers::lockfile_resolver::LockfileResolver;
+        let tmp = tempfile::tempdir().expect("tempdir");
+        let manifest = tmp.path().join("package.json");
+        let lock = tmp.path().join("package-lock.json");
+        std::fs::write(&manifest, r#"{"name":"demo","version":"0.0.1"}"#).unwrap();
+        std::fs::write(
+            &lock,
+            r#"{
+          "name": "demo",
+          "version": "0.0.1",
+          "lockfileVersion": 3,
+          "packages": {
+            "": { "name": "demo", "version": "0.0.1" },
+            "node_modules/lodash": { "version": "4.17.21" }
+          }
+        }"#,
+        )
+        .unwrap();
+        let resolver = super::NpmResolver {
+            lock_path: lock.clone(),
+            sub: super::NpmLockfileType::PackageLock,
+        };
+        assert_eq!(
+            resolver.find_lockfile(&manifest).await.as_deref(),
+            Some(lock.as_path())
+        );
+        let content = std::fs::read_to_string(&lock).unwrap();
+        let graph = resolver.parse_graph(&content);
+        assert!(
+            graph
+                .packages
+                .iter()
+                .any(|p| p.name == "lodash" && p.version == "4.17.21")
+        );
+    }
+
     #[test]
     fn test_parse_yarn_lock_graph_v1() {
         let content = r#"
@@ -1247,5 +1328,35 @@ packages:
         );
         let react = graph.packages.iter().find(|p| p.name == "react").unwrap();
         assert!(react.dependencies.contains(&"scheduler".to_string()));
+    }
+
+    /// Regression: parse_package_lock_graph must not surface nested node_modules
+    /// copies. resolve_version-by-name on a graph that includes a transitive
+    /// (nested) version would otherwise return the wrong version for the
+    /// top-level dependency.
+    #[test]
+    fn test_parse_package_lock_graph_skips_nested_node_modules() {
+        let content = r#"{
+  "name": "demo",
+  "lockfileVersion": 3,
+  "packages": {
+    "": { "name": "demo", "version": "1.0.0" },
+    "node_modules/foo": { "version": "2.0.0" },
+    "node_modules/bar": { "version": "1.0.0", "dependencies": { "foo": "^1.0.0" } },
+    "node_modules/bar/node_modules/foo": { "version": "1.0.0" }
+  }
+}"#;
+        let graph = parse_package_lock_graph(content);
+        let foo_entries: Vec<&LockfilePackage> =
+            graph.packages.iter().filter(|p| p.name == "foo").collect();
+        assert_eq!(
+            foo_entries.len(),
+            1,
+            "nested node_modules/foo must not be added a second time"
+        );
+        assert_eq!(
+            foo_entries[0].version, "2.0.0",
+            "top-level foo (2.0.0) wins over nested copy (1.0.0)"
+        );
     }
 }

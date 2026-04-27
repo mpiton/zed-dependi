@@ -2,9 +2,11 @@
 
 use std::path::{Path, PathBuf};
 
+use async_trait::async_trait;
 use hashbrown::HashMap;
 
 use crate::parsers::lockfile_graph::{LockfileGraph, LockfilePackage};
+use crate::parsers::lockfile_resolver::LockfileResolver;
 
 /// Normalize a Composer package name to lowercase.
 ///
@@ -121,6 +123,27 @@ pub async fn find_composer_lock(manifest_path: &Path) -> Option<PathBuf> {
         }
 
         current = current.parent()?.to_path_buf();
+    }
+}
+
+/// Resolves versions from `composer.lock` for PHP projects.
+/// Composer normalizes package names to lowercase (Vendor/Package → vendor/package).
+/// `parse_composer_lock_graph` already normalizes internally, so the default
+/// `resolve_version` (which compares normalized dep name against stored names) works correctly.
+pub struct PhpResolver;
+
+#[async_trait]
+impl LockfileResolver for PhpResolver {
+    async fn find_lockfile(&self, manifest_path: &Path) -> Option<PathBuf> {
+        find_composer_lock(manifest_path).await
+    }
+
+    fn parse_graph(&self, lock_content: &str) -> LockfileGraph {
+        parse_composer_lock_graph(lock_content)
+    }
+
+    fn normalize_name(&self, name: &str) -> String {
+        normalize_composer_name(name)
     }
 }
 
@@ -268,6 +291,53 @@ mod tests {
             .find(|p| p.name == "symfony/polyfill-php80")
             .unwrap();
         assert!(!polyfill.dependencies.iter().any(|d| d.starts_with("ext-")));
+    }
+
+    #[tokio::test]
+    async fn php_resolver_normalizes_composer_names() {
+        use crate::parsers::lockfile_resolver::LockfileResolver;
+        let tmp = tempfile::tempdir().expect("tempdir");
+        let manifest = tmp.path().join("composer.json");
+        let lock = tmp.path().join("composer.lock");
+        std::fs::write(&manifest, "{}").unwrap();
+        std::fs::write(
+            &lock,
+            r#"{
+          "packages": [
+            { "name": "Vendor/Package", "version": "1.2.3" }
+          ]
+        }"#,
+        )
+        .unwrap();
+        let resolver = super::PhpResolver;
+        assert_eq!(
+            resolver.find_lockfile(&manifest).await.as_deref(),
+            Some(lock.as_path())
+        );
+        let content = std::fs::read_to_string(&lock).unwrap();
+        let graph = resolver.parse_graph(&content);
+        let dep = crate::parsers::Dependency {
+            name: "VENDOR/Package".to_string(),
+            version: "*".to_string(),
+            name_span: crate::parsers::Span {
+                line: 0,
+                line_start: 0,
+                line_end: 0,
+            },
+            version_span: crate::parsers::Span {
+                line: 0,
+                line_start: 0,
+                line_end: 0,
+            },
+            dev: false,
+            optional: false,
+            registry: None,
+            resolved_version: None,
+        };
+        assert_eq!(
+            resolver.resolve_version(&dep, &graph),
+            Some("1.2.3".to_string())
+        );
     }
 
     #[test]

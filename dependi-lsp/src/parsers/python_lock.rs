@@ -8,9 +8,11 @@
 
 use std::path::{Path, PathBuf};
 
+use async_trait::async_trait;
 use hashbrown::HashMap;
 
 use crate::parsers::lockfile_graph::{LockfileGraph, LockfilePackage};
+use crate::parsers::lockfile_resolver::LockfileResolver;
 
 /// Type of Python lockfile detected.
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -364,6 +366,54 @@ pub fn parse_uv_lock_graph(content: &str) -> LockfileGraph {
         });
     }
     graph
+}
+
+// ---------------------------------------------------------------------------
+// LockfileResolver implementation
+// ---------------------------------------------------------------------------
+
+/// Resolves versions from Python lockfiles (Poetry/uv/PDM/Pipfile).
+/// Sub-format is captured at selection time; PEP 503 normalization applied on lookup.
+pub struct PythonResolver {
+    pub(crate) lock_path: PathBuf,
+    pub(crate) sub: PythonLockfileType,
+}
+
+#[async_trait]
+impl LockfileResolver for PythonResolver {
+    async fn find_lockfile(&self, _manifest_path: &Path) -> Option<PathBuf> {
+        // Path was probed at selection time.
+        Some(self.lock_path.clone())
+    }
+
+    fn parse_graph(&self, lock_content: &str) -> LockfileGraph {
+        match self.sub {
+            PythonLockfileType::PoetryLock => parse_poetry_lock_graph(lock_content),
+            PythonLockfileType::UvLock => parse_uv_lock_graph(lock_content),
+            PythonLockfileType::PipfileLock => parse_pipfile_lock_graph(lock_content),
+            PythonLockfileType::PdmLock => {
+                // No dedicated graph parser for pdm.lock; build a flat graph
+                // from the name→version map. Transitive analysis is a no-op
+                // for PDM until a real graph parser lands. Matches pre-refactor behavior.
+                let lock_versions = parse_python_lockfile(lock_content, self.sub);
+                LockfileGraph {
+                    packages: lock_versions
+                        .into_iter()
+                        .map(|(name, version)| LockfilePackage {
+                            name,
+                            version,
+                            dependencies: Vec::new(),
+                            is_root: false,
+                        })
+                        .collect(),
+                }
+            }
+        }
+    }
+
+    fn normalize_name(&self, name: &str) -> String {
+        normalize_python_name(name)
+    }
 }
 
 // ---------------------------------------------------------------------------
@@ -960,5 +1010,54 @@ version = "2.0.7"
             .unwrap();
         assert!(requests.dependencies.contains(&"urllib3".to_string()));
         assert!(requests.dependencies.contains(&"certifi".to_string()));
+    }
+
+    #[tokio::test]
+    async fn python_resolver_handles_poetry_lock_with_pep503_normalization() {
+        use crate::parsers::lockfile_resolver::LockfileResolver;
+        let tmp = tempfile::tempdir().expect("tempdir");
+        let manifest = tmp.path().join("pyproject.toml");
+        let lock = tmp.path().join("poetry.lock");
+        std::fs::write(&manifest, "[tool.poetry]\nname='demo'\nversion='0.1.0'\n").unwrap();
+        std::fs::write(
+            &lock,
+            r#"
+[[package]]
+name = "Some-Package"
+version = "1.2.3"
+
+[[package]]
+name = "another_pkg"
+version = "0.5.0"
+"#,
+        )
+        .unwrap();
+        let resolver = super::PythonResolver {
+            lock_path: lock.clone(),
+            sub: super::PythonLockfileType::PoetryLock,
+        };
+        let content = std::fs::read_to_string(&lock).unwrap();
+        let graph = resolver.parse_graph(&content);
+        let dep = crate::parsers::Dependency {
+            name: "some.package".to_string(),
+            version: "*".to_string(),
+            name_span: crate::parsers::Span {
+                line: 0,
+                line_start: 0,
+                line_end: 0,
+            },
+            version_span: crate::parsers::Span {
+                line: 0,
+                line_start: 0,
+                line_end: 0,
+            },
+            dev: false,
+            optional: false,
+            registry: None,
+            resolved_version: None,
+        };
+        // PEP 503: "some.package" → "some-package" should match "Some-Package" → "some-package"
+        let v = resolver.resolve_version(&dep, &graph);
+        assert_eq!(v.as_deref(), Some("1.2.3"));
     }
 }

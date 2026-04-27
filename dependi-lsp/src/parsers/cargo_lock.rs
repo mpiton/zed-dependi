@@ -2,9 +2,12 @@
 
 use std::path::{Path, PathBuf};
 
+use async_trait::async_trait;
 use hashbrown::HashMap;
 
+use crate::parsers::Dependency;
 use crate::parsers::lockfile_graph::{LockfileGraph, LockfilePackage};
+use crate::parsers::lockfile_resolver::LockfileResolver;
 
 /// Parse a Cargo.lock file and return a map of package name → resolved version.
 ///
@@ -142,6 +145,54 @@ pub async fn find_cargo_lock(cargo_toml_path: &Path) -> Option<PathBuf> {
         }
 
         current = current.parent()?.to_path_buf();
+    }
+}
+
+/// Resolves versions from `Cargo.lock` for a Rust project.
+pub struct CargoResolver {
+    /// Captured at selection time from the manifest's `[package].name`.
+    /// Used by `resolve_version` to disambiguate multi-version crates: when the
+    /// root package depends on a specific version of a crate (Cargo writes
+    /// `"crate_name version"` in its dependencies array), that version takes
+    /// precedence over the first-found entry.
+    pub(crate) root_package: Option<String>,
+}
+
+#[async_trait]
+impl LockfileResolver for CargoResolver {
+    async fn find_lockfile(&self, manifest_path: &Path) -> Option<PathBuf> {
+        find_cargo_lock(manifest_path).await
+    }
+
+    fn parse_graph(&self, lock_content: &str) -> LockfileGraph {
+        parse_cargo_lock_graph(lock_content)
+    }
+
+    fn resolve_version(&self, dep: &Dependency, graph: &LockfileGraph) -> Option<String> {
+        // Root-package disambiguation (matches `parse_cargo_lock` semantics):
+        // when the root depends on a specific version of a multi-version crate,
+        // its dependencies array has `"crate_name version"` entries (Cargo
+        // appends the version when ambiguity exists). Old Cargo.lock v1 may
+        // also include a source suffix like `"1.0.0 (registry+...)"`.
+        if let Some(root_name) = self.root_package.as_deref()
+            && let Some(root_pkg) = graph.packages.iter().find(|p| p.name == root_name)
+        {
+            for dep_entry in &root_pkg.dependencies {
+                let mut parts = dep_entry.splitn(2, ' ');
+                if let (Some(crate_name), Some(version_part)) = (parts.next(), parts.next())
+                    && crate_name == dep.name
+                {
+                    let version = version_part.split(' ').next().unwrap_or(version_part);
+                    return Some(version.to_string());
+                }
+            }
+        }
+        // Fallback: first-wins lookup by name.
+        graph
+            .packages
+            .iter()
+            .find(|p| p.name == dep.name)
+            .map(|p| p.version.clone())
     }
 }
 
@@ -366,5 +417,148 @@ version = "0.16.1"
     fn test_parse_graph_invalid_toml() {
         let graph = parse_cargo_lock_graph("not valid ][ toml");
         assert!(graph.packages.is_empty());
+    }
+
+    #[tokio::test]
+    async fn cargo_resolver_finds_and_parses_cargo_lock() {
+        use crate::parsers::lockfile_resolver::LockfileResolver;
+        let tmp = tempfile::tempdir().expect("tempdir");
+        let manifest_path = tmp.path().join("Cargo.toml");
+        let lock_path = tmp.path().join("Cargo.lock");
+        std::fs::write(
+            &manifest_path,
+            r#"[package]
+name = "demo"
+version = "0.1.0"
+"#,
+        )
+        .expect("manifest");
+        std::fs::write(
+            &lock_path,
+            r#"
+[[package]]
+name = "serde"
+version = "1.0.230"
+
+[[package]]
+name = "tokio"
+version = "1.50.0"
+"#,
+        )
+        .expect("lockfile");
+        let resolver = super::CargoResolver {
+            root_package: Some("demo".to_string()),
+        };
+        let found = resolver.find_lockfile(&manifest_path).await;
+        assert_eq!(found.as_deref(), Some(lock_path.as_path()));
+        let content = std::fs::read_to_string(&lock_path).expect("read");
+        let graph = resolver.parse_graph(&content);
+        assert!(
+            graph
+                .packages
+                .iter()
+                .any(|p| p.name == "serde" && p.version == "1.0.230")
+        );
+        assert!(
+            graph
+                .packages
+                .iter()
+                .any(|p| p.name == "tokio" && p.version == "1.50.0")
+        );
+    }
+
+    #[test]
+    fn cargo_resolver_disambiguates_multi_version_via_root_package() {
+        use crate::parsers::Dependency;
+        use crate::parsers::Span;
+        use crate::parsers::lockfile_resolver::LockfileResolver;
+
+        // Cargo.lock with two versions of `multi`; root depends on the older one.
+        let content = r#"
+version = 3
+
+[[package]]
+name = "demo"
+version = "0.1.0"
+dependencies = [
+ "multi 1.0.0",
+]
+
+[[package]]
+name = "multi"
+version = "2.0.0"
+
+[[package]]
+name = "multi"
+version = "1.0.0"
+"#;
+        let resolver = super::CargoResolver {
+            root_package: Some("demo".to_string()),
+        };
+        let graph = resolver.parse_graph(content);
+        let dep = Dependency {
+            name: "multi".to_string(),
+            version: "*".to_string(),
+            name_span: Span {
+                line: 0,
+                line_start: 0,
+                line_end: 0,
+            },
+            version_span: Span {
+                line: 0,
+                line_start: 0,
+                line_end: 0,
+            },
+            dev: false,
+            optional: false,
+            registry: None,
+            resolved_version: None,
+        };
+        // Root package's dependency string `"multi 1.0.0"` should override
+        // the first-wins `"2.0.0"` from the graph order.
+        assert_eq!(
+            resolver.resolve_version(&dep, &graph),
+            Some("1.0.0".to_string())
+        );
+    }
+
+    #[test]
+    fn cargo_resolver_falls_back_to_first_wins_without_root_disambiguation() {
+        use crate::parsers::Dependency;
+        use crate::parsers::Span;
+        use crate::parsers::lockfile_resolver::LockfileResolver;
+
+        // No root_package set — fallback should pick first-found version.
+        let content = r#"
+version = 3
+
+[[package]]
+name = "lonely"
+version = "5.5.5"
+"#;
+        let resolver = super::CargoResolver { root_package: None };
+        let graph = resolver.parse_graph(content);
+        let dep = Dependency {
+            name: "lonely".to_string(),
+            version: "*".to_string(),
+            name_span: Span {
+                line: 0,
+                line_start: 0,
+                line_end: 0,
+            },
+            version_span: Span {
+                line: 0,
+                line_start: 0,
+                line_end: 0,
+            },
+            dev: false,
+            optional: false,
+            registry: None,
+            resolved_version: None,
+        };
+        assert_eq!(
+            resolver.resolve_version(&dep, &graph),
+            Some("5.5.5".to_string())
+        );
     }
 }

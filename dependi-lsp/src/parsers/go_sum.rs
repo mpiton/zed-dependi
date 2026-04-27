@@ -2,7 +2,12 @@
 
 use std::path::{Path, PathBuf};
 
+use async_trait::async_trait;
 use hashbrown::HashMap;
+
+use crate::parsers::Dependency;
+use crate::parsers::lockfile_graph::{LockfileGraph, LockfilePackage};
+use crate::parsers::lockfile_resolver::LockfileResolver;
 
 /// Parse a go.sum file and return a map of module path → all observed versions.
 ///
@@ -56,6 +61,58 @@ pub async fn find_go_sum(go_mod_path: &Path) -> Option<PathBuf> {
         Some(candidate)
     } else {
         None
+    }
+}
+
+/// Resolves versions from `go.sum` for Go modules. Unlike other ecosystems,
+/// `go.sum` may list multiple versions for the same module (test deps, transitive
+/// versions). `resolve_version` is overridden to honor that semantic:
+/// prefer `dep.version` if present among candidates, fall back to the sole
+/// candidate when only one exists, otherwise leave unresolved (avoid guessing).
+pub struct GoResolver;
+
+#[async_trait]
+impl LockfileResolver for GoResolver {
+    async fn find_lockfile(&self, manifest_path: &Path) -> Option<PathBuf> {
+        find_go_sum(manifest_path).await
+    }
+
+    fn parse_graph(&self, lock_content: &str) -> LockfileGraph {
+        let lock_versions = parse_go_sum(lock_content);
+        let mut packages = Vec::new();
+        for (name, versions) in &lock_versions {
+            for version in versions {
+                packages.push(LockfilePackage {
+                    name: name.clone(),
+                    version: version.clone(),
+                    dependencies: Vec::new(),
+                    is_root: false,
+                });
+            }
+        }
+        LockfileGraph { packages }
+    }
+
+    fn resolve_version(&self, dep: &Dependency, graph: &LockfileGraph) -> Option<String> {
+        // Deduplicate so identical version strings (e.g., the same module listed
+        // twice in go.sum because of separate /go.mod and h1: entries handled
+        // upstream, or upstream parsing quirks) do not inflate the candidate
+        // count and force the "ambiguous" branch when only one unique version
+        // actually exists.
+        let mut unique: Vec<&str> = Vec::new();
+        for p in graph.packages.iter().filter(|p| p.name == dep.name) {
+            let v = p.version.as_str();
+            if !unique.contains(&v) {
+                unique.push(v);
+            }
+        }
+        if unique.iter().any(|v| *v == dep.version) {
+            Some(dep.version.clone())
+        } else if unique.len() == 1 {
+            Some(unique[0].to_string())
+        } else {
+            None
+        }
     }
 }
 
@@ -191,5 +248,118 @@ github.com/foo/bar v1.0.0
 ";
         let map = parse_go_sum(content);
         assert_eq!(map.get("github.com/foo/bar").unwrap(), &["v1.0.0"]);
+    }
+
+    #[tokio::test]
+    async fn go_resolver_prefers_dep_version_when_present_in_candidates() {
+        use crate::parsers::lockfile_resolver::LockfileResolver;
+        let tmp = tempfile::tempdir().expect("tempdir");
+        let manifest = tmp.path().join("go.mod");
+        let lock = tmp.path().join("go.sum");
+        std::fs::write(&manifest, "module example.com/demo\n").unwrap();
+        std::fs::write(
+            &lock,
+            "github.com/foo/bar v1.0.0 h1:hash1=\n\
+             github.com/foo/bar v1.1.0 h1:hash2=\n\
+             github.com/baz/qux v0.5.0 h1:hash3=\n",
+        )
+        .unwrap();
+        let resolver = super::GoResolver;
+        assert_eq!(
+            resolver.find_lockfile(&manifest).await.as_deref(),
+            Some(lock.as_path())
+        );
+        let content = std::fs::read_to_string(&lock).unwrap();
+        let graph = resolver.parse_graph(&content);
+
+        // Case 1: dep.version matches one of the candidates → prefer it
+        let dep_with_match = crate::parsers::Dependency {
+            name: "github.com/foo/bar".to_string(),
+            version: "v1.1.0".to_string(),
+            name_span: crate::parsers::Span {
+                line: 0,
+                line_start: 0,
+                line_end: 0,
+            },
+            version_span: crate::parsers::Span {
+                line: 0,
+                line_start: 0,
+                line_end: 0,
+            },
+            dev: false,
+            optional: false,
+            registry: None,
+            resolved_version: None,
+        };
+        assert_eq!(
+            resolver.resolve_version(&dep_with_match, &graph),
+            Some("v1.1.0".to_string())
+        );
+
+        // Case 2: single candidate, dep.version differs → auto-select sole candidate
+        let dep_single = crate::parsers::Dependency {
+            name: "github.com/baz/qux".to_string(),
+            version: "v0.4.0".to_string(),
+            ..dep_with_match.clone()
+        };
+        assert_eq!(
+            resolver.resolve_version(&dep_single, &graph),
+            Some("v0.5.0".to_string())
+        );
+
+        // Case 3: ambiguous candidates without exact match → None
+        let dep_ambiguous = crate::parsers::Dependency {
+            name: "github.com/foo/bar".to_string(),
+            version: "v0.0.1".to_string(),
+            ..dep_with_match
+        };
+        assert_eq!(resolver.resolve_version(&dep_ambiguous, &graph), None);
+    }
+
+    /// Regression: identical duplicate versions in go.sum (e.g., from /go.mod
+    /// echoes parsed twice or repeated h1: hash lines) must not inflate the
+    /// candidate count and force the "ambiguous → None" branch when the unique
+    /// version count is in fact 1.
+    #[tokio::test]
+    async fn go_resolver_dedupes_identical_candidates_before_ambiguity_check() {
+        let graph = LockfileGraph {
+            packages: vec![
+                LockfilePackage {
+                    name: "github.com/foo/bar".to_string(),
+                    version: "v1.0.0".to_string(),
+                    dependencies: Vec::new(),
+                    is_root: false,
+                },
+                LockfilePackage {
+                    name: "github.com/foo/bar".to_string(),
+                    version: "v1.0.0".to_string(),
+                    dependencies: Vec::new(),
+                    is_root: false,
+                },
+            ],
+        };
+        let dep = crate::parsers::Dependency {
+            name: "github.com/foo/bar".to_string(),
+            version: "v0.9.0".to_string(),
+            name_span: crate::parsers::Span {
+                line: 0,
+                line_start: 0,
+                line_end: 0,
+            },
+            version_span: crate::parsers::Span {
+                line: 0,
+                line_start: 0,
+                line_end: 0,
+            },
+            dev: false,
+            optional: false,
+            registry: None,
+            resolved_version: None,
+        };
+        // Two identical entries collapse to one unique candidate → return it.
+        assert_eq!(
+            super::GoResolver.resolve_version(&dep, &graph),
+            Some("v1.0.0".to_string())
+        );
     }
 }

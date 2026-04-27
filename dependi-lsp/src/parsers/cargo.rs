@@ -9,6 +9,17 @@ use taplo::syntax::SyntaxElement;
 
 use super::{Dependency, Parser, Span};
 
+/// Extract the `[package].name` field from a Cargo.toml manifest.
+/// Used to pass the root package name to `parse_cargo_lock` for multi-version disambiguation.
+pub fn cargo_root_package_name(manifest_content: &str) -> Option<String> {
+    let value: toml::Value = toml::from_str(manifest_content).ok()?;
+    value
+        .get("package")?
+        .get("name")?
+        .as_str()
+        .map(|s| s.to_string())
+}
+
 /// Parser for Rust Cargo.toml dependency files
 #[derive(Debug, Default)]
 pub struct CargoParser;
@@ -417,5 +428,35 @@ serde = { version = "1.0.0", features = ["derive"] }
         assert_eq!(deps.len(), 1);
         assert_eq!(deps[0].name, "serde");
         assert!(deps[0].registry.is_none());
+    }
+
+    #[test]
+    fn test_cargo_root_package_name_returns_package_name() {
+        let manifest = r#"
+[package]
+name = "my-crate"
+version = "0.1.0"
+
+[dependencies]
+serde = "1.0"
+"#;
+        assert_eq!(
+            cargo_root_package_name(manifest),
+            Some("my-crate".to_string())
+        );
+    }
+
+    #[test]
+    fn test_cargo_root_package_name_returns_none_for_workspace_only() {
+        let manifest = r#"
+[workspace]
+members = ["crate-a"]
+"#;
+        assert_eq!(cargo_root_package_name(manifest), None);
+    }
+
+    #[test]
+    fn test_cargo_root_package_name_returns_none_for_invalid_toml() {
+        assert_eq!(cargo_root_package_name("not [valid toml ="), None);
     }
 }
