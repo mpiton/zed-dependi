@@ -2,7 +2,7 @@
 
 use taplo::dom::Node;
 use taplo::dom::node::DomNode;
-use taplo::rowan::TextRange;
+use taplo::rowan::{TextRange, TextSize};
 use taplo::syntax::SyntaxElement;
 
 use super::{Dependency, Parser, Span};
@@ -260,16 +260,6 @@ fn compute_line_ranges(content: &str) -> Box<[TextRange]> {
         .collect::<Box<[_]>>()
 }
 
-/// Convert a taplo DOM node's byte range into a 0-indexed line/column `Span`.
-///
-/// Returns `None` when the node lacks syntax info (synthetic/detached) or when
-/// the byte range straddles multiple lines (should not occur for the value
-/// nodes we resolve, but guards against malformed input).
-fn node_to_span(node: &Node, line_ranges: &[TextRange]) -> Option<Span> {
-    let range = node.syntax().map(SyntaxElement::text_range)?;
-    range_to_span(range, line_ranges)
-}
-
 /// Convert an arbitrary `TextRange` to a `Span`. Used for raw key ranges.
 fn range_to_span(range: TextRange, line_ranges: &[TextRange]) -> Option<Span> {
     let line_idx = line_ranges
@@ -288,6 +278,48 @@ fn range_to_span(range: TextRange, line_ranges: &[TextRange]) -> Option<Span> {
         line_start: (range.start() - line_range.start()).into(),
         line_end: (range.end() - line_range.start()).into(),
     })
+}
+
+/// Return the byte range covering the *content* of a string node, i.e. the
+/// range minus the surrounding quote characters.
+///
+/// Assumes single-character delimiters (`"..."` or `'...'`), which is the only
+/// form PEP 508 / Poetry version literals ever take in practice. Returns `None`
+/// when the node lacks syntax info or its range is shorter than 2 bytes.
+///
+/// This is the workhorse for narrow `version_span` / `name_span`: callers slice
+/// inside the inner range so quick-fix edits replace text *between* the quotes
+/// instead of clobbering them.
+fn string_inner_range(node: &Node) -> Option<TextRange> {
+    let range = node.syntax().map(SyntaxElement::text_range)?;
+    if range.len() < TextSize::from(2) {
+        return None;
+    }
+    let one = TextSize::from(1);
+    Some(TextRange::new(range.start() + one, range.end() - one))
+}
+
+/// Map PEP 508 byte ranges (relative to `dep_str`) onto the source `Span`s
+/// for the name and version literals inside the array item's string node.
+///
+/// `(name_span, version_span)` are anchored to the *content* of the string
+/// (between the quotes) so that LSP quick-fix `TextEdit`s replace just the
+/// inner text and leave the surrounding quotes intact.
+fn pep508_spans(
+    item: &Node,
+    parsed: &Pep508Parsed,
+    line_ranges: &[TextRange],
+) -> Option<(Span, Span)> {
+    let inner = string_inner_range(item)?;
+    let to_range = |(start, end): (usize, usize)| {
+        TextRange::new(
+            inner.start() + TextSize::from(start as u32),
+            inner.start() + TextSize::from(end as u32),
+        )
+    };
+    let name_span = range_to_span(to_range(parsed.name_byte_range), line_ranges)?;
+    let version_span = range_to_span(to_range(parsed.version_byte_range), line_ranges)?;
+    Some((name_span, version_span))
 }
 
 /// Parse pyproject.toml format (PEP 621 + Poetry + Hatch)
@@ -349,17 +381,17 @@ fn parse_pep621_deps(dom: &Node, line_ranges: &[TextRange], deps: &mut Vec<Depen
             continue;
         };
         let dep_str = dep_str_node.value();
-        let Some((name, version)) = parse_pep508_dependency(dep_str) else {
+        let Some(parsed) = parse_pep508_dependency(dep_str) else {
             continue;
         };
-        let Some(string_span) = node_to_span(item, line_ranges) else {
+        let Some((name_span, version_span)) = pep508_spans(item, &parsed, line_ranges) else {
             continue;
         };
         deps.push(Dependency {
-            name,
-            version,
-            name_span: string_span,
-            version_span: string_span,
+            name: parsed.name,
+            version: parsed.version,
+            name_span,
+            version_span,
             dev: false,
             optional: false,
             registry: None,
@@ -387,17 +419,17 @@ fn parse_pep621_optional(dom: &Node, line_ranges: &[TextRange], deps: &mut Vec<D
                 continue;
             };
             let dep_str = dep_str_node.value();
-            let Some((name, version)) = parse_pep508_dependency(dep_str) else {
+            let Some(parsed) = parse_pep508_dependency(dep_str) else {
                 continue;
             };
-            let Some(string_span) = node_to_span(item, line_ranges) else {
+            let Some((name_span, version_span)) = pep508_spans(item, &parsed, line_ranges) else {
                 continue;
             };
             deps.push(Dependency {
-                name,
-                version,
-                name_span: string_span,
-                version_span: string_span,
+                name: parsed.name,
+                version: parsed.version,
+                name_span,
+                version_span,
                 dev: true,
                 optional: true,
                 registry: None,
@@ -420,7 +452,7 @@ fn parse_poetry_main(dom: &Node, line_ranges: &[TextRange], deps: &mut Vec<Depen
         if name == "python" {
             continue;
         }
-        let Some((version, optional)) = extract_poetry_version_taplo(value) else {
+        let Some((version, optional, version_range)) = extract_poetry_version_taplo(value) else {
             continue;
         };
         let Some(name_span) = key
@@ -430,7 +462,7 @@ fn parse_poetry_main(dom: &Node, line_ranges: &[TextRange], deps: &mut Vec<Depen
         else {
             continue;
         };
-        let Some(version_span) = node_to_span(value, line_ranges) else {
+        let Some(version_span) = range_to_span(version_range, line_ranges) else {
             continue;
         };
         deps.push(Dependency {
@@ -455,7 +487,7 @@ fn parse_poetry_dev_legacy(dom: &Node, line_ranges: &[TextRange], deps: &mut Vec
     let entries = deps_table.entries().read();
     for (key, value) in entries.iter() {
         let name = key.value().to_string();
-        let Some((version, optional)) = extract_poetry_version_taplo(value) else {
+        let Some((version, optional, version_range)) = extract_poetry_version_taplo(value) else {
             continue;
         };
         let Some(name_span) = key
@@ -465,7 +497,7 @@ fn parse_poetry_dev_legacy(dom: &Node, line_ranges: &[TextRange], deps: &mut Vec
         else {
             continue;
         };
-        let Some(version_span) = node_to_span(value, line_ranges) else {
+        let Some(version_span) = range_to_span(version_range, line_ranges) else {
             continue;
         };
         deps.push(Dependency {
@@ -503,7 +535,8 @@ fn parse_poetry_groups(dom: &Node, line_ranges: &[TextRange], deps: &mut Vec<Dep
         let entries = deps_table.entries().read();
         for (key, value) in entries.iter() {
             let name = key.value().to_string();
-            let Some((version, optional)) = extract_poetry_version_taplo(value) else {
+            let Some((version, optional, version_range)) = extract_poetry_version_taplo(value)
+            else {
                 continue;
             };
             let Some(name_span) = key
@@ -513,7 +546,7 @@ fn parse_poetry_groups(dom: &Node, line_ranges: &[TextRange], deps: &mut Vec<Dep
             else {
                 continue;
             };
-            let Some(version_span) = node_to_span(value, line_ranges) else {
+            let Some(version_span) = range_to_span(version_range, line_ranges) else {
                 continue;
             };
             deps.push(Dependency {
@@ -549,17 +582,17 @@ fn parse_pep735_groups(dom: &Node, line_ranges: &[TextRange], deps: &mut Vec<Dep
                 continue;
             };
             let dep_str = dep_str_node.value();
-            let Some((name, version)) = parse_pep508_dependency(dep_str) else {
+            let Some(parsed) = parse_pep508_dependency(dep_str) else {
                 continue;
             };
-            let Some(string_span) = node_to_span(item, line_ranges) else {
+            let Some((name_span, version_span)) = pep508_spans(item, &parsed, line_ranges) else {
                 continue;
             };
             deps.push(Dependency {
-                name,
-                version,
-                name_span: string_span,
-                version_span: string_span,
+                name: parsed.name,
+                version: parsed.version,
+                name_span,
+                version_span,
                 dev: false,
                 optional: false,
                 registry: None,
@@ -592,17 +625,18 @@ fn parse_hatch_envs(envs_node: &Node, line_ranges: &[TextRange], deps: &mut Vec<
                     continue;
                 };
                 let dep_str = dep_str_node.value();
-                let Some((name, version)) = parse_pep508_dependency(dep_str) else {
+                let Some(parsed) = parse_pep508_dependency(dep_str) else {
                     continue;
                 };
-                let Some(string_span) = node_to_span(item, line_ranges) else {
+                let Some((name_span, version_span)) = pep508_spans(item, &parsed, line_ranges)
+                else {
                     continue;
                 };
                 deps.push(Dependency {
-                    name,
-                    version,
-                    name_span: string_span,
-                    version_span: string_span,
+                    name: parsed.name,
+                    version: parsed.version,
+                    name_span,
+                    version_span,
                     dev: true,
                     optional: false,
                     registry: None,
@@ -634,23 +668,47 @@ fn parse_hatch_toml(content: &str) -> Vec<Dependency> {
     dependencies
 }
 
-/// Parse PEP 508 dependency string: "package>=1.0.0" or "package[extra]>=1.0.0"
-fn parse_pep508_dependency(dep_str: &str) -> Option<(String, String)> {
-    let trimmed = dep_str.trim();
+/// Result of parsing a PEP 508 dependency string.
+///
+/// Carries byte ranges (in `dep_str`) for the package name and the
+/// operator+version literal, so callers can map them onto their string node's
+/// inner range and produce narrow `name_span` / `version_span` values that
+/// LSP quick-fixes can edit safely.
+struct Pep508Parsed {
+    name: String,
+    /// Operator + version, formatted with no whitespace (e.g., `">=2.28.0"`).
+    version: String,
+    /// Byte range in `dep_str` covering the package name (excludes extras like `[security]`).
+    name_byte_range: (usize, usize),
+    /// Byte range in `dep_str` covering operator + version (whitespace inside is preserved).
+    version_byte_range: (usize, usize),
+}
 
-    // Remove environment markers
-    let without_markers = if let Some(semi_pos) = trimmed.find(';') {
+/// Parse PEP 508 dependency string: "package>=1.0.0" or "package[extra]>=1.0.0"
+fn parse_pep508_dependency(dep_str: &str) -> Option<Pep508Parsed> {
+    // Compute the offset of the trimmed slice within `dep_str` so byte ranges
+    // we return are anchored to the original (untrimmed) input.
+    let trim_start = dep_str.trim_start();
+    let leading_ws = dep_str.len() - trim_start.len();
+    let trimmed = trim_start.trim_end();
+
+    // Remove environment markers (`; python_version<3.10`, etc.)
+    let pre_marker = if let Some(semi_pos) = trimmed.find(';') {
         &trimmed[..semi_pos]
     } else {
         trimmed
     };
-    let without_markers = without_markers.trim();
+    // `pre_marker` may have trailing space before the `;`; trim it before
+    // searching for the version operator.
+    let pm_trim_start = pre_marker.trim_start();
+    let pm_leading = pre_marker.len() - pm_trim_start.len();
+    let without_markers = pm_trim_start.trim_end();
+    let wm_offset = leading_ws + pm_leading;
 
-    // Find version operator
+    // Find version operator. Longest operators come first so `===` wins over `==`.
     let operators = ["===", "==", ">=", "<=", "!=", "~=", ">", "<"];
     let mut op_pos = None;
     let mut op_len = 0;
-
     for op in &operators {
         if let Some(pos) = without_markers.find(op)
             && (op_pos.is_none() || pos < op_pos.unwrap())
@@ -659,40 +717,66 @@ fn parse_pep508_dependency(dep_str: &str) -> Option<(String, String)> {
             op_len = op.len();
         }
     }
-
     let op_pos = op_pos?;
 
-    // Extract name (handle extras)
+    // Extract name (handle extras like `requests[security]`).
     let name_part = &without_markers[..op_pos];
-    let name = if let Some(bracket_pos) = name_part.find('[') {
+    let name_substr = if let Some(bracket_pos) = name_part.find('[') {
         &name_part[..bracket_pos]
     } else {
         name_part
     };
-    let name = name.trim();
+    let name_trimmed = name_substr.trim();
+    if name_trimmed.is_empty() {
+        return None;
+    }
+    // Offset of the trimmed name within `name_substr`.
+    let name_inner_offset = name_substr.len() - name_substr.trim_start().len();
+    let name_start = wm_offset + name_inner_offset;
+    let name_end = name_start + name_trimmed.len();
 
-    // Extract version (including operator, to align with requirements.txt behavior)
+    // Extract version (operator + numeric part, taking only the first constraint).
     let operator = &without_markers[op_pos..op_pos + op_len];
     let version_part = &without_markers[op_pos + op_len..];
-    let version_num = if let Some(comma_pos) = version_part.find(',') {
+    let version_num_substr = if let Some(comma_pos) = version_part.find(',') {
         &version_part[..comma_pos]
     } else {
         version_part
     };
-    let version_num = version_num.trim();
-
-    if name.is_empty() || version_num.is_empty() {
+    let version_num = version_num_substr.trim();
+    if version_num.is_empty() {
         return None;
     }
+    // version_byte_range covers `operator..end_of_version_num` in `dep_str`.
+    // Trim only the trailing side: any leading space between operator and number
+    // (e.g., `>= 2.0`) stays inside the span — replacing it with `>=2.1` is fine
+    // and keeps the range tight against the literal.
+    let version_num_end_in_part = version_num_substr.trim_end().len();
+    let v_start = wm_offset + op_pos;
+    let v_end = wm_offset + op_pos + op_len + version_num_end_in_part;
 
-    Some((name.to_string(), format!("{operator}{version_num}")))
+    Some(Pep508Parsed {
+        name: name_trimmed.to_string(),
+        version: format!("{operator}{version_num}"),
+        name_byte_range: (name_start, name_end),
+        version_byte_range: (v_start, v_end),
+    })
 }
 
-/// Extract version and optional flag from Poetry dependency value (using taplo Node)
-fn extract_poetry_version_taplo(value: &taplo::dom::Node) -> Option<(String, bool)> {
+/// Extract version, optional flag, and the inner byte range of the version
+/// literal from a Poetry dependency value.
+///
+/// The returned `TextRange` covers only the *content* of the version string
+/// (no surrounding quotes), so callers can convert it to a `Span` and use it
+/// directly as `version_span`. For inline-tables we point at the nested
+/// `version = "..."` literal rather than the whole `{ ... }` table — that's
+/// what makes "Update to X.Y.Z" quick-fixes safe (they replace just the
+/// version, not the surrounding metadata).
+fn extract_poetry_version_taplo(value: &taplo::dom::Node) -> Option<(String, bool, TextRange)> {
     // Simple string value: flask = "^2.0.0"
     if let Some(s) = value.as_str() {
-        return Some((s.value().to_string(), false));
+        let inner = string_inner_range(value)?;
+        return Some((s.value().to_string(), false, inner));
     }
 
     // Table value: flask = { version = "^2.0.0", optional = true, ... }
@@ -701,13 +785,14 @@ fn extract_poetry_version_taplo(value: &taplo::dom::Node) -> Option<(String, boo
         && let Some(version_str) = version_node.as_str()
     {
         let version = version_str.value().to_string();
-        // Extract optional flag if present
-        let optional = if let Some(opt_node) = t.get("optional") {
-            opt_node.as_bool().map(|b| b.value()).unwrap_or(false)
-        } else {
-            false
-        };
-        return Some((version, optional));
+        let optional = t
+            .get("optional")
+            .as_ref()
+            .and_then(Node::as_bool)
+            .map(|b| b.value())
+            .unwrap_or(false);
+        let inner = string_inner_range(&version_node)?;
+        return Some((version, optional, inner));
     }
 
     None
@@ -1436,23 +1521,6 @@ dependencies = ["ruff>=0.1.0"]
     }
 
     #[test]
-    fn test_node_to_span_resolves_string_value() {
-        let content = "[tool.poetry.dependencies]\nrequests = \"^2.0.0\"\n";
-        let parsed = taplo::parser::parse(content);
-        let dom = parsed.into_dom();
-        let line_ranges = compute_line_ranges(content);
-
-        let value_node = dom
-            .get("tool")
-            .get("poetry")
-            .get("dependencies")
-            .get("requests");
-        let span = node_to_span(&value_node, &line_ranges).expect("span");
-        assert_eq!(span.line, 1, "value lives on second line");
-        assert!(span.line_end > span.line_start);
-    }
-
-    #[test]
     fn test_range_to_span_returns_none_for_multiline_range() {
         let content = "abc\ndef\nghi";
         let line_ranges = compute_line_ranges(content);
@@ -1463,5 +1531,97 @@ dependencies = ["ruff>=0.1.0"]
             range_to_span(straddle, &line_ranges).is_none(),
             "multi-line range must yield None to prevent underflow"
         );
+    }
+
+    /// Helper: extract the substring `content[span]` for a single-line span.
+    fn slice_span<'a>(content: &'a str, span: &Span) -> &'a str {
+        let line = content.lines().nth(span.line as usize).expect("line");
+        &line[span.line_start as usize..span.line_end as usize]
+    }
+
+    #[test]
+    fn test_pep621_version_span_covers_only_version_literal() {
+        // Quick-fix replacement targets `version_span`, so the span MUST cover
+        // only `>=2.28.0` — never the package name or the surrounding quotes.
+        // Otherwise an "Update to 2.28.1" edit would clobber `requests` or
+        // produce `2.28.1` (no quotes) and break the TOML.
+        let content = "[project]\ndependencies = [\"requests>=2.28.0\"]\n";
+        let parser = PythonParser::new();
+        let deps = parser.parse(content);
+        assert_eq!(deps.len(), 1);
+        let dep = &deps[0];
+        assert_eq!(dep.version, ">=2.28.0");
+        assert_eq!(
+            slice_span(content, &dep.version_span),
+            ">=2.28.0",
+            "version_span must cover only the operator + version, not the whole quoted spec"
+        );
+        assert_eq!(
+            slice_span(content, &dep.name_span),
+            "requests",
+            "name_span must cover only the package name, not the whole quoted spec"
+        );
+    }
+
+    #[test]
+    fn test_poetry_simple_string_version_span_excludes_quotes() {
+        // For `flask = "^2.0.0"`, version_span must cover only `^2.0.0`
+        // (no quotes). Replacing with `^2.0.1` must yield valid TOML.
+        let content = "[tool.poetry.dependencies]\nflask = \"^2.0.0\"\n";
+        let parser = PythonParser::new();
+        let deps = parser.parse(content);
+        assert_eq!(deps.len(), 1);
+        let dep = &deps[0];
+        assert_eq!(dep.version, "^2.0.0");
+        assert_eq!(
+            slice_span(content, &dep.version_span),
+            "^2.0.0",
+            "Poetry simple-string version_span must exclude surrounding quotes"
+        );
+    }
+
+    #[test]
+    fn test_poetry_inline_table_version_span_targets_inner_string() {
+        // For `requests = { version = "^2.28.0", optional = true }`,
+        // version_span must cover only `^2.28.0` so that quick-fix replacement
+        // does not clobber the rest of the inline-table metadata.
+        let content =
+            "[tool.poetry.dependencies]\nrequests = { version = \"^2.28.0\", optional = true }\n";
+        let parser = PythonParser::new();
+        let deps = parser.parse(content);
+        assert_eq!(deps.len(), 1);
+        let dep = &deps[0];
+        assert_eq!(dep.version, "^2.28.0");
+        assert!(dep.optional);
+        assert_eq!(
+            slice_span(content, &dep.version_span),
+            "^2.28.0",
+            "Poetry inline-table version_span must point at the nested version literal, \
+             not the whole inline table"
+        );
+    }
+
+    #[test]
+    fn test_pep735_version_span_covers_only_version_literal() {
+        let content = "[dependency-groups]\ntest = [\"pytest>=7.0.0\"]\n";
+        let parser = PythonParser::new();
+        let deps = parser.parse(content);
+        assert_eq!(deps.len(), 1);
+        let dep = &deps[0];
+        assert_eq!(dep.version, ">=7.0.0");
+        assert_eq!(slice_span(content, &dep.version_span), ">=7.0.0");
+        assert_eq!(slice_span(content, &dep.name_span), "pytest");
+    }
+
+    #[test]
+    fn test_hatch_envs_version_span_covers_only_version_literal() {
+        let content = "[tool.hatch.envs.lint]\ndependencies = [\"ruff>=0.1.0\"]\n";
+        let parser = PythonParser::new();
+        let deps = parser.parse(content);
+        assert_eq!(deps.len(), 1);
+        let dep = &deps[0];
+        assert_eq!(dep.version, ">=0.1.0");
+        assert_eq!(slice_span(content, &dep.version_span), ">=0.1.0");
+        assert_eq!(slice_span(content, &dep.name_span), "ruff");
     }
 }
