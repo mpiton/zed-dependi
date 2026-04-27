@@ -1,12 +1,39 @@
-//! Parser for Dart/Flutter pubspec.yaml files
+//! Parser for Dart/Flutter `pubspec.yaml` files.
+//!
+//! Recognises three top-level sections:
+//!
+//! | YAML key | `dev` |
+//! |----------|-------|
+//! | `dependencies` | `false` |
+//! | `dev_dependencies` | `true` |
+//! | `dependency_overrides` | `false` |
+//!
+//! Complex dependency forms (git, path, SDK, hosted) are silently skipped.
+//! Flutter SDK packages (`flutter`, `flutter_test`, etc.) are also excluded.
+//! Inline YAML comments after a version string are stripped before the version
+//! is recorded.
 
 use super::{Dependency, Parser, Span};
 
-/// Parser for Dart pubspec.yaml dependency files
+/// Parser for Dart `pubspec.yaml` dependency files.
+///
+/// # Examples
+///
+/// ```
+/// use dependi_lsp::parsers::Parser;
+/// use dependi_lsp::parsers::dart::DartParser;
+/// let parser = DartParser::new();
+/// let content = "dependencies:\n  http: ^1.0.0\n";
+/// let deps = parser.parse(content);
+/// assert_eq!(deps.len(), 1);
+/// assert_eq!(deps[0].name, "http");
+/// assert_eq!(deps[0].version, "^1.0.0");
+/// ```
 #[derive(Debug, Default)]
 pub struct DartParser;
 
 impl DartParser {
+    /// Creates a new [`DartParser`] instance.
     pub fn new() -> Self {
         Self
     }
@@ -87,6 +114,7 @@ impl Parser for DartParser {
     }
 }
 
+/// Tracks which top-level YAML section is currently being parsed.
 #[derive(Debug, Clone, Copy)]
 enum DependencySection {
     Dependencies,
@@ -100,7 +128,11 @@ impl DependencySection {
     }
 }
 
-/// Parse a single dependency line in YAML format
+/// Parses a single indented YAML dependency line.
+///
+/// Returns `None` for lines without a version (complex dependencies handled
+/// by the caller as nested blocks), for complex inline forms (`sdk:`, `git:`,
+/// etc.), and for path/absolute-path version values.
 fn parse_dart_dependency_line(line: &str, line_num: u32, dev: bool) -> Option<Dependency> {
     let trimmed = line.trim();
 
@@ -176,7 +208,7 @@ fn parse_dart_dependency_line(line: &str, line_num: u32, dev: bool) -> Option<De
     })
 }
 
-/// Check if a line indicates a complex dependency (git, path, sdk)
+/// Returns `true` when `line` indicates a complex dependency form (git, path, sdk, hosted).
 fn is_complex_dependency(line: &str) -> bool {
     let trimmed = line.trim();
     trimmed.ends_with(':') && !trimmed.contains(' ')
@@ -186,7 +218,8 @@ fn is_complex_dependency(line: &str) -> bool {
         || trimmed.contains("hosted:")
 }
 
-/// Check if a package is a Flutter SDK dependency
+/// Returns `true` for packages that are part of the Flutter SDK and therefore
+/// have no pub.dev entry.
 fn is_flutter_sdk_dependency(name: &str) -> bool {
     matches!(
         name,
