@@ -50,7 +50,6 @@ pub async fn select_resolver(
     manifest_path: &Path,
     manifest_content: &str,
 ) -> Option<Box<dyn LockfileResolver>> {
-    let _ = manifest_path;
     match file_type {
         FileType::Cargo => {
             let root_package =
@@ -58,6 +57,11 @@ pub async fn select_resolver(
             Some(Box::new(crate::parsers::cargo_lock::CargoResolver {
                 root_package,
             }))
+        }
+        FileType::Npm => {
+            let (lock_path, sub) =
+                crate::parsers::npm_lock::find_npm_lockfile(manifest_path).await?;
+            Some(Box::new(crate::parsers::npm_lock::NpmResolver { lock_path, sub }))
         }
         FileType::Maven => None,
         _ => None,

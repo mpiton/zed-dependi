@@ -8,9 +8,11 @@
 
 use std::path::{Path, PathBuf};
 
+use async_trait::async_trait;
 use hashbrown::HashMap;
 
 use crate::parsers::lockfile_graph::{LockfileGraph, LockfilePackage};
+use crate::parsers::lockfile_resolver::LockfileResolver;
 
 /// Type of Node.js lockfile detected.
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -632,6 +634,42 @@ fn split_name_version(spec: &str) -> Option<(&str, &str)> {
     Some((name, version))
 }
 
+/// Resolves versions from npm/yarn/pnpm/bun lockfiles. Sub-format is captured at selection time.
+pub struct NpmResolver {
+    pub lock_path: PathBuf,
+    pub sub: NpmLockfileType,
+}
+
+#[async_trait]
+impl LockfileResolver for NpmResolver {
+    async fn find_lockfile(&self, _manifest_path: &Path) -> Option<PathBuf> {
+        // Path was probed at selection time; return the cached value.
+        Some(self.lock_path.clone())
+    }
+
+    fn parse_graph(&self, lock_content: &str) -> LockfileGraph {
+        match self.sub {
+            NpmLockfileType::PackageLock => parse_package_lock_graph(lock_content),
+            NpmLockfileType::PnpmLock => parse_pnpm_lock_graph(lock_content),
+            NpmLockfileType::YarnLock => parse_yarn_lock_graph(lock_content),
+            NpmLockfileType::BunLock => {
+                let lock_versions = parse_npm_lockfile(lock_content, self.sub);
+                LockfileGraph {
+                    packages: lock_versions
+                        .into_iter()
+                        .map(|(name, version)| LockfilePackage {
+                            name,
+                            version,
+                            dependencies: Vec::new(),
+                            is_root: false,
+                        })
+                        .collect(),
+                }
+            }
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1223,6 +1261,36 @@ packages:
             react.dependencies
         );
         assert!(react.dependencies.contains(&"react-dom".to_string()));
+    }
+
+    #[tokio::test]
+    async fn npm_resolver_handles_package_lock() {
+        use crate::parsers::lockfile_resolver::LockfileResolver;
+        let tmp = tempfile::tempdir().expect("tempdir");
+        let manifest = tmp.path().join("package.json");
+        let lock = tmp.path().join("package-lock.json");
+        std::fs::write(&manifest, r#"{"name":"demo","version":"0.0.1"}"#).unwrap();
+        std::fs::write(
+            &lock,
+            r#"{
+          "name": "demo",
+          "version": "0.0.1",
+          "lockfileVersion": 3,
+          "packages": {
+            "": { "name": "demo", "version": "0.0.1" },
+            "node_modules/lodash": { "version": "4.17.21" }
+          }
+        }"#,
+        )
+        .unwrap();
+        let resolver = super::NpmResolver {
+            lock_path: lock.clone(),
+            sub: super::NpmLockfileType::PackageLock,
+        };
+        assert_eq!(resolver.find_lockfile(&manifest).await.as_deref(), Some(lock.as_path()));
+        let content = std::fs::read_to_string(&lock).unwrap();
+        let graph = resolver.parse_graph(&content);
+        assert!(graph.packages.iter().any(|p| p.name == "lodash" && p.version == "4.17.21"));
     }
 
     #[test]
