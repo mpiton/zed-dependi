@@ -1,19 +1,36 @@
-//! Parser for Ruby Gemfile files
-//!
-//! Optimized for performance with reduced allocations.
+//! Parser for Ruby `Gemfile` files (Bundler format).
 //!
 //! Supports:
-//! - Gemfile format (Bundler)
-//! - gem declarations with version constraints
-//! - group blocks for development dependencies
+//! - `gem 'name', 'version'` and `gem "name", "version"` declarations.
+//! - Parenthesised form: `gem('name', 'version')`.
+//! - `group :development, :test do … end` blocks — gems inside `dev`/`test`
+//!   groups are emitted with `dev = true`.
+//!
+//! Gems with non-string second arguments (e.g. `git:`, `path:` options) are
+//! silently skipped.  Optimised for reduced allocations with a single byte scan
+//! per token.
 
 use super::{Dependency, Parser, Span};
 
-/// Parser for Ruby Gemfile dependency files
+/// Parser for Ruby `Gemfile` dependency files.
+///
+/// # Examples
+///
+/// ```
+/// use dependi_lsp::parsers::Parser;
+/// use dependi_lsp::parsers::ruby::RubyParser;
+/// let parser = RubyParser::new();
+/// let content = "gem 'rails', '~> 7.0'\n";
+/// let deps = parser.parse(content);
+/// assert_eq!(deps.len(), 1);
+/// assert_eq!(deps[0].name, "rails");
+/// assert_eq!(deps[0].version, "~> 7.0");
+/// ```
 #[derive(Debug, Default)]
 pub struct RubyParser;
 
 impl RubyParser {
+    /// Creates a new [`RubyParser`] instance.
     pub fn new() -> Self {
         Self
     }
@@ -74,7 +91,10 @@ impl Parser for RubyParser {
     }
 }
 
-/// Parse a gem declaration from a line
+/// Parses a `gem` declaration line and returns the corresponding [`Dependency`].
+///
+/// Handles both `gem 'name', 'version'` and `gem('name', 'version')` forms.
+/// Returns `None` when the line does not start with `gem` or has no version string.
 fn parse_gem_declaration(line: &str, line_num: u32, dev: bool) -> Option<Dependency> {
     let trimmed = line.trim();
 
@@ -110,7 +130,12 @@ fn parse_gem_declaration(line: &str, line_num: u32, dev: bool) -> Option<Depende
     })
 }
 
-/// Parse gem arguments and return (name, version, positions)
+/// Parses the argument list of a `gem` declaration and returns
+/// `(name, version, name_start, name_end, version_start, version_end)`.
+///
+/// Both single-quoted and double-quoted strings are accepted.
+/// Returns `None` when the second argument is absent, unquoted (e.g. a hash
+/// key), or contains a colon (version-as-symbol form).
 fn parse_gem_args(line: &str, args_str: &str) -> Option<(String, String, u32, u32, u32, u32)> {
     let bytes = args_str.as_bytes();
     let len = bytes.len();
@@ -165,7 +190,10 @@ fn parse_gem_args(line: &str, args_str: &str) -> Option<(String, String, u32, u3
     ))
 }
 
-/// Parse a quoted string starting at index, return (string, end_index)
+/// Parses a single- or double-quoted string from `bytes` starting at `start`.
+///
+/// Returns `(content, index_after_closing_quote)` on success, or `None`
+/// when `bytes[start]` is not a quote character or the string is unterminated.
 fn parse_quoted_string(bytes: &[u8], start: usize) -> Option<(String, usize)> {
     let len = bytes.len();
     let mut idx = start;
@@ -196,7 +224,11 @@ fn parse_quoted_string(bytes: &[u8], start: usize) -> Option<(String, usize)> {
     Some((s.to_string(), idx + 1))
 }
 
-/// Find the position of a quoted string in a line
+/// Finds the byte position of `needle` within its surrounding quotes in `line`.
+///
+/// Tries single-quoted form first (`'needle'`), then double-quoted (`"needle"`),
+/// then falls back to a direct substring search.  Returns `(start, end)` as
+/// 0-indexed byte offsets covering the inner text (no quotes).
 fn find_quoted_position(line: &str, needle: &str) -> Option<(u32, u32)> {
     // Look for the string within single quotes first (more common in Ruby)
     let single_quoted = format!("'{needle}'");
