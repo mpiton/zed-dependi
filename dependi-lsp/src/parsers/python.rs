@@ -1229,4 +1229,17 @@ mkdocs = "^1.5.0"
         assert!(!mkdocs.dev, "mkdocs in [group.docs] must be dev=false");
         assert!(!mkdocs.optional);
     }
+
+    #[test]
+    fn test_pyproject_poetry_table_format() {
+        let content = r#"
+[tool.poetry.dependencies]
+python = "^3.9"
+requests = { version = "^2.28.0", optional = true }
+"#;
+        let parser = PythonParser::new();
+        let deps = parser.parse(content);
+        let req = deps.iter().find(|d| d.name == "requests").expect("requests missing");
+        assert_eq!(req.version, "^2.28.0");
+    }
 }
