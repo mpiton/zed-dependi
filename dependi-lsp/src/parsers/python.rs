@@ -331,41 +331,8 @@ fn parse_pyproject_toml(content: &str) -> Vec<Dependency> {
         let _ = poetry_table;
     }
 
-    // PEP 735: [dependency-groups] table
-    //
-    // Each group is an array whose items are either:
-    //   - a PEP 508 string specifier  → parsed exactly like [project.dependencies]
-    //   - a table {include-group = "name"} → skipped here; since every group is
-    //     iterated directly, the packages referenced by an include are already
-    //     emitted when that group itself is processed, so no packages are missed.
-    //
-    // Unversioned items (e.g. "pytest" with no operator) produce no Dependency
-    // because parse_pep508_dependency requires a version operator; there is
-    // nothing to check without a version constraint.
-    //
-    // The spec assigns no "dev" semantics to group names, so dev = false for all.
-    let dep_groups_node = dom.get("dependency-groups");
-    if let Some(dep_groups_table) = dep_groups_node.as_table() {
-        let group_entries = dep_groups_table.entries().read();
-        for (_group_name, group_value) in group_entries.iter() {
-            if let Some(items_array) = group_value.as_array() {
-                let items = items_array.items().read();
-                for item in items.iter() {
-                    // String item: a PEP 508 dependency specifier
-                    if let Some(dep_str) = item.as_str() {
-                        let dep_str = dep_str.value();
-                        if let Some((name, version)) = parse_pep508_dependency(dep_str)
-                            && let Some(dep) =
-                                find_dependency_position(content, &name, &version, false, false)
-                        {
-                            dependencies.push(dep);
-                        }
-                    }
-                    // Table items ({include-group = "..."}) are intentionally skipped
-                }
-            }
-        }
-    }
+    parse_pep735_groups(&dom, &line_ranges, &mut dependencies);
+
     // Hatch: [tool.hatch.envs.<ENV_NAME>]
     // Both `dependencies` and `extra-dependencies` are PEP 508 string arrays.
     // Matrix overrides (e.g. [tool.hatch.envs.test.overrides.matrix.*.dependencies])
@@ -562,6 +529,45 @@ fn parse_poetry_groups(dom: &Node, line_ranges: &[TextRange], deps: &mut Vec<Dep
                 version_span,
                 dev: is_dev,
                 optional,
+                registry: None,
+                resolved_version: None,
+            });
+        }
+    }
+}
+
+/// Parse `[dependency-groups]` (PEP 735): table of group_name -> array of items.
+/// Each item is either a PEP 508 string or `{include-group = "..."}` table; tables
+/// are skipped (referenced groups are emitted when their own group is iterated).
+fn parse_pep735_groups(dom: &Node, line_ranges: &[TextRange], deps: &mut Vec<Dependency>) {
+    let dep_groups_node = dom.get("dependency-groups");
+    let Some(dep_groups_table) = dep_groups_node.as_table() else {
+        return;
+    };
+    let group_entries = dep_groups_table.entries().read();
+    for (_group_name, group_value) in group_entries.iter() {
+        let Some(items_array) = group_value.as_array() else {
+            continue;
+        };
+        let items = items_array.items().read();
+        for item in items.iter() {
+            let Some(dep_str_node) = item.as_str() else {
+                continue;
+            };
+            let dep_str = dep_str_node.value();
+            let Some((name, version)) = parse_pep508_dependency(dep_str) else {
+                continue;
+            };
+            let Some(string_span) = node_to_span(item, line_ranges) else {
+                continue;
+            };
+            deps.push(Dependency {
+                name,
+                version,
+                name_span: string_span,
+                version_span: string_span,
+                dev: false,
+                optional: false,
                 registry: None,
                 resolved_version: None,
             });
