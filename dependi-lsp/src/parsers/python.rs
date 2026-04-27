@@ -1,5 +1,7 @@
 //! Parser for Python dependency files (requirements.txt, constraints.txt, pyproject.toml, hatch.toml)
 
+use taplo::rowan::TextRange;
+
 use super::{Dependency, Parser, Span};
 
 /// Parser for Python dependency files
@@ -236,6 +238,25 @@ fn parse_requirement_line(line: &str, line_num: u32, dev: bool) -> Option<Depend
     })
 }
 
+/// Pre-compute the byte offsets of every line in `content`.
+///
+/// Returned ranges are end-exclusive, ordered, and the union covers the entire
+/// content. Used as a lookup table to convert byte-offset ranges from taplo
+/// nodes into 0-indexed `(line, column)` `Span`s.
+fn compute_line_ranges(content: &str) -> Box<[TextRange]> {
+    content
+        .split_inclusive('\n')
+        .map({
+            let mut offset: usize = 0;
+            move |line| {
+                let range = TextRange::at((offset as u32).into(), (line.len() as u32).into());
+                offset += line.len();
+                range
+            }
+        })
+        .collect::<Box<[_]>>()
+}
+
 /// Parse pyproject.toml format (PEP 621 + Poetry + Hatch)
 fn parse_pyproject_toml(content: &str) -> Vec<Dependency> {
     let mut dependencies = Vec::new();
@@ -249,6 +270,7 @@ fn parse_pyproject_toml(content: &str) -> Vec<Dependency> {
     }
 
     let dom = parsed.into_dom();
+    let _line_ranges = compute_line_ranges(content);
 
     // PEP 621: [project.dependencies] array of strings
     let project = dom.get("project");
@@ -1367,5 +1389,18 @@ dependencies = ["ruff>=0.1.0"]
         // column checks: end > start is enough; exact offsets depend on taplo quote resolution
         assert!(dep.name_span.line_end > dep.name_span.line_start);
         assert!(dep.version_span.line_end > dep.version_span.line_start);
+    }
+
+    #[test]
+    fn test_compute_line_ranges_basic() {
+        let content = "abc\nde\nfghi";
+        let ranges = compute_line_ranges(content);
+        assert_eq!(ranges.len(), 3);
+        assert_eq!(u32::from(ranges[0].start()), 0);
+        assert_eq!(u32::from(ranges[0].end()), 4); // "abc\n" = 4 bytes
+        assert_eq!(u32::from(ranges[1].start()), 4);
+        assert_eq!(u32::from(ranges[1].end()), 7); // "de\n" = 3 bytes
+        assert_eq!(u32::from(ranges[2].start()), 7);
+        assert_eq!(u32::from(ranges[2].end()), 11); // "fghi" = 4 bytes
     }
 }
