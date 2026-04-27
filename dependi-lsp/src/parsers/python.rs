@@ -1255,4 +1255,20 @@ dynamic = ["dependencies"]
         let deps = parser.parse(content);
         assert_eq!(deps.len(), 0, "dynamic deps should yield no Dependency items");
     }
+
+    #[test]
+    fn test_pyproject_environment_markers() {
+        let content = r#"
+[project]
+name = "x"
+version = "0.1.0"
+dependencies = [
+    "pytest>=7.0;python_version>='3.8'",
+]
+"#;
+        let parser = PythonParser::new();
+        let deps = parser.parse(content);
+        let pytest = deps.iter().find(|d| d.name == "pytest").expect("pytest missing");
+        assert_eq!(pytest.version, ">=7.0", "marker must be stripped");
+    }
 }
