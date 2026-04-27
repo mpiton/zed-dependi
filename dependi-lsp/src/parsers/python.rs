@@ -1175,4 +1175,25 @@ extra-dependencies = [
         assert!(deps.iter().all(|d| d.dev));
         assert!(deps.iter().all(|d| !d.optional));
     }
+
+    #[test]
+    fn test_pyproject_poetry_groups_dev() {
+        let content = r#"
+[tool.poetry]
+name = "x"
+version = "0.1.0"
+
+[tool.poetry.group.dev.dependencies]
+black = "^23.0.0"
+ruff = "^0.1.0"
+"#;
+        let parser = PythonParser::new();
+        let deps = parser.parse(content);
+        assert_eq!(deps.len(), 2, "expected 2 deps, got {:?}", deps);
+        let black = deps.iter().find(|d| d.name == "black").expect("black missing");
+        assert!(black.dev, "black in [group.dev] must be dev=true");
+        assert!(!black.optional);
+        let ruff = deps.iter().find(|d| d.name == "ruff").expect("ruff missing");
+        assert!(ruff.dev);
+    }
 }
