@@ -1297,4 +1297,19 @@ dependencies = ["ruff>=0.1.0"]
         assert!(deps.iter().any(|d| d.name == "ruff" && d.dev));
         assert_eq!(deps.len(), 4, "expected 4 deps total, got {:?}", deps);
     }
+
+    #[test]
+    fn test_pyproject_pep621_position_accuracy() {
+        let content = "[project]\nname = \"x\"\nversion = \"0.1.0\"\ndependencies = [\n    \"requests>=2.28.0\",\n]\n";
+        let parser = PythonParser::new();
+        let deps = parser.parse(content);
+        assert_eq!(deps.len(), 1);
+        let dep = &deps[0];
+        assert_eq!(dep.name, "requests");
+        assert_eq!(dep.version, ">=2.28.0");
+        assert_eq!(dep.name_span.line, 4, "name should be on the line containing the array item");
+        assert_eq!(dep.version_span.line, 4);
+        assert!(dep.name_span.line_end > dep.name_span.line_start);
+        assert!(dep.version_span.line_end > dep.version_span.line_start);
+    }
 }
