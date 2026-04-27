@@ -2,9 +2,11 @@
 
 use std::path::{Path, PathBuf};
 
+use async_trait::async_trait;
 use hashbrown::HashMap;
 
 use crate::parsers::lockfile_graph::{LockfileGraph, LockfilePackage};
+use crate::parsers::lockfile_resolver::LockfileResolver;
 
 /// Parse a Cargo.lock file and return a map of package name → resolved version.
 ///
@@ -145,15 +147,11 @@ pub async fn find_cargo_lock(cargo_toml_path: &Path) -> Option<PathBuf> {
     }
 }
 
-use async_trait::async_trait;
-
-use crate::parsers::Dependency;
-use crate::parsers::lockfile_resolver::LockfileResolver;
-
 /// Resolves versions from `Cargo.lock` for a Rust project.
 pub struct CargoResolver {
     /// Captured at selection time from the manifest's `[package].name`.
-    /// Used by `parse_cargo_lock_graph` for multi-version disambiguation.
+    /// Reserved for future use; current `parse_cargo_lock_graph` does not consume it,
+    /// but selection retains the field to keep the resolver API consistent across ecosystems.
     pub root_package: Option<String>,
 }
 
@@ -165,15 +163,6 @@ impl LockfileResolver for CargoResolver {
 
     fn parse_graph(&self, lock_content: &str) -> LockfileGraph {
         parse_cargo_lock_graph(lock_content)
-    }
-
-    fn resolve_version(&self, dep: &Dependency, graph: &LockfileGraph) -> Option<String> {
-        // First-wins by name preserves existing semantics.
-        graph
-            .packages
-            .iter()
-            .find(|p| p.name == dep.name)
-            .map(|p| p.version.clone())
     }
 }
 
