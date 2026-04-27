@@ -1312,4 +1312,19 @@ dependencies = ["ruff>=0.1.0"]
         assert!(dep.name_span.line_end > dep.name_span.line_start);
         assert!(dep.version_span.line_end > dep.version_span.line_start);
     }
+
+    #[test]
+    fn test_pyproject_poetry_position_accuracy() {
+        let content = "[tool.poetry.dependencies]\npython = \"^3.9\"\nrequests = \"^2.28.0\"\n";
+        let parser = PythonParser::new();
+        let deps = parser.parse(content);
+        assert_eq!(deps.len(), 1, "only requests, python is skipped");
+        let dep = &deps[0];
+        assert_eq!(dep.name, "requests");
+        assert_eq!(dep.version, "^2.28.0");
+        assert_eq!(dep.name_span.line, 2);
+        assert_eq!(dep.version_span.line, 2);
+        assert!(dep.name_span.line_end > dep.name_span.line_start);
+        assert!(dep.version_span.line_end > dep.version_span.line_start);
+    }
 }
