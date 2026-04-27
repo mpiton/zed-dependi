@@ -73,8 +73,8 @@ pub async fn select_resolver(
         FileType::Php => Some(Box::new(crate::parsers::composer_lock::PhpResolver)),
         FileType::Dart => Some(Box::new(crate::parsers::pubspec_lock::DartResolver)),
         FileType::Csharp => Some(Box::new(crate::parsers::packages_lock_json::CsharpResolver)),
+        FileType::Ruby => Some(Box::new(crate::parsers::gemfile_lock::RubyResolver)),
         FileType::Maven => None,
-        _ => None,
     }
 }
 

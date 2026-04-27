@@ -2,7 +2,11 @@
 
 use std::path::{Path, PathBuf};
 
+use async_trait::async_trait;
 use hashbrown::HashMap;
+
+use crate::parsers::lockfile_graph::LockfileGraph;
+use crate::parsers::lockfile_resolver::LockfileResolver;
 
 /// Platform architecture keywords used to detect platform suffixes in gem versions.
 const PLATFORM_KEYWORDS: &[&str] = &[
@@ -132,7 +136,7 @@ pub fn parse_gemfile_lock(content: &str) -> HashMap<String, String> {
     map
 }
 
-use crate::parsers::lockfile_graph::{LockfileGraph, LockfilePackage};
+use crate::parsers::lockfile_graph::LockfilePackage;
 
 #[derive(PartialEq)]
 enum GemSection {
@@ -232,6 +236,27 @@ pub async fn find_gemfile_lock(gemfile_path: &Path) -> Option<PathBuf> {
         Some(candidate)
     } else {
         None
+    }
+}
+
+/// Resolves versions from `Gemfile.lock` for Ruby projects.
+/// RubyGems normalizes gem names to lowercase via `normalize_gem_name`.
+/// `parse_gemfile_lock_graph` already normalizes names internally, so the default
+/// `resolve_version` (first-wins by normalized name) works without override.
+pub struct RubyResolver;
+
+#[async_trait]
+impl LockfileResolver for RubyResolver {
+    async fn find_lockfile(&self, manifest_path: &Path) -> Option<PathBuf> {
+        find_gemfile_lock(manifest_path).await
+    }
+
+    fn parse_graph(&self, lock_content: &str) -> LockfileGraph {
+        parse_gemfile_lock_graph(lock_content)
+    }
+
+    fn normalize_name(&self, name: &str) -> String {
+        normalize_gem_name(name)
     }
 }
 
@@ -517,6 +542,47 @@ GEM
         let map = parse_gemfile_lock(content);
         assert_eq!(map.get("rails").map(|s| s.as_str()), Some("7.0.3.1"));
         assert_eq!(map.len(), 1);
+    }
+
+    #[tokio::test]
+    async fn ruby_resolver_normalizes_gem_names() {
+        use crate::parsers::lockfile_resolver::LockfileResolver;
+        let tmp = tempfile::tempdir().expect("tempdir");
+        let manifest = tmp.path().join("Gemfile");
+        let lock = tmp.path().join("Gemfile.lock");
+        std::fs::write(&manifest, "source 'https://rubygems.org'\ngem 'rails'\n").unwrap();
+        std::fs::write(
+            &lock,
+            r#"GEM
+  remote: https://rubygems.org/
+  specs:
+    rails (7.1.0)
+
+PLATFORMS
+  ruby
+
+DEPENDENCIES
+  rails
+
+BUNDLED WITH
+   2.4.0
+"#,
+        )
+        .unwrap();
+        let resolver = super::RubyResolver;
+        let content = std::fs::read_to_string(&lock).unwrap();
+        let graph = resolver.parse_graph(&content);
+        let dep = crate::parsers::Dependency {
+            name: "Rails".to_string(),
+            version: "*".to_string(),
+            name_span: crate::parsers::Span { line: 0, line_start: 0, line_end: 0 },
+            version_span: crate::parsers::Span { line: 0, line_start: 0, line_end: 0 },
+            dev: false,
+            optional: false,
+            registry: None,
+            resolved_version: None,
+        };
+        assert_eq!(resolver.resolve_version(&dep, &graph), Some("7.1.0".to_string()));
     }
 
     #[test]
