@@ -653,6 +653,10 @@ impl LockfileResolver for NpmResolver {
             NpmLockfileType::PnpmLock => parse_pnpm_lock_graph(lock_content),
             NpmLockfileType::YarnLock => parse_yarn_lock_graph(lock_content),
             NpmLockfileType::BunLock => {
+                // No dedicated graph parser for bun.lock yet — build a flat
+                // graph (no edges, no is_root) from the name→version map.
+                // Transitive analysis is therefore a no-op for Bun until a
+                // real graph parser lands. Matches pre-refactor behavior.
                 let lock_versions = parse_npm_lockfile(lock_content, self.sub);
                 LockfileGraph {
                     packages: lock_versions
