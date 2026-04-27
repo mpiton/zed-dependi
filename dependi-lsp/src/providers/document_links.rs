@@ -1,14 +1,29 @@
 //! Document link provider — returns clickable links on dependency names.
+//!
+//! [`create_document_links`] maps each parsed [`Dependency`] to an LSP
+//! [`DocumentLink`] whose target URL points to the package page on the
+//! appropriate registry (crates.io, npm, PyPI, etc.).
+//! Dependencies from alternative/private registries are skipped because their
+//! registry URL is not reliably known.
 
 use tower_lsp::lsp_types::{DocumentLink, Position, Range, Url};
 
 use crate::file_types::FileType;
 use crate::parsers::Dependency;
 
-/// Build a list of LSP document links for the given dependencies.
+/// Build LSP document links for the given dependencies.
 ///
-/// Each link covers the span of the package name in the source file and
-/// points to the corresponding registry page.
+/// Each link covers the name-span of the package declaration and points to
+/// the corresponding registry page determined by `file_type`.  Dependencies
+/// that carry a `registry` field (alternative/private registries) are skipped
+/// because their registry URL is not known.
+///
+/// A tooltip of the form `"Open <name> on <registry>"` is attached to each link.
+///
+/// # Returns
+///
+/// A [`Vec<DocumentLink>`] with one entry per eligible dependency.  May be
+/// empty when `deps` is empty or all entries belong to alternative registries.
 pub fn create_document_links(deps: &[Dependency], file_type: &FileType) -> Vec<DocumentLink> {
     deps.iter()
         .filter_map(|dep| {
