@@ -13,7 +13,6 @@ use hashbrown::HashMap;
 
 use crate::parsers::lockfile_graph::{LockfileGraph, LockfilePackage};
 use crate::parsers::lockfile_resolver::LockfileResolver;
-use crate::parsers::Dependency;
 
 /// Type of Python lockfile detected.
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -414,17 +413,6 @@ impl LockfileResolver for PythonResolver {
 
     fn normalize_name(&self, name: &str) -> String {
         normalize_python_name(name)
-    }
-
-    fn resolve_version(&self, dep: &Dependency, graph: &LockfileGraph) -> Option<String> {
-        // Both the dep name AND the lockfile package names need PEP 503 normalization
-        // (lockfile may store "Some-Package" while manifest references "some.package").
-        let normalized_dep = self.normalize_name(&dep.name);
-        graph
-            .packages
-            .iter()
-            .find(|p| self.normalize_name(&p.name) == normalized_dep)
-            .map(|p| p.version.clone())
     }
 }
 
