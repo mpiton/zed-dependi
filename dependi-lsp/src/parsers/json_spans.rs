@@ -5,15 +5,22 @@ use super::Span;
 /// Pre-computed byte offsets of each line start in a source string.
 ///
 /// Constructed in O(n); each `position` query is O(log n) via binary search.
-#[derive(Debug)]
-pub struct LineIndex {
+pub(crate) struct LineIndex {
     /// `offsets[i]` is the byte offset where line `i` starts.
     offsets: Vec<usize>,
 }
 
+impl std::fmt::Debug for LineIndex {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("LineIndex")
+            .field("lines", &self.offsets.len())
+            .finish()
+    }
+}
+
 impl LineIndex {
     /// Build a `LineIndex` from `content`. Always contains at least one entry (`0`).
-    pub fn new(content: &str) -> Self {
+    pub(crate) fn new(content: &str) -> Self {
         let mut offsets = Vec::with_capacity(content.len() / 32 + 1);
         offsets.push(0);
         for (i, byte) in content.bytes().enumerate() {
@@ -27,11 +34,11 @@ impl LineIndex {
     /// Convert a byte offset to a `(line, column)` pair, both 0-indexed.
     /// Columns are byte offsets within the line.
     /// Offsets past the end clamp to the last line.
-    pub fn position(&self, byte_offset: usize) -> (u32, u32) {
-        let line = match self.offsets.binary_search(&byte_offset) {
-            Ok(exact) => exact,
-            Err(insert_at) => insert_at.saturating_sub(1),
-        };
+    pub(crate) fn position(&self, byte_offset: usize) -> (u32, u32) {
+        let line = self
+            .offsets
+            .partition_point(|&start| start <= byte_offset)
+            .saturating_sub(1);
         let col = byte_offset - self.offsets[line];
         (line as u32, col as u32)
     }
@@ -39,7 +46,7 @@ impl LineIndex {
 
 /// Convert a byte range `[start, end)` to a `Span` if it fits on a single line.
 /// Returns `None` if the range straddles a line boundary.
-pub fn span_to_span(line_index: &LineIndex, start: usize, end: usize) -> Option<Span> {
+pub(crate) fn span_to_span(line_index: &LineIndex, start: usize, end: usize) -> Option<Span> {
     let (line_start, col_start) = line_index.position(start);
     let (line_end, col_end) = line_index.position(end);
     if line_start != line_end {
@@ -52,11 +59,21 @@ pub fn span_to_span(line_index: &LineIndex, start: usize, end: usize) -> Option<
     })
 }
 
-/// Strip the surrounding `"…"` from a JSON string's byte range.
-/// `(start, end)` are the outer quote-inclusive bounds; the result is the
-/// inner content bounds, suitable for `span_to_span`.
-pub fn inner_string_span(start: usize, end: usize) -> (usize, usize) {
-    (start + 1, end.saturating_sub(1))
+/// Convert the outer (quote-inclusive) byte bounds of a JSON string to a
+/// `Span` covering only its inner content.
+///
+/// **Precondition**: `(start, end)` must be a valid JSON string span, i.e.
+/// `end >= start + 2` (covering at least the two surrounding quotes).
+/// Returns `None` if the resulting inner range straddles a line boundary.
+pub(crate) fn string_inner_to_span(
+    line_index: &LineIndex,
+    start: usize,
+    end: usize,
+) -> Option<Span> {
+    if end < start + 2 {
+        return None;
+    }
+    span_to_span(line_index, start + 1, end - 1)
 }
 
 #[cfg(test)]
@@ -124,16 +141,30 @@ mod tests {
     }
 
     #[test]
-    fn inner_string_span_strips_quotes() {
-        // For a JSON string `"abc"` at bytes 0..5, inner content is bytes 1..4.
-        let (s, e) = inner_string_span(0, 5);
-        assert_eq!((s, e), (1, 4));
+    fn string_inner_to_span_strips_quotes() {
+        // `"abc"` at bytes 0..5 — inner content `abc` is bytes 1..4.
+        let idx = LineIndex::new(r#""abc""#);
+        let s = string_inner_to_span(&idx, 0, 5).unwrap();
+        assert_eq!(s.line, 0);
+        assert_eq!(s.line_start, 1);
+        assert_eq!(s.line_end, 4);
     }
 
     #[test]
-    fn inner_string_span_empty_string() {
-        // Empty JSON string `""` at bytes 0..2, inner is 1..1.
-        let (s, e) = inner_string_span(0, 2);
-        assert_eq!((s, e), (1, 1));
+    fn string_inner_to_span_empty_string() {
+        // `""` at bytes 0..2 — inner is the empty range 1..1.
+        let idx = LineIndex::new(r#""""#);
+        let s = string_inner_to_span(&idx, 0, 2).unwrap();
+        assert_eq!(s.line, 0);
+        assert_eq!(s.line_start, 1);
+        assert_eq!(s.line_end, 1);
+    }
+
+    #[test]
+    fn string_inner_to_span_rejects_undersized_span() {
+        // A span shorter than the two quotes is not a valid JSON string span.
+        let idx = LineIndex::new("");
+        assert!(string_inner_to_span(&idx, 0, 0).is_none());
+        assert!(string_inner_to_span(&idx, 0, 1).is_none());
     }
 }

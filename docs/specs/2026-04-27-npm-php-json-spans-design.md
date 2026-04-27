@@ -53,11 +53,12 @@ dependi-lsp/src/parsers/
   Constructed once per parse, queried O(log n) per position via binary search.
 - `fn span_to_span(line_index: &LineIndex, byte_start: usize, byte_end: usize) -> Span`
   — converts a byte range to the project's `Span { line, line_start, line_end }`.
-  Returns `None` (or sentinel) if start/end straddle multiple lines, so callers can
-  preserve the existing same-line invariant.
-- `fn inner_string_span(spanned_str: &Spanned<String>) -> (usize, usize)`
-  — strips the surrounding `"…"` from a `Spanned<String>`'s byte range so the
-  resulting span covers only the string contents (matches current behaviour).
+  Returns `None` if start/end straddle multiple lines, so callers can preserve
+  the existing same-line invariant.
+- `fn string_inner_to_span(line_index: &LineIndex, start: usize, end: usize) -> Option<Span>`
+  — strips the surrounding `"…"` from a JSON string's outer (quote-inclusive)
+  byte range and converts the inner content to a `Span`. Returns `None` if the
+  span is shorter than the two surrounding quotes or straddles a line boundary.
 
 `npm.rs` and `php.rs` use `json_spanned_value::from_str` to deserialize into
 strongly-typed structures using `Spanned<…>` wrappers, then convert each pair

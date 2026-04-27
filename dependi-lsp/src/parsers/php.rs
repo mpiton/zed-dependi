@@ -7,8 +7,8 @@
 use json_spanned_value as jsv;
 use json_spanned_value::spanned;
 
-use super::json_spans::{LineIndex, inner_string_span, span_to_span};
-use super::{Dependency, Parser, Span};
+use super::json_spans::{LineIndex, string_inner_to_span};
+use super::{Dependency, Parser};
 
 /// Parser for PHP composer.json dependency files.
 #[derive(Debug, Default)]
@@ -85,11 +85,6 @@ fn parse_section(
             resolved_version: None,
         });
     }
-}
-
-fn string_inner_to_span(line_index: &LineIndex, start: usize, end: usize) -> Option<Span> {
-    let (inner_start, inner_end) = inner_string_span(start, end);
-    span_to_span(line_index, inner_start, inner_end)
 }
 
 #[cfg(test)]
@@ -253,6 +248,9 @@ mod tests {
         assert_eq!(prod.version, "1.0.0");
         assert_eq!(dev.version, "1.0.0");
         assert_ne!(prod.name_span.line, dev.name_span.line);
+        assert_ne!(prod.version_span.line, dev.version_span.line);
+        assert_eq!(prod.name_span.line, prod.version_span.line);
+        assert_eq!(dev.name_span.line, dev.version_span.line);
     }
 
     #[test]

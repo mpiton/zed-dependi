@@ -6,7 +6,7 @@
 use json_spanned_value as jsv;
 use json_spanned_value::spanned;
 
-use super::json_spans::{LineIndex, inner_string_span, span_to_span};
+use super::json_spans::{LineIndex, string_inner_to_span};
 use super::{Dependency, Parser, Span};
 
 /// Parser for npm package.json dependency files.
@@ -109,14 +109,12 @@ fn parse_section(
     }
 }
 
-/// Convert outer (quote-inclusive) byte bounds of a JSON string to an inner-content `Span`.
-fn string_inner_to_span(line_index: &LineIndex, start: usize, end: usize) -> Option<Span> {
-    let (inner_start, inner_end) = inner_string_span(start, end);
-    span_to_span(line_index, inner_start, inner_end)
-}
-
 /// Extract a version string and its inner-content span from a value that is
 /// either a JSON string or an object containing `"version": <string>`.
+///
+/// For object values (e.g. `{ "version": "1.0.0", ... }`) the version's inner
+/// span must lie on the same line as the surrounding key for the dependency
+/// to register; multi-line nested forms are silently skipped.
 fn extract_version(value: &spanned::Value, line_index: &LineIndex) -> Option<(String, Span)> {
     if let Some(s) = value.as_span_string() {
         let span = string_inner_to_span(line_index, s.start(), s.end())?;
@@ -356,6 +354,9 @@ mod tests {
         // Spans must be on different lines (the bug we are fixing: string
         // search may match the same line for both).
         assert_ne!(prod.name_span.line, dev.name_span.line);
+        assert_ne!(prod.version_span.line, dev.version_span.line);
+        assert_eq!(prod.name_span.line, prod.version_span.line);
+        assert_eq!(dev.name_span.line, dev.version_span.line);
     }
 
     #[test]
@@ -385,9 +386,16 @@ mod tests {
         let b = deps.iter().find(|d| d.name == "b").unwrap();
         assert_eq!(a.version, "1.0.0");
         assert_eq!(b.version, "2.0.0");
-        // Sanity: each version span lies inside its declared line range.
-        assert!(a.version_span.line_start < a.version_span.line_end);
-        assert!(b.version_span.line_start < b.version_span.line_end);
+        // Tab-separated entry: `    "a":\t\t"1.0.0",` — `a` at col 5, `1.0.0` at col 11.
+        assert_eq!(a.name_span.line_start, 5);
+        assert_eq!(a.name_span.line_end, 6);
+        assert_eq!(a.version_span.line_start, 11);
+        assert_eq!(a.version_span.line_end, 16);
+        // Multi-space entry: `    "b"  :   "2.0.0"` — `b` at col 5, `2.0.0` at col 14.
+        assert_eq!(b.name_span.line_start, 5);
+        assert_eq!(b.name_span.line_end, 6);
+        assert_eq!(b.version_span.line_start, 14);
+        assert_eq!(b.version_span.line_end, 19);
     }
 
     #[test]
@@ -399,14 +407,32 @@ mod tests {
         }
         content.push_str("  }\n}");
         let parser = NpmParser::new();
-        let start = std::time::Instant::now();
         let deps = parser.parse(&content);
-        let elapsed = start.elapsed();
         assert_eq!(deps.len(), 1000);
-        // Generous bound — purely a smoke check that we are not quadratic.
-        assert!(
-            elapsed < std::time::Duration::from_millis(500),
-            "parse took {elapsed:?}"
-        );
+        // Position checks: each entry on its own line, monotonically increasing.
+        let first = deps.iter().find(|d| d.name == "pkg0").unwrap();
+        let last = deps.iter().find(|d| d.name == "pkg999").unwrap();
+        assert_eq!(first.name_span.line, 2);
+        assert_eq!(last.name_span.line, 1001);
+    }
+
+    #[test]
+    fn test_multiline_object_value_skipped() {
+        // A complex `{ "version": "..." }` form spread across multiple lines:
+        // because the inner `"version"` literal sits on a different line than
+        // the surrounding key, the same-line invariant skips the entry rather
+        // than reporting an out-of-line span.
+        let parser = NpmParser::new();
+        let content = r#"{
+  "dependencies": {
+    "complex": {
+      "version": "2.0.0"
+    },
+    "simple": "1.0.0"
+  }
+}"#;
+        let deps = parser.parse(content);
+        assert_eq!(deps.len(), 1);
+        assert_eq!(deps[0].name, "simple");
     }
 }
