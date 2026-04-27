@@ -8,14 +8,24 @@ use hashbrown::HashMap;
 use crate::parsers::lockfile_graph::{LockfileGraph, LockfilePackage};
 use crate::parsers::lockfile_resolver::LockfileResolver;
 
-/// Parse a pubspec.lock file and return a map of package name → resolved version.
+/// Parse a `pubspec.lock` file and return a map of package name → resolved version.
 ///
-/// pubspec.lock is a YAML file with a `packages:` top-level section.
+/// `pubspec.lock` is a YAML file with a `packages:` top-level section.
 /// Each package name appears at 2-space indent, ending with `:`.
 /// The version is at 4-space indent: `    version: "X.Y.Z"`.
 /// Quotes around version values are stripped.
 /// Dart package names are case-sensitive — no normalization is applied.
 /// When a package appears multiple times, the first entry is kept.
+///
+/// # Examples
+///
+/// ```
+/// use dependi_lsp::parsers::pubspec_lock::parse_pubspec_lock;
+///
+/// let lock = "packages:\n  http:\n    source: hosted\n    version: \"1.2.0\"\n";
+/// let map = parse_pubspec_lock(lock);
+/// assert_eq!(map.get("http").map(String::as_str), Some("1.2.0"));
+/// ```
 pub fn parse_pubspec_lock(content: &str) -> HashMap<String, String> {
     let mut map = HashMap::new();
     let mut in_packages = false;
