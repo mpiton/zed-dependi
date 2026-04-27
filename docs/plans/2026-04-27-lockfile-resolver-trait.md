@@ -129,9 +129,9 @@ In `dependi-lsp/src/backend.rs`:
 
 - [ ] **Step 6: Update `main.rs` similarly**
 
-In `dependi-lsp/src/main.rs`:
+In `dependi-lsp/src/main.rs` (binary crate — `crate::` here refers to the binary, not the `dependi_lsp` library; the helper lives in the library and must be addressed via the library crate name):
 1. Delete the duplicate `fn cargo_root_package_name` near line 247 (and surrounding doc comment if any).
-2. At line 369, replace `cargo_root_package_name(&content)` with `crate::parsers::cargo::cargo_root_package_name(&content)`.
+2. At line 369, replace `cargo_root_package_name(&content)` with `dependi_lsp::parsers::cargo::cargo_root_package_name(&content)`.
 
 - [ ] **Step 7: Run full lib test suite**
 
@@ -524,8 +524,22 @@ impl LockfileResolver for CargoResolver {
     }
 
     fn resolve_version(&self, dep: &Dependency, graph: &LockfileGraph) -> Option<String> {
-        // Cargo's parse_cargo_lock applies root-package filtering, but parse_cargo_lock_graph
-        // already returns disambiguated entries. First-wins by name preserves existing semantics.
+        // Cargo.lock can record multiple versions for the same crate when the
+        // dependency graph is ambiguous. The root package's `dependencies` list
+        // disambiguates by spelling out `"crate version"`. Honor that hint
+        // before falling back to first-wins by name.
+        if let Some(root) = self.root_package.as_ref()
+            && let Some(root_pkg) = graph.packages.iter().find(|p| &p.name == root)
+        {
+            let suffix = format!(" {}", dep.version);
+            if root_pkg
+                .dependencies
+                .iter()
+                .any(|d| d == &dep.name || d.starts_with(&format!("{} ", dep.name)) && d.ends_with(&suffix))
+            {
+                return Some(dep.version.clone());
+            }
+        }
         graph
             .packages
             .iter()
@@ -1554,8 +1568,9 @@ Expected: Compiles. If borrow errors arise (e.g., `&mut dependencies` after the 
 ```bash
 cargo test --package dependi-lsp --lib
 cargo test --package dependi-lsp --test integration_test
+cargo test --package dependi-lsp --test lockfile_resolver_integration
 ```
-Expected: All previous tests pass.
+Expected: All previous tests pass; new `lockfile_resolver_integration` suite passes.
 
 - [ ] **Step 6: Commit**
 

@@ -408,10 +408,11 @@ pub fn parse_package_lock_graph(content: &str) -> LockfileGraph {
         if key.is_empty() {
             continue; // root entry represents the manifest itself
         }
-        // Key form "node_modules/<name>" or "node_modules/@scope/name"
-        let name = match key.rsplit_once("node_modules/") {
-            Some((_, rest)) => rest.to_string(),
-            None => continue,
+        // Skip nested node_modules entries (transitive dependencies of dependencies).
+        // Surfacing them lets resolve_version pick a transitive copy over the
+        // top-level one, regressing direct-dep version reporting.
+        let Some(name) = extract_name_from_node_modules_path(key) else {
+            continue;
         };
         let Some(version) = entry.get("version").and_then(|v| v.as_str()) else {
             continue;
@@ -423,7 +424,7 @@ pub fn parse_package_lock_graph(content: &str) -> LockfileGraph {
             .unwrap_or_default();
 
         graph.packages.push(LockfilePackage {
-            name,
+            name: name.to_string(),
             version: version.to_string(),
             dependencies,
             is_root: false,
@@ -1327,5 +1328,35 @@ packages:
         );
         let react = graph.packages.iter().find(|p| p.name == "react").unwrap();
         assert!(react.dependencies.contains(&"scheduler".to_string()));
+    }
+
+    /// Regression: parse_package_lock_graph must not surface nested node_modules
+    /// copies. resolve_version-by-name on a graph that includes a transitive
+    /// (nested) version would otherwise return the wrong version for the
+    /// top-level dependency.
+    #[test]
+    fn test_parse_package_lock_graph_skips_nested_node_modules() {
+        let content = r#"{
+  "name": "demo",
+  "lockfileVersion": 3,
+  "packages": {
+    "": { "name": "demo", "version": "1.0.0" },
+    "node_modules/foo": { "version": "2.0.0" },
+    "node_modules/bar": { "version": "1.0.0", "dependencies": { "foo": "^1.0.0" } },
+    "node_modules/bar/node_modules/foo": { "version": "1.0.0" }
+  }
+}"#;
+        let graph = parse_package_lock_graph(content);
+        let foo_entries: Vec<&LockfilePackage> =
+            graph.packages.iter().filter(|p| p.name == "foo").collect();
+        assert_eq!(
+            foo_entries.len(),
+            1,
+            "nested node_modules/foo must not be added a second time"
+        );
+        assert_eq!(
+            foo_entries[0].version, "2.0.0",
+            "top-level foo (2.0.0) wins over nested copy (1.0.0)"
+        );
     }
 }

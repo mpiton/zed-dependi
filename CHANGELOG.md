@@ -79,6 +79,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- `parse_package_lock_graph` no longer surfaces nested `node_modules/<a>/node_modules/<b>`
+  copies. With the new graph-based resolver path, transitive nested entries
+  could shadow the top-level direct dependency on a first-wins lookup and
+  return the wrong version. The graph parser now reuses the same
+  `extract_name_from_node_modules_path` helper as the flat parser, which
+  skips nested entries
+  ([#239](https://github.com/mpiton/zed-dependi/issues/239))
+- `LockfileResolver::resolve_version` (default impl) now applies
+  `normalize_name` to BOTH the dependency name and each `LockfilePackage.name`
+  so resolvers whose `parse_graph` does not pre-normalize entries (e.g.,
+  Composer, NuGet, Ruby) still match correctly
+- `GoResolver::resolve_version` deduplicates identical version strings before
+  the ambiguity check; repeated entries no longer force the result to `None`
+  when only a single unique version is present
 - Abort the previous advisory cache cleanup tasks when `initialize` rebuilds
   the runtime, instead of leaking them. `spawn_default_cleanup_task` now
   returns the `JoinHandle`, the backend tracks the handles in a `Mutex`, and

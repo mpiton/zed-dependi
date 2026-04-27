@@ -29,14 +29,16 @@ pub trait LockfileResolver: Send + Sync {
     }
 
     /// Resolve the version for a single dependency from a parsed graph.
-    /// Default: first-wins lookup by normalized name.
+    /// Default: first-wins lookup by normalized name. Normalizes BOTH `dep.name`
+    /// and each `LockfilePackage.name` so the comparison is consistent regardless
+    /// of whether the parser pre-normalized graph entries.
     /// Override for ecosystems with multi-version semantics (e.g., Go).
     fn resolve_version(&self, dep: &Dependency, graph: &LockfileGraph) -> Option<String> {
         let normalized = self.normalize_name(&dep.name);
         graph
             .packages
             .iter()
-            .find(|p| p.name == normalized)
+            .find(|p| self.normalize_name(&p.name) == normalized)
             .map(|p| p.version.clone())
     }
 }
@@ -196,6 +198,37 @@ version = "0.0.1"
             resolve_versions_from_lockfile(&mut deps, resolver, Path::new("/tmp/Cargo.toml")).await;
         assert!(result.is_none());
         assert_eq!(deps[0].resolved_version, None);
+    }
+
+    /// Default `resolve_version` must normalize BOTH sides so that resolvers
+    /// whose `parse_graph` does not pre-normalize names still match correctly.
+    #[test]
+    fn default_resolve_version_normalizes_both_sides() {
+        struct LowercaseResolver;
+        #[async_trait]
+        impl LockfileResolver for LowercaseResolver {
+            async fn find_lockfile(&self, _: &Path) -> Option<PathBuf> {
+                None
+            }
+            fn parse_graph(&self, _: &str) -> LockfileGraph {
+                LockfileGraph { packages: vec![] }
+            }
+            fn normalize_name(&self, name: &str) -> String {
+                name.to_lowercase()
+            }
+        }
+
+        let resolver = LowercaseResolver;
+        let graph = LockfileGraph {
+            // Graph stores name un-normalized (mixed case).
+            packages: vec![test_pkg("Newtonsoft.Json", "13.0.1")],
+        };
+        let dep = test_dep("newtonsoft.json", "13.0");
+        assert_eq!(
+            resolver.resolve_version(&dep, &graph),
+            Some("13.0.1".to_string()),
+            "normalization must apply to both dep.name AND package.name"
+        );
     }
 
     #[tokio::test]

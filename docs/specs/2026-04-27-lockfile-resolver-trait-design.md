@@ -28,7 +28,7 @@ Maintenance overhead is high: any change to logging, error semantics, or graph h
 
 ## 4. Architecture
 
-```
+```text
 backend.rs::process_document
         │
         ▼
@@ -51,6 +51,7 @@ Located at `dependi-lsp/src/parsers/lockfile_resolver.rs`.
 ```rust
 use async_trait::async_trait;
 use std::path::{Path, PathBuf};
+use crate::parsers::Dependency;
 use crate::parsers::lockfile_graph::LockfileGraph;
 
 #[async_trait]
@@ -61,10 +62,26 @@ pub trait LockfileResolver: Send + Sync {
     /// Parse lockfile contents into graph. Empty graph on parse failure.
     fn parse_graph(&self, lock_content: &str) -> LockfileGraph;
 
-    /// Normalize package name for version map lookup.
+    /// Normalize package name for resolution lookup.
     /// Default: identity. Override for PEP 503 (Python), lowercase (Ruby/NuGet/Composer).
     fn normalize_name(&self, name: &str) -> String {
         name.to_string()
+    }
+
+    /// Resolve the version for one dependency from a parsed graph.
+    /// Default: first-wins lookup with `normalize_name` applied to BOTH the
+    /// dependency name and each `LockfilePackage.name`. Synchronous —
+    /// implementations operate on the already-loaded `LockfileGraph`.
+    /// Override for ecosystems whose lockfile records multiple versions of the
+    /// same package (e.g., Cargo workspaces with root-package disambiguation,
+    /// Go modules with multiple recorded versions per module path).
+    fn resolve_version(&self, dep: &Dependency, graph: &LockfileGraph) -> Option<String> {
+        let normalized = self.normalize_name(&dep.name);
+        graph
+            .packages
+            .iter()
+            .find(|p| self.normalize_name(&p.name) == normalized)
+            .map(|p| p.version.clone())
     }
 }
 ```
@@ -134,15 +151,9 @@ pub async fn resolve_versions_from_lockfile(
         }
     };
     let graph = resolver.parse_graph(&lock_content);
-
-    let mut version_map: HashMap<String, String> = HashMap::new();
-    for p in &graph.packages {
-        version_map.entry(p.name.clone()).or_insert_with(|| p.version.clone());
-    }
     for dep in dependencies.iter_mut() {
-        let key = resolver.normalize_name(&dep.name);
-        if let Some(v) = version_map.get(&key) {
-            dep.resolved_version = Some(v.clone());
+        if let Some(v) = resolver.resolve_version(dep, &graph) {
+            dep.resolved_version = Some(v);
         }
     }
     tracing::debug!(
