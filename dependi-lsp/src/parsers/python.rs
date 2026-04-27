@@ -298,28 +298,7 @@ fn parse_pyproject_toml(content: &str) -> Vec<Dependency> {
     if let Some(project_table) = project.as_table() {
         // [project.dependencies]
         parse_pep621_deps(&dom, &line_ranges, &mut dependencies);
-
-        // [project.optional-dependencies]
-        let optional_node = project.get("optional-dependencies");
-        if let Some(optional_deps) = optional_node.as_table() {
-            let entries = optional_deps.entries().read();
-            for (_group, deps_node) in entries.iter() {
-                if let Some(deps_array) = deps_node.as_array() {
-                    let items = deps_array.items().read();
-                    for item in items.iter() {
-                        if let Some(dep_str) = item.as_str() {
-                            let dep_str = dep_str.value();
-                            if let Some((name, version)) = parse_pep508_dependency(dep_str)
-                                && let Some(dep) =
-                                    find_dependency_position(content, &name, &version, true, true)
-                            {
-                                dependencies.push(dep);
-                            }
-                        }
-                    }
-                }
-            }
-        }
+        parse_pep621_optional(&dom, &line_ranges, &mut dependencies);
 
         // Suppress unused variable warning
         let _ = project_table;
@@ -469,6 +448,45 @@ fn parse_pep621_deps(dom: &Node, line_ranges: &[TextRange], deps: &mut Vec<Depen
             registry: None,
             resolved_version: None,
         });
+    }
+}
+
+/// Parse `[project.optional-dependencies]` (PEP 621): table of group_name -> array of PEP 508 strings.
+/// Each emitted Dependency has dev=true and optional=true.
+fn parse_pep621_optional(dom: &Node, line_ranges: &[TextRange], deps: &mut Vec<Dependency>) {
+    let project = dom.get("project");
+    let optional_node = project.get("optional-dependencies");
+    let Some(optional_deps) = optional_node.as_table() else {
+        return;
+    };
+    let entries = optional_deps.entries().read();
+    for (_group, deps_node) in entries.iter() {
+        let Some(deps_array) = deps_node.as_array() else {
+            continue;
+        };
+        let items = deps_array.items().read();
+        for item in items.iter() {
+            let Some(dep_str_node) = item.as_str() else {
+                continue;
+            };
+            let dep_str = dep_str_node.value();
+            let Some((name, version)) = parse_pep508_dependency(dep_str) else {
+                continue;
+            };
+            let Some(string_span) = node_to_span(item, line_ranges) else {
+                continue;
+            };
+            deps.push(Dependency {
+                name,
+                version,
+                name_span: string_span,
+                version_span: string_span,
+                dev: true,
+                optional: true,
+                registry: None,
+                resolved_version: None,
+            });
+        }
     }
 }
 
