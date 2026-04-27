@@ -267,15 +267,7 @@ fn compute_line_ranges(content: &str) -> Box<[TextRange]> {
 /// nodes we resolve, but guards against malformed input).
 fn node_to_span(node: &Node, line_ranges: &[TextRange]) -> Option<Span> {
     let range = node.syntax().map(SyntaxElement::text_range)?;
-    let line_idx = line_ranges
-        .binary_search_by(|line_range| line_range.ordering(range))
-        .ok()?;
-    let line_range = line_ranges[line_idx];
-    Some(Span {
-        line: line_idx as u32,
-        line_start: (range.start() - line_range.start()).into(),
-        line_end: (range.end() - line_range.start()).into(),
-    })
+    range_to_span(range, line_ranges)
 }
 
 /// Convert an arbitrary `TextRange` to a `Span`. Used for raw key ranges.
@@ -308,27 +300,21 @@ fn parse_pyproject_toml(content: &str) -> Vec<Dependency> {
 
     // PEP 621: [project.dependencies] array of strings
     let project = dom.get("project");
-    if let Some(project_table) = project.as_table() {
+    if project.as_table().is_some() {
         // [project.dependencies]
         parse_pep621_deps(&dom, &line_ranges, &mut dependencies);
         parse_pep621_optional(&dom, &line_ranges, &mut dependencies);
-
-        // Suppress unused variable warning
-        let _ = project_table;
     }
 
     // Poetry: [tool.poetry.dependencies] table
     let tool = dom.get("tool");
     let poetry = tool.get("poetry");
-    if let Some(poetry_table) = poetry.as_table() {
+    if poetry.as_table().is_some() {
         parse_poetry_main(&dom, &line_ranges, &mut dependencies);
 
         parse_poetry_dev_legacy(&dom, &line_ranges, &mut dependencies);
 
         parse_poetry_groups(&dom, &line_ranges, &mut dependencies);
-
-        // Suppress unused variable warning
-        let _ = poetry_table;
     }
 
     parse_pep735_groups(&dom, &line_ranges, &mut dependencies);
@@ -499,6 +485,7 @@ fn parse_poetry_groups(dom: &Node, line_ranges: &[TextRange], deps: &mut Vec<Dep
     for (group_key, group_value) in group_entries.iter() {
         let group_name = group_key.value();
         let is_dev = group_name == "dev" || group_name == "test";
+        // Skip group entries that aren't tables (defensive — taplo lenient parsing).
         let Some(_group_table) = group_value.as_table() else {
             continue;
         };
@@ -708,8 +695,7 @@ fn extract_poetry_version_taplo(value: &taplo::dom::Node) -> Option<(String, boo
     {
         let version = version_str.value().to_string();
         // Extract optional flag if present
-        let optional_node = t.get("optional");
-        let optional = if let Some(opt_node) = optional_node {
+        let optional = if let Some(opt_node) = t.get("optional") {
             opt_node.as_bool().map(|b| b.value()).unwrap_or(false)
         } else {
             false
@@ -1401,6 +1387,7 @@ dependencies = ["ruff>=0.1.0"]
         let dep = &deps[0];
         assert_eq!(dep.name, "requests");
         assert_eq!(dep.version, ">=2.28.0");
+        // Content layout (0-indexed): 0=[project], 1=name, 2=version, 3=dependencies = [, 4=    "requests>=2.28.0",, 5=]
         assert_eq!(
             dep.name_span.line, 4,
             "name should be on the line containing the array item"
@@ -1420,6 +1407,7 @@ dependencies = ["ruff>=0.1.0"]
         let dep = &deps[0];
         assert_eq!(dep.name, "requests");
         assert_eq!(dep.version, "^2.28.0");
+        // Content layout (0-indexed): 0=[tool.poetry.dependencies], 1=python = "^3.9", 2=requests = "^2.28.0"
         assert_eq!(dep.name_span.line, 2);
         assert_eq!(dep.version_span.line, 2);
         // column checks: end > start is enough; exact offsets depend on taplo quote resolution
