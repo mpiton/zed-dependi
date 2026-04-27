@@ -1,8 +1,15 @@
 //! Generic lockfile resolution trait + dispatch helper.
 //!
-//! Abstracts the per-ecosystem lockfile lookup/parse logic so that
-//! [`crate::backend::ProcessingContext::process_document`] can resolve
-//! versions through a single code path regardless of the manifest format.
+//! Abstracts the per-ecosystem lockfile lookup/parse logic so that the LSP
+//! backend can resolve versions through a single code path regardless of the
+//! manifest format.
+//!
+//! The primary entry points are:
+//!
+//! - [`select_resolver`] — picks the right [`LockfileResolver`] for a given
+//!   [`crate::file_types::FileType`].
+//! - [`resolve_versions_from_lockfile`] — runs the full resolve pipeline,
+//!   mutating each [`crate::parsers::Dependency`]'s `resolved_version` field in place.
 
 use async_trait::async_trait;
 use std::path::{Path, PathBuf};
@@ -12,27 +19,50 @@ use crate::file_types::FileType;
 use crate::parsers::Dependency;
 use crate::parsers::lockfile_graph::LockfileGraph;
 
+/// Per-ecosystem lockfile resolver.
+///
+/// Each ecosystem that supports lockfiles provides a concrete implementation.
+/// The three methods work together: [`find_lockfile`](LockfileResolver::find_lockfile)
+/// locates the file on disk, [`parse_graph`](LockfileResolver::parse_graph) converts
+/// its text into a [`LockfileGraph`], and [`resolve_version`](LockfileResolver::resolve_version)
+/// maps a manifest dependency to its exact locked version.
+///
+/// Name normalization (lowercase, separator collapsing, etc.) is exposed through
+/// [`normalize_name`](LockfileResolver::normalize_name) so that both sides of the
+/// comparison use the same canonical form.
 #[async_trait]
 pub trait LockfileResolver: Send + Sync {
     /// Locate the lockfile relative to the manifest path.
-    /// Returns `None` when no lockfile exists for this ecosystem.
+    ///
+    /// Returns `None` when no lockfile exists for this ecosystem (or when the
+    /// filesystem probe fails).
     async fn find_lockfile(&self, manifest_path: &Path) -> Option<PathBuf>;
 
-    /// Parse lockfile contents into a `LockfileGraph`.
+    /// Parse lockfile contents into a [`LockfileGraph`].
+    ///
     /// On parse failure, returns an empty graph (silent — matches existing parser behavior).
     fn parse_graph(&self, lock_content: &str) -> LockfileGraph;
 
     /// Normalize a package name for version-map lookup.
-    /// Default: identity. Override for PEP 503 (Python), lowercase (Ruby/NuGet/Composer).
+    ///
+    /// Default implementation is the identity function.
+    /// Override for ecosystems with case-insensitive or separator-normalized names:
+    /// - Python: PEP 503 (`_`/`.`/`-` → `-`, lowercase)
+    /// - Ruby/NuGet/Composer: lowercase
     fn normalize_name(&self, name: &str) -> String {
         name.to_string()
     }
 
-    /// Resolve the version for a single dependency from a parsed graph.
-    /// Default: first-wins lookup by normalized name. Normalizes BOTH `dep.name`
-    /// and each `LockfilePackage.name` so the comparison is consistent regardless
-    /// of whether the parser pre-normalized graph entries.
-    /// Override for ecosystems with multi-version semantics (e.g., Go).
+    /// Resolve the locked version for a single dependency from a parsed graph.
+    ///
+    /// The default implementation performs a first-wins lookup by normalized name,
+    /// applying [`normalize_name`](LockfileResolver::normalize_name) to **both**
+    /// `dep.name` and each [`crate::parsers::lockfile_graph::LockfilePackage`]`::name`
+    /// so the comparison is consistent regardless of whether the parser pre-normalized
+    /// graph entries.
+    ///
+    /// Override for ecosystems with multi-version semantics (e.g., Go) or
+    /// root-package disambiguation (e.g., Cargo).
     fn resolve_version(&self, dep: &Dependency, graph: &LockfileGraph) -> Option<String> {
         let normalized = self.normalize_name(&dep.name);
         graph
@@ -43,10 +73,16 @@ pub trait LockfileResolver: Send + Sync {
     }
 }
 
-/// Pick the resolver matching `file_type`.
-/// For Npm/Python the on-disk sub-format is probed eagerly so the resolver
-/// caches the lockfile path + sub-format variant.
-/// Returns `None` for `FileType::Maven` (unsupported).
+/// Return the [`LockfileResolver`] that matches `file_type`.
+///
+/// For `Npm` and `Python`, the on-disk sub-format is probed eagerly at call
+/// time so the resolver can cache the lockfile path and sub-format variant
+/// (e.g., `package-lock.json` vs `yarn.lock`).
+///
+/// # Returns
+///
+/// `Some(resolver)` for all supported ecosystems; `None` for
+/// [`FileType::Maven`] which has no lockfile support.
 pub async fn select_resolver(
     file_type: FileType,
     manifest_path: &Path,
@@ -85,8 +121,17 @@ pub async fn select_resolver(
     }
 }
 
-/// Run the resolver against `dependencies`, mutating `resolved_version` in place.
-/// Returns the parsed `Arc<LockfileGraph>` for downstream consumers (vuln attribution).
+/// Resolve locked versions for all `dependencies` using the provided resolver.
+///
+/// Locates the lockfile, parses it into a [`LockfileGraph`], then sets each
+/// `dependency.resolved_version` to the exact version pinned in the lockfile.
+/// Dependencies that are absent from the lockfile are left unchanged.
+///
+/// # Returns
+///
+/// `Some(Arc<LockfileGraph>)` on success so that downstream consumers (e.g.,
+/// vulnerability attribution) can reuse the already-parsed graph.
+/// Returns `None` when no lockfile is found or the lockfile cannot be read.
 pub async fn resolve_versions_from_lockfile(
     dependencies: &mut [Dependency],
     resolver: Box<dyn LockfileResolver>,
