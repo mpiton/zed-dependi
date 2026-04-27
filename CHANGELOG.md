@@ -76,9 +76,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Bump `actions/github-script` from v8 to v9 in `contributor-experience.yml` workflow (Octokit v7; inline scripts unaffected — no `require()` or `getOctokit` shadowing)
 - Refresh all Cargo lockfiles (`dependi-lsp`, `dependi-zed`, `dependi-lsp/fuzz`) with latest semver-compatible transitive dependencies
 - Track dependency name and version lines separately
+- Refactor `parse_pyproject_toml` into focused per-section helpers (`parse_pep621_deps`, `parse_pep621_optional`, `parse_poetry_main`, `parse_poetry_dev_legacy`, `parse_poetry_groups`, `parse_pep735_groups`, `parse_hatch_envs`) and resolve dependency positions via taplo `text_range()` instead of repeated full-file line scans. Improves readability and eliminates O(deps × lines) scanning. ([#240](https://github.com/mpiton/zed-dependi/issues/240))
 
 ### Fixed
 
+- Poetry inline-table dependencies (`name = { version = "...", optional = true }`) now correctly propagate the `optional = true` flag to the parsed `Dependency`. Previously the flag was silently dropped. ([#240](https://github.com/mpiton/zed-dependi/issues/240))
 - `parse_package_lock_graph` no longer surfaces nested `node_modules/<a>/node_modules/<b>`
   copies. With the new graph-based resolver path, transitive nested entries
   could shadow the top-level direct dependency on a first-wins lookup and
