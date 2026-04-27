@@ -1,11 +1,16 @@
 //! Parser for PHP Composer files (composer.json)
 //!
-//! Uses serde_json for fast parsing with position tracking via byte offset calculation.
+//! Uses `json-spanned-value` for span tracking; the PHP-specific filter rules
+//! (skip `php` and `ext-*` keys) are applied before any work is done with the
+//! span info.
 
-use super::{Dependency, Parser, Span};
-use serde_json::Value;
+use json_spanned_value as jsv;
+use json_spanned_value::spanned;
 
-/// Parser for PHP composer.json dependency files
+use super::json_spans::{LineIndex, string_inner_to_span};
+use super::{Dependency, Parser};
+
+/// Parser for PHP composer.json dependency files.
 #[derive(Debug, Default)]
 pub struct PhpParser;
 
@@ -17,159 +22,69 @@ impl PhpParser {
 
 impl Parser for PhpParser {
     fn parse(&self, content: &str) -> Vec<Dependency> {
-        let Ok(value) = serde_json::from_str::<Value>(content) else {
+        let Ok(root) = jsv::from_str::<spanned::Object>(content) else {
             return Vec::new();
         };
 
-        // Pre-compute line start offsets for position calculation
-        let line_offsets = compute_line_offsets(content);
-
+        let line_index = LineIndex::new(content);
         let mut dependencies = Vec::with_capacity(32);
 
-        // Parse require section
-        parse_dependency_section(
-            &value,
-            "require",
-            content,
-            &line_offsets,
-            false,
-            &mut dependencies,
-        );
-
-        // Parse require-dev section
-        parse_dependency_section(
-            &value,
-            "require-dev",
-            content,
-            &line_offsets,
-            true,
-            &mut dependencies,
-        );
+        parse_section(&root, "require", false, &line_index, &mut dependencies);
+        parse_section(&root, "require-dev", true, &line_index, &mut dependencies);
 
         dependencies
     }
 }
 
-/// Compute byte offsets for each line start (for position calculation)
-fn compute_line_offsets(content: &str) -> Vec<usize> {
-    let mut offsets = vec![0];
-    for (i, byte) in content.bytes().enumerate() {
-        if byte == b'\n' {
-            offsets.push(i + 1);
-        }
-    }
-    offsets
-}
-
-/// Convert byte offset to (line, column) - both 0-indexed
-fn offset_to_position(offset: usize, line_offsets: &[usize]) -> (u32, u32) {
-    let line = line_offsets
-        .iter()
-        .rposition(|&start| start <= offset)
-        .unwrap_or(0);
-    let col = offset - line_offsets[line];
-    (line as u32, col as u32)
-}
-
-/// Parse a dependency section (require or require-dev)
-fn parse_dependency_section(
-    root: &Value,
+fn parse_section(
+    root: &spanned::Object,
     section_name: &str,
-    content: &str,
-    line_offsets: &[usize],
     dev: bool,
+    line_index: &LineIndex,
     dependencies: &mut Vec<Dependency>,
 ) {
-    let Some(section) = root.get(section_name) else {
+    let Some(section_value) = root.get_ref().get(section_name) else {
         return;
     };
-    let Some(deps_obj) = section.as_object() else {
+    let Some(section_obj) = section_value.as_span_object() else {
         return;
     };
 
-    for (name, version_val) in deps_obj {
-        // Skip PHP and extensions
+    for (name_spanned, value_spanned) in section_obj.get_ref().iter() {
+        let name = name_spanned.get_ref();
         if name == "php" || name.starts_with("ext-") {
             continue;
         }
 
-        let Some(version) = version_val.as_str() else {
+        let Some(version_spanned) = value_spanned.as_span_string() else {
             continue;
         };
 
-        // Find the dependency in the original content for position tracking
-        if let Some(dep) = find_dependency_position(content, line_offsets, name, version, dev) {
-            dependencies.push(dep);
-        }
-    }
-}
-
-/// Find the position of a dependency in the content
-fn find_dependency_position(
-    content: &str,
-    line_offsets: &[usize],
-    name: &str,
-    version: &str,
-    dev: bool,
-) -> Option<Dependency> {
-    // Search for the quoted name pattern: "name": "version"
-    let search_pattern = format!(r#""{name}""#);
-
-    // Find all occurrences and pick the one followed by a colon and the version
-    let mut search_start = 0;
-    while let Some(name_offset) = content[search_start..].find(&search_pattern) {
-        let abs_offset = search_start + name_offset;
-        let after_name = abs_offset + search_pattern.len();
-
-        // Check if this looks like a key (followed by colon)
-        let rest = &content[after_name..];
-        let trimmed = rest.trim_start();
-
-        if trimmed.starts_with(':') {
-            // This is a key, now find the version
-            if let Some(version_offset) = rest.find(&format!(r#""{version}""#)) {
-                let version_abs = after_name + version_offset;
-
-                // Calculate positions
-                let (line, name_start_col) = offset_to_position(abs_offset + 1, line_offsets); // +1 to skip opening quote
-                let name_end_col = name_start_col + name.len() as u32;
-
-                let (version_line, version_start_col) =
-                    offset_to_position(version_abs + 1, line_offsets); // +1 to skip opening quote
-
-                // Ensure name and version are on the same line
-                if version_line != line {
-                    search_start = abs_offset + 1;
-                    continue;
-                }
-
-                let version_end_col = version_start_col + version.len() as u32;
-
-                return Some(Dependency {
-                    name: name.to_string(),
-                    version: version.to_string(),
-                    name_span: Span {
-                        line,
-                        line_start: name_start_col,
-                        line_end: name_end_col,
-                    },
-                    version_span: Span {
-                        line: version_line,
-                        line_start: version_start_col,
-                        line_end: version_end_col,
-                    },
-                    dev,
-                    optional: false,
-                    registry: None,
-                    resolved_version: None,
-                });
-            }
+        let Some(name_span) =
+            string_inner_to_span(line_index, name_spanned.start(), name_spanned.end())
+        else {
+            continue;
+        };
+        let Some(version_span) =
+            string_inner_to_span(line_index, version_spanned.start(), version_spanned.end())
+        else {
+            continue;
+        };
+        if name_span.line != version_span.line {
+            continue;
         }
 
-        search_start = abs_offset + 1;
+        dependencies.push(Dependency {
+            name: name.clone(),
+            version: version_spanned.get_ref().to_string(),
+            name_span,
+            version_span,
+            dev,
+            optional: false,
+            registry: None,
+            resolved_version: None,
+        });
     }
-
-    None
 }
 
 #[cfg(test)]
@@ -308,5 +223,70 @@ mod tests {
         assert_eq!(deps.len(), 1);
         assert_eq!(deps[0].name, "vendor/pkg");
         assert_eq!(deps[0].version, "1.0.0");
+    }
+
+    #[test]
+    fn test_same_name_in_require_and_require_dev() {
+        let parser = PhpParser::new();
+        // Same name AND same version pinned in both sections — worst case
+        // for the legacy string scan: version-based disambiguation cannot
+        // tell the two entries apart when both versions match. Span-aware
+        // parsing must still place each entry on its own line.
+        let content = r#"{
+  "require": {
+    "vendor/foo": "1.0.0"
+  },
+  "require-dev": {
+    "vendor/foo": "1.0.0"
+  }
+}"#;
+        let deps = parser.parse(content);
+        assert_eq!(deps.len(), 2);
+
+        let prod = deps.iter().find(|d| !d.dev).unwrap();
+        let dev = deps.iter().find(|d| d.dev).unwrap();
+        assert_eq!(prod.version, "1.0.0");
+        assert_eq!(dev.version, "1.0.0");
+        assert_ne!(prod.name_span.line, dev.name_span.line);
+        assert_ne!(prod.version_span.line, dev.version_span.line);
+        assert_eq!(prod.name_span.line, prod.version_span.line);
+        assert_eq!(dev.name_span.line, dev.version_span.line);
+    }
+
+    #[test]
+    fn test_substring_false_match_in_value() {
+        let parser = PhpParser::new();
+        let content = r#"{
+  "description": "contains \"vendor/fake\": \"99.0\" inside a string",
+  "require": {
+    "vendor/real": "^1.0"
+  }
+}"#;
+        let deps = parser.parse(content);
+        assert_eq!(deps.len(), 1);
+        assert_eq!(deps[0].name, "vendor/real");
+    }
+
+    #[test]
+    fn test_skip_php_and_ext_when_duplicates_present() {
+        let parser = PhpParser::new();
+        let content = r#"{
+  "require": {
+    "php": ">=8.1",
+    "ext-json": "*",
+    "ext-mbstring": "*",
+    "vendor/lib": "^1.0"
+  },
+  "require-dev": {
+    "php": ">=8.1",
+    "ext-json": "*",
+    "vendor/dev": "^1.0"
+  }
+}"#;
+        let deps = parser.parse(content);
+        // Only the two real packages, not php or ext-* in either section.
+        assert_eq!(deps.len(), 2);
+        assert!(deps.iter().any(|d| d.name == "vendor/lib" && !d.dev));
+        assert!(deps.iter().any(|d| d.name == "vendor/dev" && d.dev));
     }
 }

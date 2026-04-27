@@ -39,6 +39,7 @@ hashbrown = { version = "0.17.0", features = ["serde"] }
 quick-xml = "0.38"
 url = "2.5"
 async-trait = "0.1"
+json-spanned-value = "0.2.2"
 
 [dev-dependencies]
 serial_test = "3"

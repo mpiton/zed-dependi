@@ -77,9 +77,30 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Refresh all Cargo lockfiles (`dependi-lsp`, `dependi-zed`, `dependi-lsp/fuzz`) with latest semver-compatible transitive dependencies
 - Track dependency name and version lines separately
 - Refactor `parse_pyproject_toml` into focused per-section helpers (`parse_pep621_deps`, `parse_pep621_optional`, `parse_poetry_main`, `parse_poetry_dev_legacy`, `parse_poetry_groups`, `parse_pep735_groups`, `parse_hatch_envs`) and resolve dependency positions via taplo `text_range()` instead of repeated full-file line scans. Improves readability and eliminates O(deps × lines) scanning. ([#240](https://github.com/mpiton/zed-dependi/issues/240))
+- npm and PHP parsers now read dependency name/version positions from a
+  span-aware JSON parser (`json-spanned-value`) via a new shared
+  `parsers::json_spans` helper module (`LineIndex`, `span_to_span`,
+  `inner_string_span`), replacing the previous `find_dependency_position`
+  string scan ([#236](https://github.com/mpiton/zed-dependi/issues/236))
+
+### Performance
+
+- Cut npm and PHP manifest parse time on large files by replacing the
+  O(num_deps × document_length) string scan with span information
+  produced directly by the JSON parser. Measured on `package.json` /
+  `composer.json` with 100 dependencies: ~20 % faster for npm, ~17 %
+  faster for PHP; gains scale with file size as the algorithm goes
+  from quadratic to linear
+  ([#236](https://github.com/mpiton/zed-dependi/issues/236))
 
 ### Fixed
 
+- npm and PHP parsers no longer mismatch dependencies whose name appears
+  in more than one section (e.g. both `dependencies` and
+  `devDependencies`, or `require` and `require-dev`) when the version is
+  identical in both. Spans now come straight from the parser instead of
+  a content-wide string search, eliminating the disambiguation bug
+  ([#236](https://github.com/mpiton/zed-dependi/issues/236))
 - Poetry inline-table dependencies (`name = { version = "...", optional = true }`) now correctly propagate the `optional = true` flag to the parsed `Dependency`. Previously the flag was silently dropped. ([#240](https://github.com/mpiton/zed-dependi/issues/240))
 - `pyproject.toml` `version_span` and `name_span` now point at the version literal and the package name only — not the surrounding quotes or the whole inline-table — so "Update to X.Y.Z" quick-fixes replace just the version and leave the rest of the dependency entry intact. Affects PEP 621 array deps, PEP 735 groups, Hatch envs, and Poetry simple-string + inline-table forms. ([#240](https://github.com/mpiton/zed-dependi/issues/240))
 - `parse_package_lock_graph` no longer surfaces nested `node_modules/<a>/node_modules/<b>`
