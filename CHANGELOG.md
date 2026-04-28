@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.8.0] - 2026-04-28
+
 ### Added
 
 - Architecture guide `docs/architecture.md` for contributors — covers the five
@@ -98,6 +100,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Bump `hashbrown` from 0.16.1 to 0.17.0 (purely additive release, hashbrown MSRV 1.85 ≤ project MSRV 1.94)
 - Bump `tokio` constraint from 1.50 to 1.52 in `dependi-lsp/Cargo.toml` (lockfile resolves 1.52.1; patch + minor, backwards compatible)
 - Bump `actions/github-script` from v8 to v9 in `contributor-experience.yml` workflow (Octokit v7; inline scripts unaffected — no `require()` or `getOctokit` shadowing)
+- Bump `quick-xml` from 0.38.4 to 0.39.2 in `dependi-lsp` (used by Maven `pom.xml` and `.csproj` parsers; release adds `read_text_into()` and fixes namespace scope tracking — no breaking API surface used by parsers)
+- Bump `actions/upload-pages-artifact` from v4 to v5 in `pages.yml` workflow
+- Bump `softprops/action-gh-release` from v2 to v3 in `release.yml` workflow
 - Refresh all Cargo lockfiles (`dependi-lsp`, `dependi-zed`, `dependi-lsp/fuzz`) with latest semver-compatible transitive dependencies
 - Track dependency name and version lines separately
 - Refactor `parse_pyproject_toml` into focused per-section helpers (`parse_pep621_deps`, `parse_pep621_optional`, `parse_poetry_main`, `parse_poetry_dev_legacy`, `parse_poetry_groups`, `parse_pep735_groups`, `parse_hatch_envs`) and resolve dependency positions via taplo `text_range()` instead of repeated full-file line scans. Improves readability and eliminates O(deps × lines) scanning. ([#240](https://github.com/mpiton/zed-dependi/issues/240))
@@ -127,6 +132,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   ([#236](https://github.com/mpiton/zed-dependi/issues/236))
 - Poetry inline-table dependencies (`name = { version = "...", optional = true }`) now correctly propagate the `optional = true` flag to the parsed `Dependency`. Previously the flag was silently dropped. ([#240](https://github.com/mpiton/zed-dependi/issues/240))
 - `pyproject.toml` `version_span` and `name_span` now point at the version literal and the package name only — not the surrounding quotes or the whole inline-table — so "Update to X.Y.Z" quick-fixes replace just the version and leave the rest of the dependency entry intact. Affects PEP 621 array deps, PEP 735 groups, Hatch envs, and Poetry simple-string + inline-table forms. ([#240](https://github.com/mpiton/zed-dependi/issues/240))
+- Maven `pom.xml` parser now recognizes elements declared with a prefixed XML namespace (e.g. `<m:project xmlns:m="http://maven.apache.org/POM/4.0.0">`). Previously, `<m:dependencies>` / `<m:dependency>` were silently ignored because the parser compared raw qualified names (`m:project`) against bare local names (`project`); element matching now uses `local_name()` to strip the prefix. Default xmlns and bare poms are unaffected.
 - `parse_package_lock_graph` no longer surfaces nested `node_modules/<a>/node_modules/<b>`
   copies. With the new graph-based resolver path, transitive nested entries
   could shadow the top-level direct dependency on a first-wins lookup and
@@ -638,7 +644,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - In-memory caching for version data
 - Parallel registry requests (5 concurrent)
 
-[Unreleased]: https://github.com/mpiton/zed-dependi/compare/v1.7.0...HEAD
+[Unreleased]: https://github.com/mpiton/zed-dependi/compare/v1.8.0...HEAD
+[1.8.0]: https://github.com/mpiton/zed-dependi/compare/v1.7.0...v1.8.0
 [1.7.0]: https://github.com/mpiton/zed-dependi/compare/v1.6.1...v1.7.0
 [1.6.1]: https://github.com/mpiton/zed-dependi/compare/v1.6.0...v1.6.1
 [1.6.0]: https://github.com/mpiton/zed-dependi/compare/v1.5.0...v1.6.0
