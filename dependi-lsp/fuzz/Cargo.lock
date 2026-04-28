@@ -381,12 +381,14 @@ name = "dependi-lsp"
 version = "1.7.0"
 dependencies = [
  "anyhow",
+ "async-trait",
  "chrono",
  "clap",
  "dashmap 6.1.0",
  "dirs",
  "futures",
  "hashbrown 0.17.0",
+ "json-spanned-value",
  "quick-xml",
  "r2d2",
  "reqwest",
@@ -401,6 +403,7 @@ dependencies = [
  "tower-lsp",
  "tracing",
  "tracing-subscriber",
+ "url",
 ]
 
 [[package]]
@@ -1031,6 +1034,16 @@ dependencies = [
  "futures-util",
  "once_cell",
  "wasm-bindgen",
+]
+
+[[package]]
+name = "json-spanned-value"
+version = "0.2.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "bb343fa4e3b1b22b344937deedac88da995abf139c2232cbeaa436c38380a210"
+dependencies = [
+ "serde",
+ "serde_json",
 ]
 
 [[package]]

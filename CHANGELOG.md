@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.8.0] - 2026-04-28
+
 ### Added
 
 - Architecture guide `docs/architecture.md` for contributors — covers the five
@@ -98,6 +100,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Bump `hashbrown` from 0.16.1 to 0.17.0 (purely additive release, hashbrown MSRV 1.85 ≤ project MSRV 1.94)
 - Bump `tokio` constraint from 1.50 to 1.52 in `dependi-lsp/Cargo.toml` (lockfile resolves 1.52.1; patch + minor, backwards compatible)
 - Bump `actions/github-script` from v8 to v9 in `contributor-experience.yml` workflow (Octokit v7; inline scripts unaffected — no `require()` or `getOctokit` shadowing)
+- Bump `quick-xml` from 0.38.4 to 0.39.2 in `dependi-lsp` (used by Maven `pom.xml` and `.csproj` parsers; release adds `read_text_into()` and fixes namespace scope tracking — no breaking API surface used by parsers)
+- Bump `actions/upload-pages-artifact` from v4 to v5 in `pages.yml` workflow
+- Bump `softprops/action-gh-release` from v2 to v3 in `release.yml` workflow
 - Refresh all Cargo lockfiles (`dependi-lsp`, `dependi-zed`, `dependi-lsp/fuzz`) with latest semver-compatible transitive dependencies
 - Track dependency name and version lines separately
 - Refactor `parse_pyproject_toml` into focused per-section helpers (`parse_pep621_deps`, `parse_pep621_optional`, `parse_poetry_main`, `parse_poetry_dev_legacy`, `parse_poetry_groups`, `parse_pep735_groups`, `parse_hatch_envs`) and resolve dependency positions via taplo `text_range()` instead of repeated full-file line scans. Improves readability and eliminates O(deps × lines) scanning. ([#240](https://github.com/mpiton/zed-dependi/issues/240))
@@ -638,7 +643,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - In-memory caching for version data
 - Parallel registry requests (5 concurrent)
 
-[Unreleased]: https://github.com/mpiton/zed-dependi/compare/v1.7.0...HEAD
+[Unreleased]: https://github.com/mpiton/zed-dependi/compare/v1.8.0...HEAD
+[1.8.0]: https://github.com/mpiton/zed-dependi/compare/v1.7.0...v1.8.0
 [1.7.0]: https://github.com/mpiton/zed-dependi/compare/v1.6.1...v1.7.0
 [1.6.1]: https://github.com/mpiton/zed-dependi/compare/v1.6.0...v1.6.1
 [1.6.0]: https://github.com/mpiton/zed-dependi/compare/v1.5.0...v1.6.0
