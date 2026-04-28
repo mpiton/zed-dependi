@@ -339,7 +339,142 @@ For those cases, study the existing `dependi-lsp/src/parsers/maven.rs` (which us
 
 ## 5. Step 3 — Write the registry client
 
-_TBD — Task 14._
+Create `dependi-lsp/src/registries/swift_package_index.rs` and declare it in `registries/mod.rs` with `pub mod swift_package_index;`.
+
+### 5.1 Construct from the shared HTTP client
+
+Every registry takes an `Arc<reqwest::Client>` so connection pooling is shared across the LSP. Use `registries::http_client::create_shared_client()` for the default.
+
+```rust,ignore
+use std::sync::Arc;
+
+use reqwest::Client;
+
+use crate::registries::{Registry, VersionInfo, http_client::create_shared_client};
+
+pub struct SwiftPackageIndexRegistry {
+    client: Arc<Client>,
+    base_url: String,
+}
+
+impl SwiftPackageIndexRegistry {
+    pub fn with_client(client: Arc<Client>) -> Self {
+        Self {
+            client,
+            base_url: "https://swiftpackageindex.com/api/packages".to_string(),
+        }
+    }
+}
+
+impl Default for SwiftPackageIndexRegistry {
+    fn default() -> Self {
+        Self::with_client(
+            create_shared_client().expect("failed to create HTTP client"),
+        )
+    }
+}
+```
+
+### 5.2 Implement the trait
+
+The `Registry` trait uses native `async fn` (`#[allow(async_fn_in_trait)]` on the trait declaration) rather than the `async-trait` crate, so the `impl` block does **not** carry an `#[async_trait]` attribute.
+
+```rust,ignore
+impl Registry for SwiftPackageIndexRegistry {
+    async fn get_version_info(
+        &self,
+        package_name: &str,
+    ) -> anyhow::Result<VersionInfo> {
+        let url = format!("{}/{}", self.base_url, package_name);
+        let response = self.client.get(&url).send().await?;
+        anyhow::ensure!(
+            response.status().is_success(),
+            "Swift Package Index returned {}",
+            response.status()
+        );
+        let payload: SpiPackage = response.json().await?;
+        Ok(VersionInfo {
+            latest: payload.latest_version.clone(),
+            versions: payload.versions.clone(),
+            description: payload.summary,
+            homepage: payload.url,
+            repository: payload.url_alt,
+            license: payload.license,
+            ..Default::default()
+        })
+    }
+
+    fn http_client(&self) -> Arc<Client> {
+        Arc::clone(&self.client)
+    }
+}
+
+#[derive(serde::Deserialize)]
+struct SpiPackage {
+    latest_version: Option<String>,
+    versions: Vec<String>,
+    summary: Option<String>,
+    url: Option<String>,
+    url_alt: Option<String>,
+    license: Option<String>,
+}
+```
+
+The `..Default::default()` spread fills the remaining `VersionInfo` fields (`yanked`, `deprecated`, `release_dates`, `vulnerabilities`, `transitive_vulnerabilities`, `latest_prerelease`, `yanked_versions`) with their defaults.
+
+### 5.3 Test
+
+Use `wiremock` (already in `[dev-dependencies]`) to stub the API:
+
+```rust,ignore
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use wiremock::matchers::{method, path};
+    use wiremock::{Mock, MockServer, ResponseTemplate};
+
+    #[tokio::test]
+    async fn fetches_latest_version() {
+        let server = MockServer::start().await;
+        Mock::given(method("GET"))
+            .and(path("/api/packages/apple/swift-argument-parser"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
+                "latest_version": "1.3.0",
+                "versions": ["1.0.0", "1.3.0"],
+                "summary": "Argument parser",
+                "url": "https://github.com/apple/swift-argument-parser",
+                "url_alt": null,
+                "license": "Apache-2.0"
+            })))
+            .mount(&server)
+            .await;
+
+        let registry = SwiftPackageIndexRegistry {
+            client: std::sync::Arc::new(reqwest::Client::new()),
+            base_url: format!("{}/api/packages", server.uri()),
+        };
+        let info = registry
+            .get_version_info("apple/swift-argument-parser")
+            .await
+            .unwrap();
+        assert_eq!(info.latest.as_deref(), Some("1.3.0"));
+        assert_eq!(info.versions.len(), 2);
+    }
+}
+```
+
+Run it:
+
+```bash
+cd dependi-lsp
+cargo test registries::swift_package_index
+```
+
+Expected: `1 passed`.
+
+### 5.4 Pay attention to rate limits
+
+Most registries publish a fair-use limit. Swift Package Index's API is CDN-cached and has no documented hard limit, so no client-side throttling is needed. If your target registry is strict (crates.io, for example, enforces 1 request/second), adopt the pattern in `dependi-lsp/src/registries/crates_io.rs` (look for the `RateLimiter` struct) — never burst-fire a registry.
 
 ## 6. Step 4 — Wire into the backend
 
