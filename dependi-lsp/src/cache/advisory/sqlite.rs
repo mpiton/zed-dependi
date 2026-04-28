@@ -35,7 +35,7 @@ impl SqliteAdvisoryCache {
         Self::with_path(path, DEFAULT_ADVISORY_TTL_SECS)
     }
 
-    /// Build a cache from an [`AdvisoryCacheConfig`] (issue #237).
+    /// Build a cache from an [`crate::config::AdvisoryCacheConfig`] (issue #237).
     ///
     /// Uses `config.db_path` if set, otherwise the default cache location.
     /// Returns an error if the database directory cannot be created or the
