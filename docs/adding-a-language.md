@@ -646,7 +646,32 @@ Expected: `1 passed` (assuming you wrote a test). Without this resolver, vulnera
 
 ## 8. Step 6 — Update docs and CHANGELOG
 
-_TBD — Task 17._
+### 8.1 Add `docs/languages/swift.md`
+
+Take any existing language doc as a template (`docs/languages/rust.md` is the most complete). The minimum sections:
+
+- **Front-matter** with `parent: Languages`, `nav_order: <next free>`.
+- **Manifest format** — `Package.swift` syntax, where ecosystem version operators come from.
+- **Registry quirks** — Swift Package Index API, OSV ecosystem name, rate limits.
+- **Known limitations** — naïve parser doesn't handle multi-line declarations.
+
+### 8.2 Update `docs/registries.md`
+
+Add a new row to the registry table covering the Swift Package Index endpoint, license, rate limit, and OSV ecosystem string.
+
+### 8.3 Append to `CHANGELOG.md`
+
+Open `CHANGELOG.md` at the project root. Under `## [Unreleased]` → `### Added`, prepend (newest entries first) a bullet describing your work:
+
+```markdown
+- Support for Swift / Swift Package Manager (`Package.swift`):
+  - Parse direct dependencies declared via `.package(url:..., from/exact:...)`.
+  - Fetch versions from Swift Package Index API.
+  - Vulnerability scanning via OSV.dev (`SwiftURL` ecosystem).
+  ([#XXX](https://github.com/mpiton/zed-dependi/issues/XXX))
+```
+
+Replace `XXX` with the issue number you're closing. Follow the [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) format already used by neighbours in the file.
 
 ## 9. Verifying your work
 
