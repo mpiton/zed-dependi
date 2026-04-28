@@ -522,6 +522,7 @@ dependencies = [
  "json-spanned-value",
  "quick-xml",
  "r2d2",
+ "regex",
  "reqwest",
  "rusqlite",
  "semver",
@@ -537,6 +538,7 @@ dependencies = [
  "tracing",
  "tracing-subscriber",
  "url",
+ "walkdir",
  "wiremock",
 ]
 
