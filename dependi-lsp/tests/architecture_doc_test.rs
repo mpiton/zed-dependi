@@ -9,10 +9,10 @@
 //! Soft warn (stderr):
 //!   - PascalCase identifiers in backticks not in allowlist or source
 
-use std::collections::HashSet;
 use std::fs;
 use std::path::PathBuf;
 
+use hashbrown::HashSet;
 use regex::Regex;
 use walkdir::WalkDir;
 
@@ -94,8 +94,8 @@ fn workspace_root() -> PathBuf {
 
 fn read_doc() -> (PathBuf, String) {
     let path = workspace_root().join("docs/architecture.md");
-    let content = fs::read_to_string(&path)
-        .unwrap_or_else(|e| panic!("missing docs/architecture.md: {e}"));
+    let content =
+        fs::read_to_string(&path).unwrap_or_else(|e| panic!("missing docs/architecture.md: {e}"));
     (path, content)
 }
 
@@ -149,11 +149,10 @@ fn architecture_doc_has_no_placeholder_comments() {
 fn architecture_doc_has_three_mermaid_diagrams() {
     let (path, content) = read_doc();
     let count = content.matches("```mermaid").count();
+    let path_disp = path.display();
     assert!(
         count >= 3,
-        "{} has only {} mermaid block(s); expected at least 3 (system boundary, lifecycle, cache, vuln)",
-        path.display(),
-        count
+        "{path_disp} has only {count} mermaid block(s); expected >= 3"
     );
 }
 
@@ -200,8 +199,7 @@ fn architecture_doc_struct_trait_enum_claims_exist_in_source() {
     let (_, content) = read_doc();
     let allowed = collect_pub_defs(&root.join("dependi-lsp/src"));
 
-    let claim_re =
-        Regex::new(r"`([A-Z][A-Za-z0-9_]+)`\s+(?:struct|trait|enum)\b").unwrap();
+    let claim_re = Regex::new(r"`([A-Z][A-Za-z0-9_]+)`\s+(?:struct|trait|enum)\b").unwrap();
     let mut bad = Vec::new();
     for cap in claim_re.captures_iter(&content) {
         let name = cap[1].to_string();
