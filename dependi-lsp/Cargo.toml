@@ -36,7 +36,7 @@ clap = { version = "4.5.60", features = ["derive"] }
 futures = "0.3.32"
 taplo = "0.14"
 hashbrown = { version = "0.17.0", features = ["serde"] }
-quick-xml = "0.38"
+quick-xml = "0.39"
 url = "2.5"
 async-trait = "0.1"
 json-spanned-value = "0.2.2"
