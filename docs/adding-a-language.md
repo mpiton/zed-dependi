@@ -545,7 +545,7 @@ In `dependi-lsp/src/vulnerabilities/mod.rs`:
 ```rust,ignore
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum Ecosystem {
-    Crates,
+    CratesIo,
     // ... existing variants ...
     SwiftPM,
 }
@@ -554,7 +554,7 @@ impl Ecosystem {
     pub fn as_osv_str(&self) -> &'static str {
         match self {
             // ... existing arms ...
-            Self::SwiftPM => "SwiftURL",  // verify against the OSV schema
+            Ecosystem::SwiftPM => "SwiftURL",  // verify against the OSV schema
         }
     }
 }
@@ -620,20 +620,33 @@ impl LockfileResolver for SwiftLockfileResolver {
 
 ### 7.2 Register the resolver
 
-In `dependi-lsp/src/parsers/lockfile_resolver.rs`, extend `select_resolver`:
+In `dependi-lsp/src/parsers/lockfile_resolver.rs`, extend `select_resolver` (it is an exhaustive `async fn` taking the manifest path and content alongside the file type):
 
 ```rust,ignore
-pub fn select_resolver(file_type: FileType)
-    -> Option<Box<dyn LockfileResolver>>
-{
+pub async fn select_resolver(
+    file_type: FileType,
+    manifest_path: &Path,
+    manifest_content: &str,
+) -> Option<Box<dyn LockfileResolver>> {
     match file_type {
-        FileType::Cargo => Some(Box::new(crate::parsers::cargo_lock::CargoLockResolver)),
-        // ... existing arms ...
-        FileType::Swift => Some(Box::new(crate::parsers::swift_resolved::SwiftLockfileResolver)),
-        _ => None,
+        FileType::Cargo => {
+            let root_package =
+                crate::parsers::cargo::cargo_root_package_name(manifest_content);
+            Some(Box::new(crate::parsers::cargo_lock::CargoResolver {
+                root_package,
+            }))
+        }
+        // ... existing arms for Npm, Python, Go, Php, Dart, Csharp, Ruby ...
+        FileType::Swift => {
+            let _ = (manifest_path, manifest_content);
+            Some(Box::new(crate::parsers::swift_resolved::SwiftLockfileResolver))
+        }
+        FileType::Maven => None, // Maven has no lockfile support today
     }
 }
 ```
+
+The match must remain exhaustive (no `_ =>` arm); add explicit `None` for any future `FileType` whose ecosystem genuinely lacks a lockfile.
 
 ### 7.3 Verify
 
