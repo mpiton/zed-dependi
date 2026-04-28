@@ -99,9 +99,37 @@ fn read_doc() -> (PathBuf, String) {
     (path, content)
 }
 
+/// Collect names of `pub struct|enum|trait` items reachable from outside the
+/// crate's `tests` and private-module scopes.
+///
+/// Scope and limits — this is a textual scan, not a true public-API resolver.
+/// It deliberately accepts:
+///   - `pub`, `pub(crate)`, and `pub(in …)` items at any nesting (no visibility
+///     parsing — `pub` in source is treated as public).
+///
+/// It deliberately filters out:
+///   - items inside `#[cfg(test)]` modules (cfg-gated test-only code), and
+///   - items inside non-`pub mod NAME { … }` blocks (items not reachable
+///     outside the file from a top-level entry point).
+///
+/// It does NOT:
+///   - resolve `pub use` re-exports (a name re-exported from a private
+///     submodule still gets picked up because the original definition uses
+///     `pub`),
+///   - parse the AST (a `syn`-based resolver would be more rigorous; the cost
+///     is a heavier dev dependency for a doc-validator).
+///
+/// The brace-depth tracking can desync on braces inside string literals or
+/// comments. The failure mode is a false-negative (an item is excluded that
+/// wouldn't have been), which is acceptable for a validator whose job is to
+/// flag *missing* claims rather than enforce a closed set.
 fn collect_pub_defs(root: &std::path::Path) -> HashSet<String> {
-    let item_re = Regex::new(r"^\s*pub (?:struct|enum|trait) (\w+)").unwrap();
+    let item_re = Regex::new(r"^\s*pub(?:\([^)]*\))?\s+(?:struct|enum|trait)\s+(\w+)").unwrap();
     let cfg_test_re = Regex::new(r"^\s*#\[cfg\(test\)\]").unwrap();
+    // Match `mod NAME {` without a leading `pub` (i.e. private modules).
+    let priv_mod_re = Regex::new(r"^\s*(?:pub\([^)]*\)\s+)?mod\s+\w+\s*\{").unwrap();
+    let pub_mod_re = Regex::new(r"^\s*pub(?:\([^)]*\))?\s+mod\b").unwrap();
+
     let mut set = HashSet::new();
     for entry in WalkDir::new(root).into_iter().flatten() {
         if entry.path().extension().and_then(|s| s.to_str()) != Some("rs") {
@@ -111,38 +139,38 @@ fn collect_pub_defs(root: &std::path::Path) -> HashSet<String> {
             continue;
         };
 
-        // Skip items reachable only at test time. Track depth of an enclosing
-        // #[cfg(test)] item via a simple brace counter that opens on the first
-        // `{` after the attribute and closes when the depth returns to zero.
-        // String/comment braces can desync this, but the cost is occasional
-        // false-negatives (an item is excluded that wouldn't have been), which
-        // is acceptable for a validator that flags missing claims.
         let mut pending_cfg_test = false;
-        let mut depth: i32 = 0;
+        let mut skip_depth: i32 = 0;
         for line in src.lines() {
-            if depth > 0 {
-                depth += line.matches('{').count() as i32;
-                depth -= line.matches('}').count() as i32;
-                if depth <= 0 {
-                    depth = 0;
+            if skip_depth > 0 {
+                skip_depth += line.matches('{').count() as i32;
+                skip_depth -= line.matches('}').count() as i32;
+                if skip_depth <= 0 {
+                    skip_depth = 0;
                 }
                 continue;
             }
             if pending_cfg_test {
                 if line.contains('{') {
-                    depth = line.matches('{').count() as i32 - line.matches('}').count() as i32;
-                    if depth <= 0 {
-                        depth = 0;
+                    skip_depth =
+                        line.matches('{').count() as i32 - line.matches('}').count() as i32;
+                    if skip_depth <= 0 {
+                        skip_depth = 0;
                         pending_cfg_test = false;
                     }
                     continue;
                 }
-                // Attribute applied to a non-block item (e.g. a `#[cfg(test)] use ...`);
-                // discard the gate and fall through.
                 pending_cfg_test = false;
             }
             if cfg_test_re.is_match(line) {
                 pending_cfg_test = true;
+                continue;
+            }
+            if !pub_mod_re.is_match(line) && priv_mod_re.is_match(line) {
+                skip_depth = line.matches('{').count() as i32 - line.matches('}').count() as i32;
+                if skip_depth <= 0 {
+                    skip_depth = 0;
+                }
                 continue;
             }
             if let Some(c) = item_re.captures(line) {
@@ -212,7 +240,9 @@ fn architecture_doc_module_paths_exist() {
     let re = Regex::new(r"dependi-lsp/src/[\w/]+\.rs(?::(\d+))?").unwrap();
 
     let mut errors = Vec::new();
+    let mut cite_count = 0usize;
     for cap in re.captures_iter(&content) {
+        cite_count += 1;
         let full = cap.get(0).unwrap().as_str();
         let (path_part, line_opt) = match cap.get(1) {
             Some(line_match) => {
@@ -235,6 +265,11 @@ fn architecture_doc_module_paths_exist() {
             }
         }
     }
+    assert!(
+        cite_count > 0,
+        "no `dependi-lsp/src/...rs` citations found in docs/architecture.md — \
+         the architecture guide must cite source files for the validator to be meaningful"
+    );
     assert!(
         errors.is_empty(),
         "broken cites:\n  {}",
