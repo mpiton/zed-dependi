@@ -90,7 +90,7 @@ pub trait Registry: Send + Sync {
 [`Parser`]: https://docs.rs/dependi-lsp/latest/dependi_lsp/parsers/trait.Parser.html
 [`Registry`]: https://docs.rs/dependi-lsp/latest/dependi_lsp/registries/trait.Registry.html
 
-`Parser` is synchronous. `Registry` is asynchronous and Send + Sync (so it can be wrapped in `Arc` and shared across the request pool). The trait uses native `async fn` rather than the `async-trait` crate; the `#[allow(async_fn_in_trait)]` attribute is needed because the trait is internal and the `Send + Sync` bound is already declared on the trait itself.
+[`Parser`] is synchronous. [`Registry`] is asynchronous and Send + Sync (so it can be wrapped in `Arc` and shared across the request pool). The trait uses native `async fn` rather than the `async-trait` crate; the `#[allow(async_fn_in_trait)]` attribute is needed because the trait is internal and the `Send + Sync` bound is already declared on the trait itself.
 
 ## 3. Step 1 — Define the file type
 
@@ -289,7 +289,7 @@ Expected: compilation error mentioning `cannot find type SwiftParser`.
 
 ### 4.3 Implement
 
-Replace the rest of `dependi-lsp/src/parsers/swift.rs` body with the implementation. The doctest [Example 3](#example-3--implementing-the-parser-trait) on this page contains a complete implementation you can copy. The full file:
+Replace the rest of `dependi-lsp/src/parsers/swift.rs` body with the implementation. The doctest "Example 3 — Implementing the `Parser` trait" in `dependi-lsp/src/docs/swift_tutorial_fixture.rs` contains a complete implementation you can copy. The full file:
 
 ```rust,ignore
 //! `Package.swift` parser for Swift Package Manager.
