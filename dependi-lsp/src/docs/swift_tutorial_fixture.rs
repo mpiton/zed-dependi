@@ -215,6 +215,43 @@
 //! let deps = dispatch_parse(Some(FileType::Cargo), cargo);
 //! assert!(!deps.is_empty());
 //! ```
-//! ```compile_fail
-//! compile_error!("fixture not yet populated — Task 7");
+//! # Example 6 — Canonical parser unit test
+//!
+//! Every parser ships with an inline `#[cfg(test)] mod tests`. The doctest
+//! below shows the exact structure existing parsers (e.g. `csharp.rs`,
+//! `php.rs`) follow.
+//!
+//! ```
+//! use dependi_lsp::parsers::{Dependency, Parser, Span};
+//!
+//! struct SwiftParser;
+//!
+//! impl Parser for SwiftParser {
+//!     fn parse(&self, _content: &str) -> Vec<Dependency> {
+//!         // Stand-in for Example 3's body. Real parsers reuse the
+//!         // implementation directly.
+//!         vec![Dependency {
+//!             name: "swift-log".to_string(),
+//!             version: "1.5.3".to_string(),
+//!             name_span: Span { line: 0, line_start: 0, line_end: 9 },
+//!             version_span: Span { line: 0, line_start: 11, line_end: 16 },
+//!             dev: false,
+//!             optional: false,
+//!             registry: None,
+//!             resolved_version: None,
+//!         }]
+//!     }
+//! }
+//!
+//! fn check_parses_single_dependency() {
+//!     let parser = SwiftParser;
+//!     let manifest = ".package(url: \"https://github.com/apple/swift-log\", exact: \"1.5.3\")";
+//!     let deps = parser.parse(manifest);
+//!     assert_eq!(deps.len(), 1);
+//!     assert_eq!(deps[0].name, "swift-log");
+//!     assert_eq!(deps[0].version, "1.5.3");
+//!     assert!(!deps[0].dev);
+//! }
+//!
+//! check_parses_single_dependency();
 //! ```
