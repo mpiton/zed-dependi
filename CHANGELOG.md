@@ -9,6 +9,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- Contributor tutorial `docs/adding-a-language.md` walks through adding
+  support for a new language/ecosystem (Parser trait, Registry trait,
+  backend wiring, tests). Worked example: Swift Package Manager. All Rust
+  snippets in the tutorial are mirrored as compiled doctests in
+  `dependi-lsp/src/docs/swift_tutorial_fixture.rs`, so they cannot drift
+  from the real trait signatures.
+  ([#233](https://github.com/mpiton/zed-dependi/issues/233))
 - Cache RustSec advisory details fetched from OSV.dev with a hybrid
   memory + SQLite layer. `check_rustsec_unmaintained` now consults the
   cache before issuing per-advisory `GET /vulns/{id}` requests, with a
