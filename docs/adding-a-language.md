@@ -215,7 +215,127 @@ Expected: `1 passed`. If the test does not yet pass, your variant or match arm i
 
 ## 4. Step 2 — Write the parser
 
-_TBD — Task 13._
+Create `dependi-lsp/src/parsers/swift.rs` and declare it in `parsers/mod.rs` with `pub mod swift;`.
+
+### 4.1 Span semantics — read this first
+
+`Span` covers the **inner bytes of a token**, measured from the start of the line, end-exclusive:
+
+```text
+    .package(url: "https://github.com/apple/swift-argument-parser", from: "1.3.0"),
+                  ^                                              ^         ^     ^
+                  inner start                                inner end  v.start v.end
+
+name_span    = Span { line: 4, line_start: 18, line_end: 71 }
+version_span = Span { line: 4, line_start: 80, line_end: 85 }
+```
+
+If you accidentally include the surrounding quotes, LSP quick-fix code actions will replace `"1.3.0"` with `"1.4.0""` — broken. The first thing your tests should assert is that spans don't include the quotes.
+
+### 4.2 Test first (TDD)
+
+Add the failing test before any implementation. In `dependi-lsp/src/parsers/swift.rs`:
+
+```rust,ignore
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::parsers::Parser;
+
+    const SAMPLE: &str = r#"
+let package = Package(
+    name: "MyApp",
+    dependencies: [
+        .package(url: "https://github.com/apple/swift-argument-parser", from: "1.3.0"),
+        .package(url: "https://github.com/apple/swift-log", exact: "1.5.3"),
+    ]
+)
+"#;
+
+    #[test]
+    fn parses_two_dependencies() {
+        let parser = SwiftParser::new();
+        let deps = parser.parse(SAMPLE);
+        assert_eq!(deps.len(), 2);
+        assert_eq!(deps[0].name, "swift-argument-parser");
+        assert_eq!(deps[0].version, "1.3.0");
+        assert_eq!(deps[1].name, "swift-log");
+        assert_eq!(deps[1].version, "1.5.3");
+    }
+
+    #[test]
+    fn version_span_excludes_quotes() {
+        let parser = SwiftParser::new();
+        let deps = parser.parse(SAMPLE);
+        let line_5 = SAMPLE.lines().nth(4).unwrap();
+        let inner = &line_5[deps[0].version_span.line_start as usize
+            ..deps[0].version_span.line_end as usize];
+        assert_eq!(inner, "1.3.0");
+        assert!(!inner.starts_with('"') && !inner.ends_with('"'));
+    }
+}
+```
+
+Run it — it should fail to compile (`SwiftParser` doesn't exist):
+
+```bash
+cd dependi-lsp
+cargo test parsers::swift
+```
+
+Expected: compilation error mentioning `cannot find type SwiftParser`.
+
+### 4.3 Implement
+
+Replace the rest of `dependi-lsp/src/parsers/swift.rs` body with the implementation. The doctest [Example 3](#example-3--implementing-the-parser-trait) on this page contains a complete implementation you can copy. The full file:
+
+```rust,ignore
+//! `Package.swift` parser for Swift Package Manager.
+
+use crate::parsers::{Dependency, Parser, Span};
+
+#[derive(Debug, Default)]
+pub struct SwiftParser;
+
+impl SwiftParser {
+    pub fn new() -> Self {
+        Self
+    }
+}
+
+impl Parser for SwiftParser {
+    fn parse(&self, content: &str) -> Vec<Dependency> {
+        // Body identical to Example 3 of `swift_tutorial_fixture.rs`.
+        // See the doctest for the worked-out logic; this comment exists so
+        // a reader doesn't read past it expecting more code.
+        unimplemented!("copy the body from Example 3");
+    }
+}
+
+#[cfg(test)]
+mod tests { /* defined above */ }
+```
+
+> **In a real PR**, replace the `unimplemented!()` body with the parsing logic from Example 3 verbatim. Keeping the two in sync is the contributor's responsibility — the doctest catches API drift but not logic drift.
+
+### 4.4 Run the tests
+
+```bash
+cd dependi-lsp
+cargo test parsers::swift
+```
+
+Expected: `2 passed`.
+
+### 4.5 If your manifest format is more complex
+
+Some ecosystems use full programming languages as manifests (Swift DSL, Gradle Kotlin DSL). Naïve substring parsing covers ~95% of real-world manifests but breaks on, for example:
+
+- Multi-line `.package(...)` calls.
+- `.package(name: "X", url: "Y", ...)` with the `name:` argument.
+- Dependencies inside `#if swift(>=5.5)` conditional blocks.
+
+For those cases, study the existing `dependi-lsp/src/parsers/maven.rs` (which uses `quick-xml`) or `dependi-lsp/src/parsers/python.rs` (which uses `taplo`) for richer parsing patterns. Adding a real Swift tokenizer is out of scope for the v1 tutorial.
 
 ## 5. Step 3 — Write the registry client
 
