@@ -36,11 +36,22 @@ if [ ${#blocks[@]} -eq 0 ]; then
     exit 0
 fi
 
+# Puppeteer needs --no-sandbox under CI containers (it cannot drop privileges
+# when the runner already executes as a non-root user inside an unprivileged
+# container). The same config is harmless on dev machines.
+PUPPETEER_CFG="$TMP/puppeteer.json"
+cat > "$PUPPETEER_CFG" <<'JSON'
+{ "args": ["--no-sandbox", "--disable-setuid-sandbox"] }
+JSON
+
 failures=0
 for f in "${blocks[@]}"; do
-    if ! "$MMDC" -i "$f" -o "$TMP/$(basename "$f").svg" --quiet >/dev/null 2>&1; then
+    err_log="$TMP/$(basename "$f").err"
+    if ! "$MMDC" -i "$f" -o "$TMP/$(basename "$f").svg" -p "$PUPPETEER_CFG" --quiet >"$err_log" 2>&1; then
         echo "FAIL: $(basename "$f")" >&2
         head -10 "$f" >&2
+        echo "--- mmdc stderr ---" >&2
+        head -20 "$err_log" >&2
         echo "---" >&2
         failures=$((failures + 1))
     fi
