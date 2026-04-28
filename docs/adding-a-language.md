@@ -675,7 +675,37 @@ Replace `XXX` with the issue number you're closing. Follow the [Keep a Changelog
 
 ## 9. Verifying your work
 
-_TBD — Task 18._
+Before opening a PR, every check below must pass locally. CI runs the same set on every PR (`.github/workflows/ci.yml`), so a green local run is your fastest feedback loop.
+
+```bash
+# 1. Formatting (no diff allowed)
+cd dependi-lsp
+cargo fmt --all -- --check
+
+# 2. Lints (warnings are errors)
+cargo clippy -- -D warnings
+cargo clippy --all-targets -- -D warnings
+
+# 3. Unit + integration + doctests in one pass
+cargo test
+
+# 4. Rustdoc must be clean (broken intra-doc links are deny-level)
+cargo doc --no-deps
+cd ..
+
+# 5. Extension still builds for WASM
+cd dependi-zed
+cargo build --release --target wasm32-wasip1
+cd ..
+```
+
+If you'd like to manually confirm the new ecosystem in Zed:
+
+```bash
+./build-and-deploy.sh
+```
+
+Then in Zed: **Extensions → Install Dev Extension → select `dependi-zed`**, open a `Package.swift` from any open-source Swift project, and verify inlay hints appear next to each `.package(url:...)` declaration.
 
 ## 10. Reference checklist
 
