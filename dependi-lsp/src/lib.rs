@@ -72,7 +72,7 @@ pub mod vulnerabilities;
 ///
 /// This module is compiled only under `cfg(test)` and `cfg(doctest)` so it
 /// adds zero bytes to the production WASM build. Each example shown in the
-/// tutorial that uses a fenced ```rust block (without `ignore`) is reproduced
+/// tutorial that uses a fenced `rust` code block (without `ignore`) is reproduced
 /// here as a doctest. A failure here means the tutorial has drifted from the
 /// real `Parser`, `Registry`, `Dependency`, or `Span` types.
 #[cfg(any(test, doctest))]
