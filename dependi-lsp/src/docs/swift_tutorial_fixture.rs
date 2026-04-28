@@ -186,8 +186,34 @@
 //!
 //! [`Registry`]: dependi_lsp::registries::Registry
 //! [`VersionInfo`]: dependi_lsp::registries::VersionInfo
-//! ```compile_fail
-//! compile_error!("fixture not yet populated — Task 6");
+//! # Example 5 — Registration glue
+//!
+//! When the contributor adds a new ecosystem, the LSP backend's
+//! `parse_document` switch and the registry-fetch loop both need a new
+//! match arm. The example below mirrors the dispatch shape used in
+//! `dependi-lsp/src/backend.rs` so contributors can copy the pattern.
+//!
+//! The example imports the existing real types — only the dispatch shape
+//! is illustrative, and the parser used here is the Cargo parser to keep
+//! the doctest hermetic.
+//!
+//! ```
+//! use dependi_lsp::file_types::FileType;
+//! use dependi_lsp::parsers::{Dependency, Parser};
+//!
+//! fn dispatch_parse(file_type: Option<FileType>, content: &str) -> Vec<Dependency> {
+//!     match file_type {
+//!         Some(FileType::Cargo) => dependi_lsp::parsers::cargo::CargoParser
+//!             .parse(content),
+//!         // ↓ A new ecosystem adds one arm here:
+//!         // Some(FileType::Swift) => SwiftParser.parse(content),
+//!         _ => Vec::new(),
+//!     }
+//! }
+//!
+//! let cargo = "[dependencies]\nserde = \"1\"\n";
+//! let deps = dispatch_parse(Some(FileType::Cargo), cargo);
+//! assert!(!deps.is_empty());
 //! ```
 //! ```compile_fail
 //! compile_error!("fixture not yet populated — Task 7");
