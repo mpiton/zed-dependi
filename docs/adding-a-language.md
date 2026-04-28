@@ -478,7 +478,97 @@ Most registries publish a fair-use limit. Swift Package Index's API is CDN-cache
 
 ## 6. Step 4 — Wire into the backend
 
-_TBD — Task 15._
+Open `dependi-lsp/src/backend.rs`. The wiring is mechanical but easy to forget partial steps. Each sub-step ends with a `cargo check` to confirm the next step is set up correctly.
+
+### 6.1 Import
+
+At the top of `backend.rs`, add:
+
+```rust,ignore
+use crate::parsers::swift::SwiftParser;
+use crate::registries::swift_package_index::SwiftPackageIndexRegistry;
+```
+
+```bash
+cd dependi-lsp
+cargo check
+```
+Expected: a warning about unused imports (you'll fix it in 6.2). No errors.
+
+### 6.2 Add fields to `ProcessingContext`
+
+In the `ProcessingContext` struct, add two `Arc<...>` fields:
+
+```rust,ignore
+pub(crate) struct ProcessingContext {
+    // ... existing fields ...
+    pub(crate) swift_parser: Arc<SwiftParser>,
+    pub(crate) swift_registry: Arc<SwiftPackageIndexRegistry>,
+}
+```
+
+### 6.3 Initialize them in `DependiBackend::new` (or `with_http_client`)
+
+Wherever `ProcessingContext` is constructed, add:
+
+```rust,ignore
+swift_parser: Arc::new(SwiftParser::new()),
+swift_registry: Arc::new(SwiftPackageIndexRegistry::with_client(Arc::clone(&http_client))),
+```
+
+```bash
+cd dependi-lsp
+cargo check
+```
+Expected: zero errors.
+
+### 6.4 Dispatch in `parse_document`
+
+In the `match FileType::detect(uri)` arm:
+
+```rust,ignore
+Some(FileType::Swift) => self.swift_parser.parse(content),
+```
+
+### 6.5 Dispatch in the registry-fetch loop
+
+Find the `match file_type` block that calls `get_version_info`. Add:
+
+```rust,ignore
+FileType::Swift => self.swift_registry.get_version_info(name).await,
+```
+
+### 6.6 Add the `Ecosystem` variant
+
+In `dependi-lsp/src/vulnerabilities/mod.rs`:
+
+```rust,ignore
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum Ecosystem {
+    Crates,
+    // ... existing variants ...
+    SwiftPM,
+}
+
+impl Ecosystem {
+    pub fn as_osv_str(&self) -> &'static str {
+        match self {
+            // ... existing arms ...
+            Self::SwiftPM => "SwiftURL",  // verify against the OSV schema
+        }
+    }
+}
+```
+
+### 6.7 Verify the whole pipeline compiles
+
+```bash
+cd dependi-lsp
+cargo check
+cargo test
+```
+
+Expected: zero errors. Test count increases by 3 (the two parser tests and the one registry test you wrote in Steps 2 and 3).
 
 ## 7. Step 5 — (Optional) Lockfile resolver
 
