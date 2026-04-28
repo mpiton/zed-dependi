@@ -9,6 +9,23 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- Architecture guide `docs/architecture.md` for contributors — covers the five
+  layered modules (transport / handlers / providers / parsers + registries /
+  cache), the request lifecycle including debounce and bounded concurrency, the
+  hybrid memory + SQLite cache topology, the OSV vulnerability path, the five
+  LSP providers, the auth subsystem (with explicit partial-implementation
+  callout), and key design decisions (cache, runtime, debounce, span model,
+  shared HTTP client). Includes four mermaid diagrams (system boundary,
+  request lifecycle, cache topology, vulnerability flow)
+  ([#232](https://github.com/mpiton/zed-dependi/issues/232))
+- TDD validators for the architecture guide:
+  `dependi-lsp/tests/architecture_doc_test.rs` checks every cited
+  `dependi-lsp/src/...rs` path and line number resolves, every backticked
+  struct/trait/enum claim maps to a real `pub` definition, and the doc has at
+  least three mermaid diagrams; `scripts/check_mermaid_syntax.sh` validates
+  every fenced ```mermaid block parses with `@mermaid-js/mermaid-cli`. Both
+  wired into CI alongside a lychee link check
+  ([#232](https://github.com/mpiton/zed-dependi/issues/232))
 - Contributor tutorial `docs/adding-a-language.md` walks through adding
   support for a new language/ecosystem (Parser trait, Registry trait,
   backend wiring, tests). Worked example: Swift Package Manager. All Rust
