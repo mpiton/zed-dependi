@@ -126,9 +126,66 @@
 //! ```
 //!
 //! [`Parser`]: dependi_lsp::parsers::Parser
-//! ```compile_fail
-//! compile_error!("fixture not yet populated — Task 5");
+//! # Example 4 — Implementing the [`Registry`] trait
+//!
+//! Registry clients fetch metadata for a package and return a
+//! [`VersionInfo`] populated with the latest version, all known versions,
+//! and homepage/license/repository fields. The example uses a fixed
+//! response so the doctest stays offline.
+//!
+//! The real [`Registry`] trait uses native async fns
+//! (`#[allow(async_fn_in_trait)]`) — do not wrap your `impl` with
+//! `#[async_trait]`.
+//!
 //! ```
+//! use std::sync::Arc;
+//!
+//! use dependi_lsp::registries::{Registry, VersionInfo};
+//! use reqwest::Client;
+//!
+//! struct SwiftPackageIndexRegistry {
+//!     client: Arc<Client>,
+//! }
+//!
+//! impl Registry for SwiftPackageIndexRegistry {
+//!     async fn get_version_info(&self, package_name: &str)
+//!         -> anyhow::Result<VersionInfo>
+//!     {
+//!         // A real client would:
+//!         //   1. resolve `package_name` to an owner/repo pair,
+//!         //   2. GET https://swiftpackageindex.com/api/packages/{owner}/{repo},
+//!         //   3. parse the JSON into VersionInfo.
+//!         //
+//!         // For the doctest, return a fixed VersionInfo so we stay offline.
+//!         let _ = package_name;
+//!         let _ = &self.client;
+//!         Ok(VersionInfo {
+//!             latest: Some("1.3.0".to_string()),
+//!             versions: vec!["1.0.0".to_string(), "1.3.0".to_string()],
+//!             ..Default::default()
+//!         })
+//!     }
+//!
+//!     fn http_client(&self) -> Arc<Client> {
+//!         Arc::clone(&self.client)
+//!     }
+//! }
+//!
+//! # async fn run() -> anyhow::Result<()> {
+//! let registry = SwiftPackageIndexRegistry {
+//!     client: Arc::new(reqwest::Client::new()),
+//! };
+//! let info = registry.get_version_info("apple/swift-argument-parser").await?;
+//! assert_eq!(info.latest.as_deref(), Some("1.3.0"));
+//! assert_eq!(info.versions.len(), 2);
+//! # Ok(())
+//! # }
+//! # tokio::runtime::Builder::new_current_thread()
+//! #     .enable_all().build().unwrap().block_on(run()).unwrap();
+//! ```
+//!
+//! [`Registry`]: dependi_lsp::registries::Registry
+//! [`VersionInfo`]: dependi_lsp::registries::VersionInfo
 //! ```compile_fail
 //! compile_error!("fixture not yet populated — Task 6");
 //! ```
