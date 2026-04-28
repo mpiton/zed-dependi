@@ -1,11 +1,12 @@
 ---
 title: Architecture
-nav_order: 90
+layout: default
+nav_order: 11
 ---
 
 # Dependi LSP Architecture
 
-> Audience: contributors. Read [README.md](../README.md) and [Configuration]({% link configuration.md %}) first for user-facing context.
+> Audience: contributors. Read the [Architecture section in README.md](../README.md#architecture) and [Configuration]({% link configuration.md %}) first for user-facing context — this guide expands README's high-level diagram into the full layered model.
 
 ## Table of Contents
 
@@ -82,17 +83,20 @@ The LSP is organised as five layers, each occupying a single subdirectory of `de
 | `dependi-lsp/src/config.rs` | Workspace config (registries, auth, cache TTL, debounce ms). |
 | `dependi-lsp/src/document.rs` | Text/document utilities. |
 | `dependi-lsp/src/file_types.rs` | `FileType` enum + path-pattern → ecosystem detection. |
+| `dependi-lsp/src/document.rs` | `DocumentState` per-open-document snapshot. |
 | `dependi-lsp/src/reports.rs` | JSON / Markdown vulnerability report generation. |
 | `dependi-lsp/src/settings_edit.rs` | Programmatic edits to user settings (used by code actions). |
 | `dependi-lsp/src/utils.rs` | Shared utilities. |
 | `dependi-lsp/src/auth/` | Token providers, cargo credentials, npmrc parsing. |
-| `dependi-lsp/src/parsers/` | Per-ecosystem parsers + lockfile resolvers (`lockfile_resolver.rs`, `lockfile_graph.rs`). |
+| `dependi-lsp/src/parsers/` | Per-ecosystem parsers (cargo, npm, python, go, php, dart, csharp, ruby, maven) + lockfile resolvers (`lockfile_resolver.rs`, `lockfile_graph.rs`). |
 | `dependi-lsp/src/providers/` | Five LSP feature implementations. |
-| `dependi-lsp/src/registries/` | Registry HTTP clients + shared `reqwest::Client`. |
+| `dependi-lsp/src/registries/` | Registry HTTP clients (incl. `maven_central.rs`) + shared `reqwest::Client`. |
 | `dependi-lsp/src/vulnerabilities/` | OSV client + vulnerability seen-set cache. |
 | `dependi-lsp/src/cache/` | Hybrid cache, advisory cache. |
 
 The strict directional rule: **handlers call providers, providers call domain modules, domain modules read/write the cache.** Providers do not call each other; domain modules do not call handlers.
+
+**Adding a new ecosystem?** The parser (§5), registry (§6) and `FileType` entry (§2 above) are the three touch-points. A step-by-step walkthrough is in [Adding a language]({% link adding-a-language.md %}).
 
 ## 3. Request Lifecycle
 
@@ -139,10 +143,10 @@ sequenceDiagram
 
 ### Key invariants
 
-- **Debounce:** every `didChange` aborts the previous task and increments an `AtomicU64` generation counter. The task only proceeds if its generation is still current.
-- **Bounded concurrency:** registry fetches run under a `Semaphore` (max 5 in-flight) — see `backend.rs` `ProcessingContext`.
+- **Debounce** (coalescing rapid keystrokes into one delayed action): every `didChange` writes the new content into `pending_changes`, aborts the previous `JoinHandle`, and spawns a fresh task. After sleeping 200 ms the task verifies *its* content is still the value in `pending_changes` (an equality check on the buffered text) — if a newer keystroke arrived, that buffer was overwritten and this task exits without doing work. An `Arc<AtomicU64>` generation counter is used independently to clean up the per-URI `debounce_tasks` slot via `remove_if(stored_gen == generation)`. Full rationale in [§11 Key Design Decisions](#11-key-design-decisions).
+- **Bounded concurrency:** registry fetches run under a `tokio::sync::Semaphore` (max 5 in-flight). The semaphore is created inline inside `process_document` (`backend.rs`) — it is **not** a field of `ProcessingContext`.
 - **Vulnerabilities never block hints:** the vuln path is a separate `tokio::spawn`. Inlay hints publish first; vulnerability diagnostics arrive in a second pass.
-- **Document state lives in `Arc<DashMap<Url, DocumentState>>`** so handlers can drop the read guard before any `await`.
+- **Document state lives in `Arc<DashMap<Url, DocumentState>>`** — `DashMap` shards are independently locked, so two handlers reading different URIs never block each other. Handlers snapshot the fields they need into locals and drop the `Ref` (the `DashMap` shard reference) before any `await`, since shard references are not `Send`.
 
 The `did_open`, `did_save` and `did_close` paths share the same skeleton minus the debounce: open and save run `process_document` immediately, close removes the entry from `documents` and any pending debounce.
 
@@ -166,7 +170,7 @@ The central handler struct that implements `tower_lsp::LanguageServer`. All shar
 | `token_manager: Arc<TokenProviderManager>` | URL → auth-header resolution. |
 | `osv_client`, `vuln_cache`, `advisory_cache`, `negative_advisory_cache` | Vulnerability subsystem. |
 | `transitive_vuln_data: Arc<DashMap<VulnCacheKey, Vec<Vulnerability>>>` | Per-package transitive vuln payloads. |
-| `debounce_tasks`, `debounce_generation: AtomicU64`, `pending_changes` | Debounce coordination. |
+| `debounce_tasks: Arc<DashMap<Url, (u64, JoinHandle<()>)>>`, `debounce_generation: Arc<AtomicU64>`, `pending_changes: Arc<DashMap<Url, String>>` | Debounce coordination. |
 | `version_cache: Arc<HybridCache>` | Two-tier version-info cache. |
 
 ### `Dependency` (`dependi-lsp/src/parsers/mod.rs`)
@@ -198,13 +202,13 @@ Note the offsets are **line-relative byte offsets**, not file-relative. This mak
 
 Returned by every registry client. Contains `latest`, `latest_prerelease`, `versions: Vec<String>`, `description`, `homepage`, `repository`, `license`, `vulnerabilities`, `deprecated`, `yanked_versions`, `release_dates: HashMap<String, DateTime<Utc>>`, `transitive_vulnerabilities`. Vulnerability fields are populated separately (after the OSV pass) — registry clients themselves never query OSV.
 
-### `DocumentState` (`dependi-lsp/src/backend.rs`)
+### `DocumentState` (`dependi-lsp/src/document.rs`)
 
-Per-open-document snapshot held in `documents: DashMap<Url, DocumentState>`. Stores parsed dependencies, file type, content, last-publish timestamps. Read once into a local then guard dropped — never held across `await`.
+Per-open-document snapshot held in `documents: DashMap<Url, DocumentState>` on the backend. Stores parsed dependencies, file type, content, last-publish timestamps. Read once into a local then `Ref` dropped — never held across `await`.
 
 ### `FileType` (`dependi-lsp/src/file_types.rs`)
 
-A `Copy`-able enum tagging the ecosystem of an open file: `Cargo`, `Npm`, `Python`, `Go`, `Php`, `Dart`, `Csharp`, `Ruby`, plus lockfile variants. Single source of truth used by handlers, parsers and providers when picking ecosystem-specific behaviour.
+A `Copy`-able enum tagging the ecosystem of an open file: `Cargo`, `Npm`, `Python` (covers `requirements.txt`, `constraints.txt`, `pyproject.toml`, `hatch.toml`), `Go`, `Php`, `Dart`, `Csharp`, `Ruby`, `Maven`. Single source of truth used by handlers, parsers and providers when picking ecosystem-specific behaviour. Lockfiles do *not* get their own variants — the ecosystem variant identifies both manifest and lockfile, and `lockfile_resolver.rs` handles per-ecosystem dispatch.
 
 ## 5. Parsers
 
@@ -244,7 +248,7 @@ The downstream `process_document` switches on the resulting `FileType` to pick t
 
 Two cooperating modules turn `Cargo.lock` / `package-lock.json` / `composer.lock` / `pubspec.lock` / `go.sum` / `Gemfile.lock` / etc. into structured graphs:
 
-- **`LockfileResolver` trait** (`dependi-lsp/src/parsers/lockfile_resolver.rs`) — async trait with `find_lockfile`, `parse_graph`, `normalize_name`, `resolve_version`. `select_resolver(file_type)` dispatches to the per-ecosystem implementation. `resolve_versions_from_lockfile` walks `Vec<Dependency>` and back-fills each `dep.resolved_version` in place; returns the parsed graph for the vulnerability pass.
+- **`LockfileResolver` trait** (`dependi-lsp/src/parsers/lockfile_resolver.rs`) — async trait with `find_lockfile`, `parse_graph`, `normalize_name`, `resolve_version`. `select_resolver(file_type)` returns the per-ecosystem implementation as `Box<dyn LockfileResolver>`. The free function `resolve_versions_from_lockfile(deps: &mut [Dependency], resolver: Box<dyn LockfileResolver>, manifest_path: &Path) -> Option<Arc<LockfileGraph>>` then locates the lockfile, parses the graph, and back-fills each `dep.resolved_version` in place; the returned graph feeds the vulnerability pass.
 - **`LockfileGraph`** (`dependi-lsp/src/parsers/lockfile_graph.rs`) — DFS algorithms over `Vec<LockfilePackage>`:
   - `transitive_deps_of(name)` — cycle-safe DFS, multi-version aware.
   - `transitives_only(direct)` — reachability filter for "what is brought in by this top-level dep".
@@ -283,7 +287,7 @@ There is no HTTP-level cache. Caching happens at the application layer (see [§7
 
 ### Bounded concurrency
 
-`process_document` builds a `tokio::sync::Semaphore::new(5)` per request and acquires a permit before each `get_version_info` call (see `ProcessingContext` in `backend.rs`). Five in-flight requests is enough to saturate a slow-path lockfile while staying polite to public registries.
+`process_document` builds a `tokio::sync::Semaphore::new(5)` per request (created inline; not a field of `ProcessingContext`) and acquires a permit before each `get_version_info` call. Five in-flight requests is enough to saturate a slow-path lockfile while staying polite to public registries. For per-registry rate limits and HTTP API details see [Registries]({% link registries.md %}).
 
 ### Per-ecosystem clients
 
@@ -402,7 +406,7 @@ OSV returns CVSS scores. We map them to four severities (`dependi-lsp/src/vulner
 | ≥ 4.0 | `Medium` | `Warning` |
 | < 4.0 | `Low` | `Hint` |
 
-Non-numeric CVSS strings default to `Medium` (defensive — do not silently swallow severity information).
+Non-numeric CVSS strings default to `Medium` (defensive — do not silently swallow severity information). User-visible severity indicators are described in [Security Scanning]({% link features/security.md %}).
 
 ### Concurrency
 
@@ -438,21 +442,11 @@ The provider functions are unit-testable in isolation — they accept any `impl 
 
 ### Inlay hint label vocabulary
 
-The labels rendered next to versions are produced exclusively by `create_inlay_hint`:
-
-| Label | Meaning |
-|---|---|
-| `✓` | Up to date. |
-| `→ X.Y.Z` | Newer compatible version available. |
-| `⚠ N vuln(s)` | N vulnerabilities at this version. |
-| `⚠ Deprecated` | Package marked deprecated by registry. |
-| `⊘ Yanked` | This specific version was yanked. |
-| `→ Local` | Path / git dependency, no registry version. |
-| `? Unknown` | Could not fetch (network, unknown package). |
+The labels rendered next to versions are produced exclusively by `create_inlay_hint`. The full label vocabulary (`✓`, `→ X.Y.Z`, `⚠ N vulns`, `⚠ Deprecated`, `⊘ Yanked`, `→ Local`, `? Unknown`) and rendering rules are documented in [Inlay Hints]({% link features/inlay-hints.md %}); from the architecture standpoint what matters is that `create_inlay_hint` is the single producer — no other call site emits these strings.
 
 ## 10. Authentication & Private Registries
 
-> **Status — partial implementation.** The auth subsystem is **structurally complete** (`TokenProvider` trait, `TokenProviderManager`, parsers for `~/.cargo/credentials.toml` and `.npmrc`) but the manager is **not yet injected into registry HTTP calls** in production. Most parsing functions are currently `#[cfg(test)]`-gated. This section documents the design as built; the wiring will land in a follow-up. See [Private Registries]({% link private-registries.md %}) for user-facing setup once enabled.
+> **Status — partial implementation.** The auth subsystem is **structurally complete** (`TokenProvider` trait, `TokenProviderManager`, parsers for `~/.cargo/credentials.toml` and `.npmrc`) but the manager is **not yet injected into registry HTTP calls** in production. The cargo-credentials parser is a plain `pub fn` and ready to use, but the `.npmrc` parsers and `TokenProviderManager::get_auth_headers` are currently `#[cfg(test)]`-gated. This section documents the design as built; the wiring will land in a follow-up. See [Private Registries]({% link private-registries.md %}) for user-facing setup once enabled.
 
 ### `TokenProvider` trait
 
@@ -466,7 +460,7 @@ Implementations decide if a request URL falls within their scope and, if so, ret
 
 ### `TokenProviderManager`
 
-Stores `RwLock<HashMap<String, Arc<dyn TokenProvider>>>` keyed by URL prefix (`dependi-lsp/src/auth/mod.rs`). Resolution walks the keys and picks the **longest matching prefix** so a more specific scope (e.g. `https://internal.npm.example.com/scoped/`) wins over a general one (`https://internal.npm.example.com/`).
+Stores `tokio::sync::RwLock<hashbrown::HashMap<String, Arc<dyn TokenProvider>>>` keyed by URL prefix (`dependi-lsp/src/auth/mod.rs`). Resolution walks the keys and picks the **longest matching prefix** so a more specific scope (e.g. `https://internal.npm.example.com/scoped/`) wins over a general one (`https://internal.npm.example.com/`).
 
 Two safety properties enforced at registration:
 
@@ -477,7 +471,7 @@ Two safety properties enforced at registration:
 
 | Parser | Source | Status |
 |---|---|---|
-| `parse_credentials_content` | `~/.cargo/credentials.toml` (`[registries.<name>].token`) | Pure function implemented; file I/O integration pending. |
+| `parse_credentials_content` | `~/.cargo/credentials.toml` (`[registries.<name>].token`) | Plain `pub fn`, ready to use; production file I/O integration pending. |
 | `parse_token_from_content`, `parse_registry_from_content`, `extract_auth_token`, `resolve_env_var` | `.npmrc` (env-var expansion supported) | All `#[cfg(test)]`-gated; not yet wired. |
 
 Both modules live under `dependi-lsp/src/auth/`. They are deliberately small and side-effect-free so they can be exercised by unit tests without touching the filesystem.
@@ -502,11 +496,11 @@ This section captures non-obvious choices and their rationale. Each subsection a
 
 **Why not `current_thread`?** Registry fan-out, vulnerability fetches and SQLite blocking calls all benefit from a thread pool. The LSP itself is mostly I/O-bound, but the work it dispatches is CPU-bound enough (parsers, JSON deserialisation) that a single-threaded runtime would serialise it and create head-of-line blocking on hint publishing.
 
-### Debounce via `JoinHandle::abort` + atomic generation counter
+### Debounce via `JoinHandle::abort` + content equality check
 
-**Choice:** rolling token implemented as `AtomicU64` + per-URI `JoinHandle`. On `didChange`: abort the existing handle, increment the counter, spawn a new task that sleeps 200 ms then verifies its generation is still current.
+**Choice:** per-URI `JoinHandle` plus a `pending_changes: DashMap<Url, String>` buffer. On `didChange`: write the new content into `pending_changes` (overwriting any prior pending value), abort the existing handle, and spawn a new task that sleeps 200 ms then re-reads `pending_changes` and only proceeds if the buffered value still equals the content this task captured. A separate `Arc<AtomicU64>` generation counter exists solely to clean up the per-URI `debounce_tasks` slot via `remove_if(stored_gen == generation)` — it is **not** the gate for "should I run".
 
-**Why not `tokio_util::sync::CancellationToken`?** Adding the dependency for one call site felt heavy. Abort + generation counter is six lines and uses only `tokio` core. Cancellation tokens shine when a long-lived task wants to be cooperatively interrupted; debounce is closer to "discard work in flight" — abort fits.
+**Why not `tokio_util::sync::CancellationToken`?** Adding the dependency for one call site felt heavy. Abort + content equality is a handful of lines and uses only `tokio` core. Cancellation tokens shine when a long-lived task wants to be cooperatively interrupted; debounce is closer to "discard work in flight" — abort fits.
 
 ### Plain provider functions instead of a trait
 
