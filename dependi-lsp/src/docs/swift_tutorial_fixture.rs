@@ -27,9 +27,29 @@
 //!
 //! # Placeholder doctests (replaced in later tasks)
 //!
-//! ```compile_fail
-//! compile_error!("fixture not yet populated — Task 3");
+//! # Example 2 — Constructing a [`Dependency`]
+//!
+//! Each call to [`Parser::parse`] produces zero or more [`Dependency`]
+//! values. The two `Span` fields anchor LSP quick-fix edits.
+//!
 //! ```
+//! use dependi_lsp::parsers::{Dependency, Span};
+//!
+//! let dep = Dependency {
+//!     name: "swift-argument-parser".to_string(),
+//!     version: "1.3.0".to_string(),
+//!     name_span: Span { line: 4, line_start: 32, line_end: 53 },
+//!     version_span: Span { line: 4, line_start: 60, line_end: 65 },
+//!     dev: false,
+//!     optional: false,
+//!     registry: None,
+//!     resolved_version: None,
+//! };
+//! assert_eq!(dep.effective_version(), "1.3.0");
+//! ```
+//!
+//! [`Dependency`]: dependi_lsp::parsers::Dependency
+//! [`Parser::parse`]: dependi_lsp::parsers::Parser::parse
 //! ```compile_fail
 //! compile_error!("fixture not yet populated — Task 4");
 //! ```
