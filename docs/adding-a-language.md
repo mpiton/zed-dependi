@@ -709,7 +709,53 @@ Then in Zed: **Extensions → Install Dev Extension → select `dependi-zed`**, 
 
 ## 10. Reference checklist
 
-_TBD — Task 19._
+Use this list as a final review before opening your PR. Every item must be done (or explicitly N/A for your ecosystem).
+
+### Code
+
+- [ ] `dependi-lsp/src/file_types.rs`
+  - [ ] Added `FileType::<YourLang>` variant.
+  - [ ] Added arm in `detect()`.
+  - [ ] Added arm in `to_ecosystem()`.
+  - [ ] Added arm in `registry_name()`.
+  - [ ] Added arm in `fmt_cache_key()`.
+  - [ ] Added arm in `fmt_registry_package_url()`.
+  - [ ] Added unit test in `#[cfg(test)] mod tests` covering the new file pattern.
+- [ ] `dependi-lsp/src/parsers/<your_lang>.rs`
+  - [ ] New file containing struct + `impl Parser`.
+  - [ ] `pub mod <your_lang>;` declaration in `parsers/mod.rs`.
+  - [ ] Inline `#[cfg(test)] mod tests` with at least one realistic manifest fixture.
+- [ ] `dependi-lsp/src/registries/<your_lang>.rs`
+  - [ ] New file containing struct + `impl Registry`.
+  - [ ] `pub mod <your_lang>;` declaration in `registries/mod.rs`.
+  - [ ] `wiremock` test stubbing the upstream API.
+- [ ] `dependi-lsp/src/backend.rs`
+  - [ ] Imports for the new parser and registry types.
+  - [ ] `Arc<>` fields on `ProcessingContext`.
+  - [ ] Initialization in `DependiBackend::new` / `with_http_client`.
+  - [ ] Match arm in `parse_document`.
+  - [ ] Match arm in the registry-fetch loop.
+- [ ] `dependi-lsp/src/vulnerabilities/mod.rs`
+  - [ ] Added `Ecosystem::<YourEcosystem>` variant.
+  - [ ] Added arm in `as_osv_str()` returning the OSV ecosystem string.
+- [ ] (Optional) `dependi-lsp/src/parsers/<your_lang>_resolved.rs` plus dispatch in `lockfile_resolver::select_resolver`.
+
+### Tests
+
+- [ ] `cd dependi-lsp && cargo test` is green.
+- [ ] `cd dependi-lsp && cargo test --doc` is green.
+- [ ] `cd dependi-lsp && cargo doc --no-deps` is green.
+
+### Docs
+
+- [ ] `docs/languages/<your_lang>.md` (new).
+- [ ] Row in `docs/registries.md`.
+- [ ] `[Unreleased] / Added` entry in `CHANGELOG.md` referencing your issue/PR.
+
+### CI
+
+- [ ] PR opens without `clippy` warnings.
+- [ ] All workflow jobs in `.github/workflows/ci.yml` are green.
 
 ## 11. Common pitfalls
 
