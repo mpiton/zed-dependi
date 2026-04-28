@@ -759,4 +759,41 @@ Use this list as a final review before opening your PR. Every item must be done 
 
 ## 11. Common pitfalls
 
-_TBD — Task 20._
+A short tour of the mistakes most likely to bite a first-time contributor.
+
+### 11.1 Spans include surrounding quotes
+
+`Span::line_start..line_end` must cover the **inner** text. A span that points at `"1.3.0"` (with quotes) makes LSP quick-fixes produce `""1.3.0""` (broken). Always assert in your tests that `&line[span.line_start..span.line_end]` does not start or end with `"`.
+
+### 11.2 Spans are byte offsets, not characters
+
+LSP positions are UTF-16 character offsets. `Span` stores byte offsets within the line. ASCII manifests map 1:1, but non-ASCII content (e.g. a UTF-8 BOM, accented identifier names) does not. If your ecosystem allows non-ASCII names, you must transcode at the LSP boundary — see `dependi-lsp/src/providers/diagnostics.rs` for the pattern.
+
+### 11.3 Blocking I/O inside async fns
+
+The project rule (`CLAUDE.md`): **`tokio::fs`, never `std::fs`**, and never `unwrap()`/`expect()` outside of tests. A blocking `std::fs::read_to_string` call inside `Registry::get_version_info` will stall the runtime under load.
+
+### 11.4 Forgetting the OSV ecosystem string
+
+If `Ecosystem::as_osv_str` returns the wrong value, vulnerabilities silently never surface. Verify by issuing a known-CVE lookup against OSV.dev, e.g.:
+
+```bash
+curl -s -X POST 'https://api.osv.dev/v1/query' \
+  -H 'Content-Type: application/json' \
+  -d '{"package":{"name":"<known-vulnerable-package>","ecosystem":"<your-osv-string>"}}' \
+  | head -50
+```
+
+The response must contain at least one `vulns[]` entry. If it's empty, double-check the ecosystem string against <https://ossf.github.io/osv-schema/#defined-ecosystems>.
+
+### 11.5 Forgetting an exhaustive match arm
+
+Rust's exhaustive `match` is your friend. The `parse_document` switch in `backend.rs` lists all `FileType` variants explicitly. After adding `FileType::Swift`, the compiler will tell you exactly which match expressions still need an arm — fix every error before moving on. If you suppress this with `_ => {}`, you'll silently ship a half-integrated ecosystem.
+
+### 11.6 Rate-limiting your way to a ban
+
+Aggressive registry clients get IP-blocked. crates.io enforces 1 req/s strictly; npm tolerates ~1 req/s before blocking; PyPI is CDN-cached but still asks for politeness. If your registry has a documented limit, copy the `RateLimiter` pattern from `dependi-lsp/src/registries/crates_io.rs` rather than burst-firing requests in tests.
+
+### 11.7 Skipping the doctest gate
+
+This guide ships with doctests that lock the snippets to the real `Parser`/`Registry` API. If you change a trait signature in your PR, run `cd dependi-lsp && cargo test --doc` to confirm the tutorial doctests still compile. They will fail loudly if anything has drifted.
