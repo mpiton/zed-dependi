@@ -572,7 +572,77 @@ Expected: zero errors. Test count increases by 3 (the two parser tests and the o
 
 ## 7. Step 5 — (Optional) Lockfile resolver
 
-_TBD — Task 16._
+If your ecosystem has a lockfile (`Package.resolved` for SwiftPM, `pnpm-lock.yaml` for pnpm, etc.), Dependi can pin diagnostics to the lock-resolved version instead of the manifest range. Skip this section for the SwiftPM v1 walkthrough — it's a good follow-up issue.
+
+### 7.1 Implement the trait
+
+In a new `dependi-lsp/src/parsers/swift_resolved.rs`:
+
+```rust,ignore
+use std::path::{Path, PathBuf};
+
+use async_trait::async_trait;
+
+use crate::parsers::{Dependency, lockfile_graph::LockfileGraph,
+                     lockfile_resolver::LockfileResolver};
+
+pub struct SwiftLockfileResolver;
+
+#[async_trait]
+impl LockfileResolver for SwiftLockfileResolver {
+    async fn find_lockfile(&self, manifest_path: &Path) -> Option<PathBuf> {
+        let lockfile = manifest_path.parent()?.join("Package.resolved");
+        if tokio::fs::try_exists(&lockfile).await.unwrap_or(false) {
+            Some(lockfile)
+        } else {
+            None
+        }
+    }
+
+    fn parse_graph(&self, lock_content: &str) -> LockfileGraph {
+        // Parse Package.resolved (JSON v2 format) and return a graph.
+        // See dependi-lsp/src/parsers/cargo_lock.rs for a complete example.
+        let _ = lock_content;
+        LockfileGraph::default()
+    }
+
+    fn resolve_version(
+        &self,
+        dep: &Dependency,
+        graph: &LockfileGraph,
+    ) -> Option<String> {
+        graph.packages.iter()
+            .find(|p| p.name == dep.name)
+            .map(|p| p.version.clone())
+    }
+}
+```
+
+### 7.2 Register the resolver
+
+In `dependi-lsp/src/parsers/lockfile_resolver.rs`, extend `select_resolver`:
+
+```rust,ignore
+pub fn select_resolver(file_type: FileType)
+    -> Option<Box<dyn LockfileResolver>>
+{
+    match file_type {
+        FileType::Cargo => Some(Box::new(crate::parsers::cargo_lock::CargoLockResolver)),
+        // ... existing arms ...
+        FileType::Swift => Some(Box::new(crate::parsers::swift_resolved::SwiftLockfileResolver)),
+        _ => None,
+    }
+}
+```
+
+### 7.3 Verify
+
+```bash
+cd dependi-lsp
+cargo test parsers::swift_resolved
+```
+
+Expected: `1 passed` (assuming you wrote a test). Without this resolver, vulnerability scanning still works on the declared range, but transitive vulnerabilities won't be detected.
 
 ## 8. Step 6 — Update docs and CHANGELOG
 
