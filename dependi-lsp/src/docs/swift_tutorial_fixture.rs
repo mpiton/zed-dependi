@@ -25,8 +25,6 @@
 //!
 //! [`Span`]: dependi_lsp::parsers::Span
 //!
-//! # Placeholder doctests (replaced in later tasks)
-//!
 //! # Example 2 — Constructing a [`Dependency`]
 //!
 //! Each call to [`Parser::parse`] produces zero or more [`Dependency`]
@@ -50,6 +48,7 @@
 //!
 //! [`Dependency`]: dependi_lsp::parsers::Dependency
 //! [`Parser::parse`]: dependi_lsp::parsers::Parser::parse
+//!
 //! # Example 3 — Implementing the [`Parser`] trait
 //!
 //! A parser receives the manifest contents as `&str` and returns a
@@ -126,6 +125,7 @@
 //! ```
 //!
 //! [`Parser`]: dependi_lsp::parsers::Parser
+//!
 //! # Example 4 — Implementing the [`Registry`] trait
 //!
 //! Registry clients fetch metadata for a package and return a
@@ -186,6 +186,7 @@
 //!
 //! [`Registry`]: dependi_lsp::registries::Registry
 //! [`VersionInfo`]: dependi_lsp::registries::VersionInfo
+//!
 //! # Example 5 — Registration glue
 //!
 //! When the contributor adds a new ecosystem, the LSP backend's
