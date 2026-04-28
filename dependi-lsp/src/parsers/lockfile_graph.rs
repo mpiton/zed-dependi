@@ -1,10 +1,25 @@
 //! Shared graph representation for lockfile contents.
+//!
+//! [`LockfileGraph`] stores the full set of packages recorded in a lockfile as a
+//! flat [`Vec`] of [`LockfilePackage`] nodes with explicit dependency edges.
+//! Graph algorithms (DFS, reachability, reverse index) are implemented as methods
+//! on [`LockfileGraph`] and are used for transitive vulnerability attribution.
 
 use hashbrown::HashSet;
 use tokio::io::AsyncReadExt;
 
-/// Read a lockfile with a 50 MiB size cap to prevent OOM on hostile inputs.
-/// The cap is enforced DURING the read, not before, to avoid TOCTOU races.
+/// Read a lockfile into a `String`, refusing content larger than 50 MiB.
+///
+/// The cap is enforced **during** the read rather than by checking the file
+/// size beforehand, which avoids TOCTOU races on network filesystems.
+///
+/// # Errors
+///
+/// Returns `Err` with `ErrorKind::InvalidData` when:
+/// - The file content exceeds 50 MiB.
+/// - The file content is not valid UTF-8.
+///
+/// Propagates any I/O errors from opening or reading the file.
 pub async fn read_lockfile_capped(path: &std::path::Path) -> std::io::Result<String> {
     const MAX_LOCKFILE_BYTES: u64 = 50 * 1024 * 1024;
     let file = tokio::fs::File::open(path).await?;
@@ -26,25 +41,67 @@ pub async fn read_lockfile_capped(path: &std::path::Path) -> std::io::Result<Str
         .map_err(|e| std::io::Error::new(std::io::ErrorKind::InvalidData, e.utf8_error()))
 }
 
+/// A single package entry in a resolved lockfile.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct LockfilePackage {
+    /// Package name as recorded in the lockfile (may be pre-normalized by the parser).
     pub name: String,
+    /// Exact locked version string (e.g., `"1.0.195"` or `"v0.14.0"`).
     pub version: String,
-    /// Names of packages directly required by this one (no version info).
+    /// Names of packages directly required by this one.
+    ///
+    /// For Cargo, entries may include a version token (`"serde 1.0.195"`) when
+    /// multiple versions of the same crate are locked. Graph-walk code strips
+    /// the version token when resolving edges.
     pub dependencies: Vec<String>,
-    /// True when this package is declared in the manifest (a direct dependency).
+    /// `true` when this package is declared directly in the manifest.
+    ///
+    /// Currently unused by most parsers (defaults to `false`); reserved for
+    /// future use when distinguishing direct from transitive dependencies.
     pub is_root: bool,
 }
 
+/// The full set of packages from a resolved lockfile, with dependency edges.
+///
+/// Built by ecosystem-specific parsers (see [`crate::parsers::cargo_lock`],
+/// [`crate::parsers::npm_lock`], etc.) and consumed by vulnerability attribution
+/// logic to determine which manifest dependencies transitively pull in a
+/// vulnerable package.
+///
+/// # Examples
+///
+/// ```
+/// use dependi_lsp::parsers::lockfile_graph::LockfileGraph;
+/// let graph = LockfileGraph::default();
+/// assert!(graph.packages.is_empty());
+/// ```
 #[derive(Debug, Clone, Default)]
 pub struct LockfileGraph {
+    /// All packages present in the lockfile, including transitive dependencies.
     pub packages: Vec<LockfilePackage>,
 }
 
 impl LockfileGraph {
-    /// Returns all packages sharing the given name (0 or more). Some lockfiles
-    /// pin multiple versions of the same crate/package — e.g. Cargo's
-    /// transitive resolution.
+    /// Return all packages in the graph that match `name` (0 or more).
+    ///
+    /// Some lockfiles pin multiple versions of the same crate — e.g. Cargo's
+    /// transitive resolution — so `find_all` can return more than one entry.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use dependi_lsp::parsers::lockfile_graph::{LockfileGraph, LockfilePackage};
+    /// let graph = LockfileGraph {
+    ///     packages: vec![
+    ///         LockfilePackage { name: "serde".into(), version: "1.0.195".into(), dependencies: vec![], is_root: false },
+    ///         LockfilePackage { name: "serde".into(), version: "1.0.100".into(), dependencies: vec![], is_root: false },
+    ///         LockfilePackage { name: "tokio".into(), version: "1.36.0".into(), dependencies: vec![], is_root: false },
+    ///     ],
+    /// };
+    /// assert_eq!(graph.find_all("serde").len(), 2);
+    /// assert_eq!(graph.find_all("tokio").len(), 1);
+    /// assert_eq!(graph.find_all("absent").len(), 0);
+    /// ```
     pub fn find_all(&self, name: &str) -> Vec<&LockfilePackage> {
         self.packages.iter().filter(|p| p.name == name).collect()
     }

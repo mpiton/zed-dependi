@@ -1,14 +1,41 @@
-//! Parser for Go module files (go.mod)
+//! Parser for Go module files (`go.mod`).
 //!
-//! Optimized for performance with pre-allocation and reduced string searches.
+//! Recognises both single-line and block `require` directives:
+//!
+//! ```text
+//! require github.com/pkg/errors v0.9.1
+//!
+//! require (
+//!     github.com/gin-gonic/gin v1.9.1
+//!     golang.org/x/text v0.14.0 // indirect
+//! )
+//! ```
+//!
+//! Indirect dependencies are surfaced with `optional = true`.
+//! `replace` directives and comment-only lines are silently skipped.
+//! Optimised for performance with pre-allocation and a single byte scan per line.
 
 use super::{Dependency, Parser, Span};
 
-/// Parser for Go go.mod dependency files
+/// Parser for Go `go.mod` dependency files.
+///
+/// # Examples
+///
+/// ```
+/// use dependi_lsp::parsers::Parser;
+/// use dependi_lsp::parsers::go::GoParser;
+/// let parser = GoParser::new();
+/// let content = "require github.com/pkg/errors v0.9.1\n";
+/// let deps = parser.parse(content);
+/// assert_eq!(deps.len(), 1);
+/// assert_eq!(deps[0].name, "github.com/pkg/errors");
+/// assert_eq!(deps[0].version, "v0.9.1");
+/// ```
 #[derive(Debug, Default)]
 pub struct GoParser;
 
 impl GoParser {
+    /// Creates a new [`GoParser`] instance.
     pub fn new() -> Self {
         Self
     }
@@ -61,8 +88,11 @@ impl Parser for GoParser {
     }
 }
 
-/// Parse a require line (either standalone or inside a block)
-/// Format: module/path v1.2.3 [// indirect]
+/// Parses a single `require` entry (standalone or inside a block).
+///
+/// Expected format: `module/path v1.2.3 [// indirect]`
+///
+/// Returns `None` for comments, blank lines, and `replace` directives.
 fn parse_require_line(line: &str, content: &str, line_num: u32) -> Option<Dependency> {
     // Skip empty lines, comments, and replace directives
     if content.is_empty() || content.starts_with("//") || content.starts_with("replace") {
@@ -108,7 +138,8 @@ fn parse_require_line(line: &str, content: &str, line_num: u32) -> Option<Depend
     parse_require_with_positions(line, module_path, version, line_num, is_indirect)
 }
 
-/// Calculate positions and create Dependency
+/// Resolves byte positions for `module_path` and `version` within `line` and
+/// constructs the [`Dependency`].
 fn parse_require_with_positions(
     line: &str,
     module_path: &str,

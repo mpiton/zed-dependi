@@ -1,4 +1,23 @@
-//! Inlay hints provider for dependency versions
+//! Inlay hint provider — displays version status inline next to dependency declarations.
+//!
+//! The central function [`crate::providers::inlay_hints::create_inlay_hint`]
+//! constructs an [`tower_lsp::lsp_types::InlayHint`] for one dependency using
+//! metadata from the version cache.  Status labels follow a strict priority
+//! order:
+//!
+//! 1. **Local/path dependency** — `→ Local` (no registry lookup performed).
+//! 2. **Yanked version** — `⊘ Yanked [→ latest]`.
+//! 3. **Deprecated package** — `⚠ Deprecated [→ latest]`.
+//! 4. **Vulnerabilities** — `⚠ N vuln(s) [→ latest]`.
+//! 5. **Up to date** — `✓`.
+//! 6. **Update available** — `→ X.Y.Z`.
+//! 7. **Unknown** — `? Unknown` (registry unreachable, package not found, etc.).
+//!
+//! Pure helper functions
+//! [`crate::providers::inlay_hints::is_local_dependency`],
+//! [`crate::providers::inlay_hints::compare_versions`], and
+//! [`crate::providers::inlay_hints::normalize_version`] are public so other
+//! providers and tests can reuse them.
 
 use core::fmt::{self, Write};
 
@@ -9,18 +28,54 @@ use crate::registries::{VersionInfo, VulnerabilitySeverity};
 use crate::utils::fmt_truncate_string;
 use crate::{parsers::Dependency, registries::Vulnerability};
 
-/// Result of comparing a dependency version with the latest available
+/// Outcome of comparing a dependency's declared version against the latest available.
+///
+/// Produced by [`compare_versions`] and consumed by [`create_inlay_hint`] as
+/// well as the diagnostics and code-actions providers.
 #[derive(Debug, Clone)]
 pub enum VersionStatus {
-    /// Version is up to date
+    /// The declared version is at least as recent as the latest known version.
     UpToDate,
-    /// Update available to the given version
+    /// A newer version is available; the inner `String` is the latest version string.
     UpdateAvailable(String),
-    /// Could not determine version status
+    /// Version status could not be determined (e.g. no cache entry, no `latest` field).
     Unknown,
 }
 
-/// Generate an inlay hint for a dependency
+/// Build an [`InlayHint`] for a single dependency.
+///
+/// The hint is positioned immediately after the version span and displays a
+/// label chosen by the priority rules documented in the [module level
+/// docs](self).  A tooltip string is attached when additional context is
+/// available (vulnerability details, deprecation reasons, etc.).
+///
+/// # Parameters
+///
+/// - `dep` — parsed dependency; its `version_span` determines hint placement.
+/// - `version_info` — cached registry metadata, or `None` when unavailable.
+/// - `file_type` — used to format registry URLs inside tooltips.
+///
+/// # Examples
+///
+/// ```
+/// use dependi_lsp::providers::inlay_hints::create_inlay_hint;
+/// use dependi_lsp::file_types::FileType;
+/// use dependi_lsp::registries::VersionInfo;
+/// use dependi_lsp::parsers::{Dependency, Span};
+/// use tower_lsp::lsp_types::InlayHintLabel;
+///
+/// let dep = Dependency {
+///     name: "serde".to_string(),
+///     version: "1.0.0".to_string(),
+///     name_span: Span { line: 5, line_start: 0, line_end: 5 },
+///     version_span: Span { line: 5, line_start: 9, line_end: 14 },
+///     dev: false, optional: false, registry: None, resolved_version: None,
+/// };
+/// let info = VersionInfo { latest: Some("1.0.0".to_string()), ..Default::default() };
+/// let hint = create_inlay_hint(&dep, Some(&info), FileType::Cargo);
+/// assert_eq!(hint.position.line, 5);
+/// assert!(matches!(hint.label, InlayHintLabel::String(ref s) if s.contains("✓")));
+/// ```
 pub fn create_inlay_hint(
     dep: &Dependency,
     version_info: Option<&VersionInfo>,
@@ -342,7 +397,26 @@ fn fmt_yanked_tooltip(
     })
 }
 
-/// Check if a dependency version string indicates a local/path dependency
+/// Returns `true` when `version` refers to a local path, git repository, or
+/// URL source rather than a plain registry version string.
+///
+/// The following prefixes are recognised as local/non-registry sources:
+/// `./`, `../`, `/`, `file:`, `git+`, `git@`, `git:`, `https://`, `http://`,
+/// `github:`, `gitlab:`, `bitbucket:`, `workspace:`, `link:`, `portal:`, `npm:`.
+///
+/// # Examples
+///
+/// ```
+/// use dependi_lsp::providers::inlay_hints::is_local_dependency;
+/// assert!(is_local_dependency("git+https://example.com/foo.git"));
+/// assert!(is_local_dependency("./my-lib"));
+/// assert!(is_local_dependency("../shared"));
+/// assert!(is_local_dependency("workspace:*"));
+/// assert!(is_local_dependency("file:./local-pkg"));
+/// assert!(!is_local_dependency("1.2.3"));
+/// assert!(!is_local_dependency("^1.0.0"));
+/// assert!(!is_local_dependency("latest"));
+/// ```
 pub fn is_local_dependency(version: &str) -> bool {
     // Path-based dependencies
     version.starts_with("./")
@@ -399,7 +473,41 @@ fn strip_python_prerelease(version: &str) -> String {
         .join(".")
 }
 
-/// Compare a dependency version with the latest available
+/// Compare a dependency's declared version against the latest version in `info`.
+///
+/// The comparison handles several version-string formats:
+///
+/// - **Standard semver** — `^`, `~`, `>=`, `<=`, `>`, `<`, `=`, `v` prefixes
+///   are stripped before parsing.
+/// - **Python compatible-release operator** (`~=X.Y`) — compared at the same
+///   granularity as the base specifier (see PEP 440).
+/// - **PEP 440 pre-release suffixes** (`a`, `b`, `rc`, `alpha`, `beta`, `dev`)
+///   — stripped for the semver parse attempt so that e.g. `4.0.0a6` compared
+///   against stable `3.11.2` correctly returns [`VersionStatus::UpToDate`]
+///   rather than suggesting a downgrade.
+/// - **Calendar versions** — four-segment versions like `2024.1.1.5` are not
+///   truncated when they do not contain pre-release markers.
+///
+/// Returns [`VersionStatus::Unknown`] when `info.latest` is `None`.
+///
+/// # Examples
+///
+/// ```
+/// use dependi_lsp::providers::inlay_hints::{compare_versions, VersionStatus};
+/// use dependi_lsp::registries::VersionInfo;
+///
+/// let up_to_date = VersionInfo { latest: Some("1.0.0".to_string()), ..Default::default() };
+/// assert!(matches!(compare_versions("1.0.0", &up_to_date), VersionStatus::UpToDate));
+///
+/// let outdated = VersionInfo { latest: Some("2.0.0".to_string()), ..Default::default() };
+/// assert!(matches!(
+///     compare_versions("^1.0.0", &outdated),
+///     VersionStatus::UpdateAvailable(ref v) if v == "2.0.0"
+/// ));
+///
+/// let no_latest = VersionInfo { latest: None, ..Default::default() };
+/// assert!(matches!(compare_versions("1.0.0", &no_latest), VersionStatus::Unknown));
+/// ```
 pub fn compare_versions(current: &str, info: &VersionInfo) -> VersionStatus {
     let Some(latest) = info.latest.as_deref() else {
         return VersionStatus::Unknown;
@@ -523,8 +631,27 @@ fn truncate_version(version: &str, segments: usize) -> String {
     }
 }
 
-/// Normalize a version string for comparison
-/// Handles version specifiers like ^, ~, >=, ~=, ==, etc.
+/// Normalize a version string into a three-component `MAJOR.MINOR.PATCH` form.
+///
+/// Leading range operators (`^`, `~`, `>=`, `<=`, `>`, `<`, `=`, `~=`, `~>`,
+/// `==`, `!=`, `===`) are stripped.  When the string contains a
+/// comma-separated range (e.g. `>=1.0, <2.0`), only the first component is
+/// kept.  One- and two-component versions are padded with `.0` segments.
+///
+/// Note: the bare `v` prefix is **not** stripped by this function; use
+/// `format_version` in the code-actions provider when writing back to the
+/// manifest.
+///
+/// # Examples
+///
+/// ```
+/// use dependi_lsp::providers::inlay_hints::normalize_version;
+/// assert_eq!(normalize_version("1.0.0"),       "1.0.0");
+/// assert_eq!(normalize_version("^1.0"),        "1.0.0");
+/// assert_eq!(normalize_version("~=14.3"),      "14.3.0");
+/// assert_eq!(normalize_version(">=1.0, <2.0"), "1.0.0");
+/// assert_eq!(normalize_version("3"),           "3.0.0");
+/// ```
 pub fn normalize_version(version: &str) -> String {
     let version = version.trim();
 

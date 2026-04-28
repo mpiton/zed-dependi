@@ -65,6 +65,18 @@ pub async fn find_npm_lockfile(package_json_path: &Path) -> Option<(PathBuf, Npm
 }
 
 /// Parse a Node.js lockfile and return a map of package name → resolved version.
+///
+/// Dispatches to the appropriate sub-parser based on `lockfile_type`.
+///
+/// # Examples
+///
+/// ```
+/// use dependi_lsp::parsers::npm_lock::{parse_npm_lockfile, NpmLockfileType};
+///
+/// let lock = r#"{"lockfileVersion":3,"packages":{"node_modules/express":{"version":"4.18.2"}}}"#;
+/// let map = parse_npm_lockfile(lock, NpmLockfileType::PackageLock);
+/// assert_eq!(map.get("express").map(String::as_str), Some("4.18.2"));
+/// ```
 pub fn parse_npm_lockfile(
     content: &str,
     lockfile_type: NpmLockfileType,
@@ -390,9 +402,19 @@ fn clean_jsonc(content: &str) -> String {
 // Graph extraction — package-lock.json, pnpm-lock.yaml, yarn.lock v1
 // ---------------------------------------------------------------------------
 
-/// Parse a `package-lock.json` (lockfile v2/v3 flat `packages` format) into a graph.
+/// Parse a `package-lock.json` (lockfile v2/v3 flat `packages` format) into a [`LockfileGraph`].
 ///
-/// v1 nested format is intentionally not supported here (superseded since npm 7, 2020).
+/// v1 nested-`dependencies` format is intentionally not supported (superseded since npm 7, 2020).
+///
+/// # Examples
+///
+/// ```
+/// use dependi_lsp::parsers::npm_lock::parse_package_lock_graph;
+///
+/// let lock = r#"{"lockfileVersion":3,"packages":{"node_modules/react":{"version":"18.2.0"}}}"#;
+/// let graph = parse_package_lock_graph(lock);
+/// assert!(graph.packages.iter().any(|p| p.name == "react" && p.version == "18.2.0"));
+/// ```
 pub fn parse_package_lock_graph(content: &str) -> LockfileGraph {
     let mut graph = LockfileGraph::default();
     let value: serde_json::Value = match serde_json::from_str(content) {
@@ -434,9 +456,21 @@ pub fn parse_package_lock_graph(content: &str) -> LockfileGraph {
     graph
 }
 
-/// Parse a pnpm-lock.yaml into a graph. Uses a minimal line-based walker because the
-/// project has no YAML parser in dependencies; this mirrors the approach of existing
-/// pnpm parsing in the file.
+/// Parse a `pnpm-lock.yaml` into a [`LockfileGraph`].
+///
+/// Uses a minimal line-based walker (no YAML parser dependency). Handles both
+/// v6 (`/name@ver:`) and v9 (`name@ver:`) key formats, including quoted scoped
+/// package names.
+///
+/// # Examples
+///
+/// ```
+/// use dependi_lsp::parsers::npm_lock::parse_pnpm_lock_graph;
+///
+/// let lock = "lockfileVersion: '9.0'\npackages:\n  react@18.2.0:\n    resolution: {}\n";
+/// let graph = parse_pnpm_lock_graph(lock);
+/// assert!(graph.packages.iter().any(|p| p.name == "react" && p.version == "18.2.0"));
+/// ```
 pub fn parse_pnpm_lock_graph(content: &str) -> LockfileGraph {
     let mut graph = LockfileGraph::default();
     let mut in_packages = false;
@@ -541,8 +575,20 @@ fn split_pnpm_key(key: &str) -> Option<(String, String)> {
     Some((base[..at].to_string(), base[at + 1..].to_string()))
 }
 
-/// Parse yarn.lock (v1 format) into a graph. v2+ (Berry) uses a different format,
-/// out of scope here.
+/// Parse a `yarn.lock` (Yarn Classic v1 format) into a [`LockfileGraph`].
+///
+/// Yarn Berry v2+ uses a different YAML-based format and is not handled by
+/// this entry point.
+///
+/// # Examples
+///
+/// ```
+/// use dependi_lsp::parsers::npm_lock::parse_yarn_lock_graph;
+///
+/// let lock = "\"react@^18.0.0\":\n  version \"18.2.0\"\n";
+/// let graph = parse_yarn_lock_graph(lock);
+/// assert!(graph.packages.iter().any(|p| p.name == "react" && p.version == "18.2.0"));
+/// ```
 pub fn parse_yarn_lock_graph(content: &str) -> LockfileGraph {
     let mut graph = LockfileGraph::default();
     let mut current: Option<LockfilePackage> = None;

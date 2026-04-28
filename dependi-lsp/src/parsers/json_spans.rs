@@ -1,4 +1,14 @@
-//! Shared helpers for span-aware JSON parsing (used by npm and php parsers).
+//! Shared helpers for span-aware JSON parsing.
+//!
+//! Used by the npm (`package-lock.json`) and PHP (`composer.lock`) lockfile parsers
+//! to convert byte-range information returned by the JSON parser into [`super::Span`]
+//! values that the LSP layer can attach to diagnostic and inlay-hint positions.
+//!
+//! The key types are:
+//! - `LineIndex` — pre-computes line-start byte offsets so that O(log n)
+//!   `position()` calls can convert any byte offset to a `(line, column)` pair.
+//! - `span_to_span` / `string_inner_to_span` — convert raw byte ranges into
+//!   [`super::Span`] instances, returning `None` for multi-line ranges.
 
 use super::Span;
 

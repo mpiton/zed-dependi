@@ -35,11 +35,21 @@ const LOCKFILE_CANDIDATES: &[(&str, PythonLockfileType)] = &[
     ("Pipfile.lock", PythonLockfileType::PipfileLock),
 ];
 
-/// Detect which Python tool manages the project by inspecting pyproject.toml content.
+/// Detect which Python tool manages the project by inspecting `pyproject.toml` content.
 ///
-/// Looks for `[tool.poetry]`, `[tool.uv]`, or `[tool.pdm]` section headers to determine
-/// which lockfile should be preferred. Returns `None` for requirements.txt or when no
-/// tool-specific section is found (falls back to filename-priority discovery).
+/// Looks for `[tool.poetry]`, `[tool.uv]`, or `[tool.pdm]` TOML section headers
+/// to determine which lockfile should be preferred. Returns `None` for
+/// `requirements.txt` or when no tool-specific section is found (in which case
+/// [`find_python_lockfile`] falls back to the static filename-priority list).
+///
+/// # Examples
+///
+/// ```
+/// use dependi_lsp::parsers::python_lock::{detect_python_tool, PythonLockfileType};
+/// assert_eq!(detect_python_tool("[tool.poetry]\n"), Some(PythonLockfileType::PoetryLock));
+/// assert_eq!(detect_python_tool("[tool.uv]\n"), Some(PythonLockfileType::UvLock));
+/// assert_eq!(detect_python_tool("[project]\n"), None);
+/// ```
 pub fn detect_python_tool(manifest_content: &str) -> Option<PythonLockfileType> {
     for line in manifest_content.lines() {
         let trimmed = line.trim();
@@ -74,7 +84,10 @@ fn is_tool_section(line: &str, tool: &str) -> bool {
 /// manifest-derived tool detection to override the static priority list.
 ///
 /// Uses async I/O to avoid blocking the Tokio executor on slow or networked filesystems.
-/// Stops after 10 levels to prevent infinite traversal on unusual file systems.
+///
+/// Walks at most `MAX_DEPTH = 10` directories — the manifest's parent counts as
+/// the first level, so the search inspects the start directory plus up to 9
+/// ancestor directories before giving up.
 pub async fn find_python_lockfile(
     manifest_path: &Path,
     preferred: Option<PythonLockfileType>,
@@ -121,8 +134,19 @@ pub async fn find_python_lockfile(
 
 /// Parse a Python lockfile and return a map of normalized package name → resolved version.
 ///
-/// Package names are normalized per PEP 503 (lowercase, `_`/`.`/`-` → `-`) so that
-/// lookups match regardless of how the manifest or lockfile spells the name.
+/// Package names are normalized per PEP 503 (lowercase, `_`/`.`/`-` → `-`) so
+/// that lookups match regardless of how the manifest or lockfile spells the name.
+/// Dispatches to the appropriate sub-parser based on `lockfile_type`.
+///
+/// # Examples
+///
+/// ```
+/// use dependi_lsp::parsers::python_lock::{parse_python_lockfile, PythonLockfileType};
+///
+/// let lock = "[[package]]\nname = \"requests\"\nversion = \"2.31.0\"\n";
+/// let map = parse_python_lockfile(lock, PythonLockfileType::PoetryLock);
+/// assert_eq!(map.get("requests").map(String::as_str), Some("2.31.0"));
+/// ```
 pub fn parse_python_lockfile(
     content: &str,
     lockfile_type: PythonLockfileType,
@@ -144,6 +168,15 @@ pub fn parse_python_lockfile(
 /// Normalize a Python package name per PEP 503.
 ///
 /// Lowercases the name and replaces runs of `_`, `.`, and `-` with a single `-`.
+///
+/// # Examples
+///
+/// ```
+/// use dependi_lsp::parsers::python_lock::normalize_python_name;
+/// assert_eq!(normalize_python_name("typing_extensions"), "typing-extensions");
+/// assert_eq!(normalize_python_name("Jinja2"), "jinja2");
+/// assert_eq!(normalize_python_name("zope.interface"), "zope-interface");
+/// ```
 pub fn normalize_python_name(name: &str) -> String {
     let mut result = String::with_capacity(name.len());
     let mut prev_was_separator = false;
@@ -257,7 +290,20 @@ fn parse_pipfile_lock(content: &str) -> HashMap<String, String> {
 // Graph parsers (lockfile → LockfileGraph)
 // ---------------------------------------------------------------------------
 
-/// Parse poetry.lock into a graph.
+/// Parse `poetry.lock` into a [`LockfileGraph`].
+///
+/// Normalizes package names per PEP 503 and records `dependencies` table keys
+/// as outgoing edges.
+///
+/// # Examples
+///
+/// ```
+/// use dependi_lsp::parsers::python_lock::parse_poetry_lock_graph;
+///
+/// let lock = "[[package]]\nname = \"requests\"\nversion = \"2.31.0\"\n";
+/// let graph = parse_poetry_lock_graph(lock);
+/// assert!(graph.packages.iter().any(|p| p.name == "requests"));
+/// ```
 pub fn parse_poetry_lock_graph(content: &str) -> LockfileGraph {
     let mut graph = LockfileGraph::default();
     let value: toml::Value = match toml::from_str(content) {
@@ -293,8 +339,21 @@ pub fn parse_poetry_lock_graph(content: &str) -> LockfileGraph {
     graph
 }
 
-/// Parse Pipfile.lock into a graph. Pipfile.lock does NOT record sub-deps natively;
-/// the graph will include all packages but edges are limited to what's explicitly present.
+/// Parse `Pipfile.lock` into a [`LockfileGraph`].
+///
+/// `Pipfile.lock` does not record sub-dependencies natively, so the graph
+/// includes all packages from `default` and `develop` sections but edges are
+/// limited to what is explicitly recorded in the file (usually none).
+///
+/// # Examples
+///
+/// ```
+/// use dependi_lsp::parsers::python_lock::parse_pipfile_lock_graph;
+///
+/// let lock = r#"{"default":{"requests":{"version":"==2.31.0"}},"develop":{}}"#;
+/// let graph = parse_pipfile_lock_graph(lock);
+/// assert!(graph.packages.iter().any(|p| p.name == "requests" && p.version == "2.31.0"));
+/// ```
 pub fn parse_pipfile_lock_graph(content: &str) -> LockfileGraph {
     let mut graph = LockfileGraph::default();
     let value: serde_json::Value = match serde_json::from_str(content) {
@@ -331,7 +390,20 @@ pub fn parse_pipfile_lock_graph(content: &str) -> LockfileGraph {
     graph
 }
 
-/// Parse uv.lock into a graph.
+/// Parse `uv.lock` into a [`LockfileGraph`].
+///
+/// uv's `[[package]]` entries record dependencies as an array of
+/// `{ name = "..." }` tables; each `name` becomes an outgoing edge.
+///
+/// # Examples
+///
+/// ```
+/// use dependi_lsp::parsers::python_lock::parse_uv_lock_graph;
+///
+/// let lock = "version = 1\n[[package]]\nname = \"requests\"\nversion = \"2.31.0\"\n";
+/// let graph = parse_uv_lock_graph(lock);
+/// assert!(graph.packages.iter().any(|p| p.name == "requests"));
+/// ```
 pub fn parse_uv_lock_graph(content: &str) -> LockfileGraph {
     let mut graph = LockfileGraph::default();
     let value: toml::Value = match toml::from_str(content) {

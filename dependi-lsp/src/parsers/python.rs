@@ -1,4 +1,20 @@
-//! Parser for Python dependency files (requirements.txt, constraints.txt, pyproject.toml, hatch.toml)
+//! Parser for Python dependency files.
+//!
+//! Supports four file formats detected heuristically from content:
+//!
+//! | Format | Detection | Key spec |
+//! |--------|-----------|----------|
+//! | `pyproject.toml` | `[project]`, `[tool.poetry]`, `[dependency-groups]`, `[tool.hatch]` headers | PEP 621, Poetry, PEP 735, Hatch |
+//! | `hatch.toml` | `[envs.<name>]` top-level header | Hatch standalone config |
+//! | `requirements.txt` / `constraints.txt` | default | PEP 508 one-package-per-line |
+//!
+//! Detection is content-based (line-anchored section headers) so that packages
+//! whose *extras* resemble section headers (e.g. `mypkg[project]==1.2`) are never
+//! misrouted to the TOML parsers.
+//!
+//! Parsing is performed with `taplo` for TOML formats, giving byte-accurate
+//! [`Span`] values that let LSP quick-fix `TextEdit`s replace only the version
+//! literal inside the surrounding quotes.
 
 use taplo::dom::Node;
 use taplo::dom::node::DomNode;
@@ -7,11 +23,27 @@ use taplo::syntax::SyntaxElement;
 
 use super::{Dependency, Parser, Span};
 
-/// Parser for Python dependency files
+/// Parser for Python dependency files.
+///
+/// Dispatches to one of three sub-parsers based on content detection:
+/// `parse_pyproject_toml`, `parse_hatch_toml`, or `parse_requirements_txt`.
+///
+/// # Examples
+///
+/// ```
+/// use dependi_lsp::parsers::Parser;
+/// use dependi_lsp::parsers::python::PythonParser;
+/// let parser = PythonParser::new();
+/// let deps = parser.parse("flask==2.0.0\nrequests>=2.25.0\n");
+/// assert_eq!(deps.len(), 2);
+/// assert_eq!(deps[0].name, "flask");
+/// assert_eq!(deps[0].version, "==2.0.0");
+/// ```
 #[derive(Debug, Default)]
 pub struct PythonParser;
 
 impl PythonParser {
+    /// Creates a new [`PythonParser`] instance.
     pub fn new() -> Self {
         Self
     }

@@ -11,12 +11,33 @@ use crate::parsers::lockfile_resolver::LockfileResolver;
 
 /// Parse a Cargo.lock file and return a map of package name → resolved version.
 ///
-/// Cargo.lock uses `[[package]]` TOML array-of-tables entries with `name` and `version` fields.
-/// When multiple versions of the same package exist, the first one is kept by default.
+/// Cargo.lock uses `[[package]]` TOML array-of-tables entries with `name` and
+/// `version` fields. When multiple versions of the same package exist, the
+/// first entry is kept by default.
 ///
-/// If `root_package` is provided, the root package's `dependencies` list is used to disambiguate:
-/// Cargo writes `"crate_name version"` (with version) in dependencies when multiple versions exist,
-/// so the version referenced by the root package takes precedence over the first-found version.
+/// If `root_package` is provided, the root package's `dependencies` list is
+/// used to disambiguate: Cargo writes `"crate_name version"` (with version)
+/// in the dependencies array when multiple versions exist, so the version
+/// referenced by the root package takes precedence over the first-found entry.
+///
+/// # Examples
+///
+/// ```
+/// use dependi_lsp::parsers::cargo_lock::parse_cargo_lock;
+///
+/// let lock = r#"
+/// [[package]]
+/// name = "serde"
+/// version = "1.0.195"
+///
+/// [[package]]
+/// name = "tokio"
+/// version = "1.36.0"
+/// "#;
+/// let map = parse_cargo_lock(lock, None);
+/// assert_eq!(map.get("serde").map(String::as_str), Some("1.0.195"));
+/// assert_eq!(map.get("tokio").map(String::as_str), Some("1.36.0"));
+/// ```
 pub fn parse_cargo_lock(content: &str, root_package: Option<&str>) -> HashMap<String, String> {
     let mut map = HashMap::new();
 
@@ -73,12 +94,32 @@ pub fn parse_cargo_lock(content: &str, root_package: Option<&str>) -> HashMap<St
     map
 }
 
-/// Parse Cargo.lock into a full dependency graph.
+/// Parse `Cargo.lock` into a full [`LockfileGraph`].
 ///
 /// Dependency strings are stored as-is (e.g. `"serde"` or `"serde 1.0.195"`).
-/// Cargo writes the version when multiple versions of the same crate are locked,
-/// so preserving it allows correct transitive attribution.  Graph-walk code
-/// normalises to the name portion when resolving edges.
+/// Cargo writes the version suffix when multiple versions of the same crate
+/// are locked; preserving it allows correct transitive attribution. Graph-walk
+/// code strips the version suffix when resolving edges.
+///
+/// # Examples
+///
+/// ```
+/// use dependi_lsp::parsers::cargo_lock::parse_cargo_lock_graph;
+///
+/// let lock = r#"
+/// [[package]]
+/// name = "demo"
+/// version = "0.1.0"
+/// dependencies = ["serde"]
+///
+/// [[package]]
+/// name = "serde"
+/// version = "1.0.195"
+/// "#;
+/// let graph = parse_cargo_lock_graph(lock);
+/// assert_eq!(graph.packages.len(), 2);
+/// assert!(graph.packages.iter().any(|p| p.name == "serde"));
+/// ```
 pub fn parse_cargo_lock_graph(content: &str) -> LockfileGraph {
     let mut graph = LockfileGraph::default();
 
@@ -121,11 +162,18 @@ pub fn parse_cargo_lock_graph(content: &str) -> LockfileGraph {
     graph
 }
 
-/// Find the Cargo.lock file by walking up from a Cargo.toml path.
+/// Find the `Cargo.lock` file by walking up from a `Cargo.toml` path.
 ///
-/// Handles both single-crate and workspace layouts by searching parent directories.
-/// Uses async I/O to avoid blocking the Tokio executor on slow or networked filesystems.
-/// Stops after 10 levels to prevent infinite traversal on unusual file systems.
+/// Handles both single-crate and workspace layouts by searching parent
+/// directories. Stops after 10 levels to prevent unbounded traversal.
+///
+/// Uses async I/O to avoid blocking the Tokio executor on slow or networked
+/// filesystems.
+///
+/// # Returns
+///
+/// `Some(path)` pointing to the first `Cargo.lock` found, or `None` when
+/// no lockfile exists within 10 directory levels.
 pub async fn find_cargo_lock(cargo_toml_path: &Path) -> Option<PathBuf> {
     let start_dir = cargo_toml_path.parent()?;
 

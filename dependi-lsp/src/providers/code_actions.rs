@@ -1,4 +1,17 @@
-//! Code actions provider for updating dependencies
+//! Code actions provider for updating dependencies.
+//!
+//! Exposes [`crate::providers::code_actions::create_code_actions`] which
+//! produces LSP [`tower_lsp::lsp_types::CodeActionOrCommand`] items for a
+//! cursor range in a dependency manifest.  Three kinds of actions are
+//! possible:
+//!
+//! - **Update to X.Y.Z** — one per outdated, non-ignored, non-property-reference
+//!   dependency whose version span overlaps the requested range.
+//! - **Ignore package** — one per in-range, non-ignored dependency when a
+//!   `workspace_root` is supplied so the ignore entry can be written to
+//!   `.zed/settings.json`.
+//! - **Update all N dependencies** — emitted at the front of the list when at
+//!   least two dependencies in the file are outdated.
 
 use futures::stream::{self, StreamExt};
 use tower_lsp::lsp_types::*;
@@ -8,16 +21,35 @@ use crate::file_types::FileType;
 use crate::parsers::Dependency;
 use crate::providers::inlay_hints::{VersionStatus, compare_versions};
 
-/// Type of semantic version update
+/// Classification of a semantic-version bump.
+///
+/// Used to annotate "Update to X.Y.Z" code-action titles and to decide
+/// whether the action should be marked as preferred by the LSP client
+/// (all categories except [`Major`](VersionUpdateType::Major) are preferred).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum VersionUpdateType {
+    /// Breaking change: the major component increased (e.g. `1.x.x` → `2.0.0`).
     Major,
+    /// Non-breaking feature: the minor component increased (e.g. `1.2.x` → `1.3.0`).
     Minor,
+    /// Bug-fix: only the patch component increased (e.g. `1.2.3` → `1.2.4`).
     Patch,
+    /// Pre-release version (e.g. `1.0.0-alpha.1`).
     PreRelease,
 }
 
 impl VersionUpdateType {
+    /// Returns a short human-readable prefix used in the code-action title.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use dependi_lsp::providers::code_actions::VersionUpdateType;
+    /// assert_eq!(VersionUpdateType::Major.prefix(), "⚠ MAJOR");
+    /// assert_eq!(VersionUpdateType::Minor.prefix(), "+ minor");
+    /// assert_eq!(VersionUpdateType::Patch.prefix(), "· patch");
+    /// assert_eq!(VersionUpdateType::PreRelease.prefix(), "* prerelease");
+    /// ```
     pub fn prefix(&self) -> &'static str {
         match self {
             VersionUpdateType::Major => "⚠ MAJOR",
@@ -27,12 +59,42 @@ impl VersionUpdateType {
         }
     }
 
+    /// Returns `true` when the LSP client should mark this action as preferred.
+    ///
+    /// All categories are preferred except [`Major`](VersionUpdateType::Major)
+    /// because a major bump may be breaking.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use dependi_lsp::providers::code_actions::VersionUpdateType;
+    /// assert!(!VersionUpdateType::Major.is_preferred());
+    /// assert!(VersionUpdateType::Minor.is_preferred());
+    /// assert!(VersionUpdateType::Patch.is_preferred());
+    /// assert!(VersionUpdateType::PreRelease.is_preferred());
+    /// ```
     pub fn is_preferred(&self) -> bool {
         !matches!(self, VersionUpdateType::Major)
     }
 }
 
-/// Determine the type of version update between current and new version
+/// Classify the version bump from `current` to `new` as a [`VersionUpdateType`].
+///
+/// Both strings are normalized (leading operators such as `^`, `~=`, `>=` are
+/// stripped) before parsing with [`semver`].  If either string cannot be
+/// parsed after normalization, the function falls back to [`Patch`](VersionUpdateType::Patch).
+///
+/// # Examples
+///
+/// ```
+/// use dependi_lsp::providers::code_actions::{compare_update_type, VersionUpdateType};
+/// assert_eq!(compare_update_type("1.0.0", "2.0.0"), VersionUpdateType::Major);
+/// assert_eq!(compare_update_type("1.5.0", "1.6.0"), VersionUpdateType::Minor);
+/// assert_eq!(compare_update_type("1.5.0", "1.5.1"), VersionUpdateType::Patch);
+/// assert_eq!(compare_update_type("1.5.0", "1.5.1-alpha.1"), VersionUpdateType::PreRelease);
+/// // Version-range operators are stripped before comparison.
+/// assert_eq!(compare_update_type("^1.0.0", "2.0.0"), VersionUpdateType::Major);
+/// ```
 pub fn compare_update_type(current: &str, new: &str) -> VersionUpdateType {
     let current_normalized = normalize_version(current);
     let new_normalized = normalize_version(new);
@@ -88,7 +150,30 @@ fn normalize_version(version: &str) -> String {
     }
 }
 
-/// Create code actions for dependencies in the given range
+/// Build LSP code actions for dependency declarations that fall within `range`.
+///
+/// The function reads from `cache` using keys produced by `cache_key_fn` and
+/// compares each dependency's version against the latest available.
+///
+/// # Parameters
+///
+/// - `dependencies` — all dependencies parsed from the manifest (not filtered to `range`).
+/// - `cache` — read-only cache handle used to look up latest-version info.
+/// - `uri` — document URI inserted into [`WorkspaceEdit`] text-edit maps.
+/// - `range` — LSP selection range; only dependencies whose `version_span` line
+///   falls within this range receive individual Update/Ignore actions.
+/// - `file_type` — governs version-string formatting (e.g. Go prepends `v`).
+/// - `cache_key_fn` — maps a package name to its cache key.
+/// - `ignored` — packages matching any entry (wildcards supported) are skipped.
+/// - `workspace_root` — when `Some`, enables the "Ignore package" action which
+///   writes to `.zed/settings.json`.
+/// - `current_settings` — existing `.zed/settings.json` contents, used by
+///   [`crate::settings_edit::build_ignore_workspace_edit`] to produce a minimal diff.
+///
+/// # Returns
+///
+/// A [`Vec`] of [`CodeActionOrCommand`].  The "Update all" action, when
+/// present, is always first; individual actions follow in dependency order.
 #[expect(
     clippy::too_many_arguments,
     reason = "LSP context requires passing doc state, cache, range, ignore list, and workspace metadata together; refactoring into a struct is tracked for a follow-up."
@@ -358,7 +443,9 @@ async fn create_update_all_action(
 fn format_version(version: &str, file_type: FileType) -> String {
     match file_type {
         FileType::Cargo | FileType::Npm | FileType::Php => {
-            // Keep the version as-is - the range already includes the quotes in these formats
+            // Keep the version as-is. version_span covers the inner token text
+            // only (no surrounding quotes), so callers replace just the version
+            // literal and the existing quote pair is preserved.
             version.to_string()
         }
         FileType::Python => {

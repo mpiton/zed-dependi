@@ -1,4 +1,22 @@
-//! Diagnostics provider for outdated dependencies and vulnerabilities
+//! Diagnostic provider for dependency manifests.
+//!
+//! [`crate::providers::diagnostics::create_diagnostics`] is the main entry
+//! point. For each non-ignored dependency it pushes LSP
+//! [`tower_lsp::lsp_types::Diagnostic`] entries chosen as follows:
+//!
+//! - **Local / path dependency** — a single informational `→ Local` hint;
+//!   no further diagnostics are emitted for the entry.
+//! - **Registry dependency** — an optional **outdated** hint
+//!   (`Update available: X → Y`) plus, when applicable, exactly one of the
+//!   higher-severity diagnostics below, picked in this priority order:
+//!
+//!   1. **Yanked version** — warning with a link to the registry page.
+//!   2. **Deprecated package** — warning with optional homepage / repository links.
+//!   3. **Vulnerability summary** — error/warning/hint depending on max severity.
+//!
+//! Helper function
+//! [`crate::providers::diagnostics::build_transitive_summary_message`] is
+//! public so the vulnerability report generator can reuse the formatting logic.
 
 use core::fmt;
 
@@ -11,10 +29,30 @@ use crate::providers::inlay_hints::{VersionStatus, compare_versions, is_local_de
 use crate::registries::{TransitiveVuln, VersionInfo, Vulnerability, VulnerabilitySeverity};
 use crate::utils::fmt_truncate_string;
 
-/// Create diagnostics for a list of dependencies
+/// Build LSP diagnostics for the given dependency list.
 ///
-/// The `min_severity` parameter filters vulnerabilities to only show those
-/// at or above the specified severity level.
+/// For each non-ignored dependency the function performs a single cache lookup
+/// and may emit an outdated-version hint plus, when applicable, one
+/// higher-severity diagnostic (yanked, deprecated, or vulnerability summary)
+/// following the priority order documented in the [module level docs](self).
+///
+/// # Parameters
+///
+/// - `dependencies` — all dependencies parsed from the current manifest.
+/// - `cache` — read-only cache handle used to look up version metadata.
+/// - `cache_key_fn` — maps a package name to its cache key.
+/// - `min_severity` — when `Some`, vulnerability diagnostics are suppressed
+///   unless at least one vulnerability meets the threshold.
+/// - `file_type` — used to format registry names in yanked-version messages.
+/// - `doc_transitive_vulns` — per-document transitive vulnerability data keyed
+///   by direct-dependency name.  Stored separately from the shared version cache
+///   to avoid cross-workspace contamination.
+/// - `ignored` — package names (wildcards supported) that should be skipped.
+///
+/// # Returns
+///
+/// A [`Vec<Diagnostic>`] in the same order as `dependencies`, with at most
+/// one entry per dependency.
 pub async fn create_diagnostics(
     dependencies: &[Dependency],
     cache: &impl ReadCache,
@@ -348,8 +386,33 @@ fn create_yanked_diagnostic(
     }
 }
 
-/// Build a short message listing transitive vulnerabilities for a direct dep.
-/// Shows up to 3 entries, then "+N more".
+/// Format a short summary of transitive vulnerabilities for display in a diagnostic message.
+///
+/// Lists up to three entries as `pkg@ver (ID)` and appends `+N more` when
+/// there are additional entries.  Returns an empty string when `tv` is empty.
+///
+/// # Examples
+///
+/// ```
+/// use dependi_lsp::providers::diagnostics::build_transitive_summary_message;
+/// use dependi_lsp::registries::{TransitiveVuln, Vulnerability, VulnerabilitySeverity};
+///
+/// let tv = vec![TransitiveVuln {
+///     package_name: "scheduler".to_string(),
+///     package_version: "1.2.3".to_string(),
+///     vulnerability: Vulnerability {
+///         id: "CVE-1".to_string(),
+///         severity: VulnerabilitySeverity::High,
+///         description: "desc".to_string(),
+///         url: None,
+///     },
+/// }];
+/// let refs: Vec<&_> = tv.iter().collect();
+/// let msg = build_transitive_summary_message(&refs);
+/// assert!(msg.contains("scheduler@1.2.3"));
+/// assert!(msg.contains("CVE-1"));
+/// assert!(msg.contains("1 transitive"));
+/// ```
 pub fn build_transitive_summary_message(tv: &[&TransitiveVuln]) -> String {
     if tv.is_empty() {
         return String::new();

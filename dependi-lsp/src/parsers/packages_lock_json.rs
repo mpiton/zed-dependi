@@ -10,19 +10,40 @@ use crate::parsers::lockfile_resolver::LockfileResolver;
 
 /// Normalize a NuGet package name to lowercase.
 ///
-/// NuGet package names are case-insensitive (e.g., "Newtonsoft.Json" == "newtonsoft.json").
+/// NuGet package names are case-insensitive
+/// (e.g., `"Newtonsoft.Json"` == `"newtonsoft.json"`).
 /// This function ensures consistent lookup between manifest and lockfile entries.
+///
+/// # Examples
+///
+/// ```
+/// use dependi_lsp::parsers::packages_lock_json::normalize_nuget_name;
+/// assert_eq!(normalize_nuget_name("Newtonsoft.Json"), "newtonsoft.json");
+/// assert_eq!(normalize_nuget_name("microsoft.extensions.logging"), "microsoft.extensions.logging");
+/// ```
 pub fn normalize_nuget_name(name: &str) -> String {
     name.to_lowercase()
 }
 
-/// Parse a packages.lock.json file and return a map of package name → resolved version.
+/// Parse a `packages.lock.json` file and return a map of package name → resolved version.
 ///
-/// packages.lock.json is a JSON file with a `"dependencies"` object whose keys are
-/// target framework monikers (e.g., "net8.0"). Each framework maps package names to
-/// objects with a `"resolved"` version field. Both "Direct" and "Transitive" entries
-/// are included. Names are normalized to lowercase since NuGet is case-insensitive.
-/// When a package appears in multiple target frameworks, the first entry is kept.
+/// `packages.lock.json` is a JSON file with a `"dependencies"` object whose
+/// keys are target framework monikers (e.g., `"net8.0"`). Each framework maps
+/// package names to objects with a `"resolved"` version field. Both `"Direct"`
+/// and `"Transitive"` entries are included. Names are normalized to lowercase
+/// since NuGet is case-insensitive. When a package appears in multiple target
+/// frameworks, the first entry encountered during JSON object iteration order
+/// is kept.
+///
+/// # Examples
+///
+/// ```
+/// use dependi_lsp::parsers::packages_lock_json::parse_packages_lock;
+///
+/// let lock = r#"{"version":1,"dependencies":{"net8.0":{"Newtonsoft.Json":{"type":"Direct","resolved":"13.0.1"}}}}"#;
+/// let map = parse_packages_lock(lock);
+/// assert_eq!(map.get("newtonsoft.json").map(String::as_str), Some("13.0.1"));
+/// ```
 pub fn parse_packages_lock(content: &str) -> HashMap<String, String> {
     let mut map = HashMap::new();
 

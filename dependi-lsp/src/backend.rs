@@ -1,3 +1,40 @@
+//! LSP backend — the central [`LanguageServer`](tower_lsp::LanguageServer) implementation.
+//!
+//! [`crate::backend::DependiBackend`] owns all shared state and routes LSP
+//! notifications and requests to the appropriate parsers, registry clients,
+//! and providers. The public surface is intentionally small: callers construct
+//! the backend with [`crate::backend::DependiBackend::new`] (or
+//! [`crate::backend::DependiBackend::with_http_client`] for tests) and hand it
+//! to [`tower_lsp::LspService::new`].
+//!
+//! # Concurrency model
+//!
+//! All mutable state is shared via `Arc`. Most collections use
+//! [`dashmap::DashMap`] — a sharded `RwLock`-backed concurrent hashmap that
+//! lets disjoint shards proceed in parallel without locking the whole map.
+//! Fields that require full replacement at runtime (e.g. `osv_client`,
+//! `advisory_cache`) are wrapped in [`tokio::sync::RwLock`]; each is swapped
+//! atomically on its own when [`crate::backend::DependiBackend`]`::initialize`
+//! reconfigures the server, but the swaps happen sequentially — there is no
+//! single global atomic replacement of the runtime. The backend itself is
+//! `Clone` only in the sense that tower-lsp clones the handler type; each
+//! clone shares the same underlying `Arc` handles — there is no deep copy.
+//!
+//! Document processing is debounced: `did_change` spawns a [`tokio`] task that
+//! waits for a configurable idle period before calling the full
+//! parse→fetch→diagnose pipeline. Vulnerability queries are always fired as a
+//! second background `tokio::spawn` so they never block the initial inlay-hint
+//! refresh.
+//!
+//! # Error handling at the LSP boundary
+//!
+//! [`tower_lsp::jsonrpc::Result`] is used as the return type for handler
+//! methods. Internal errors are logged with `tracing` and either converted
+//! to an LSP error response or silently swallowed (for notifications, which
+//! have no response channel). Registry and network errors are `anyhow::Result`
+//! internally and are downgraded to `tracing::warn!` / `tracing::error!` logs
+//! so a single failing registry never crashes the server.
+
 use core::fmt;
 use std::time::Duration;
 use std::{
@@ -443,6 +480,33 @@ struct VulnBgContext {
     >,
 }
 
+/// The main LSP backend for Dependi.
+///
+/// `DependiBackend` implements [`tower_lsp::LanguageServer`] and owns every
+/// piece of shared state required to serve LSP requests: parsed document state,
+/// version and advisory caches, registry clients, parsers, and the OSV
+/// vulnerability client.
+///
+/// # Responsibilities
+///
+/// - Parsing manifest files into [`crate::parsers::Dependency`] lists via
+///   ecosystem-specific parsers.
+/// - Fetching and caching package metadata from remote registries.
+/// - Running vulnerability queries against the OSV API and caching results.
+/// - Publishing diagnostics, inlay hints, code actions, and completions.
+/// - Managing per-URI debounce tasks so rapid edits do not flood the network.
+///
+/// # Cloning
+///
+/// `DependiBackend` is `Clone` (required by tower-lsp) but cloning is cheap:
+/// every field is either `Clone` by value (primitives, `Client`) or an `Arc`
+/// handle. All clones share the same underlying state.
+///
+/// # Construction
+///
+/// Use [`DependiBackend::new`] for production. Use
+/// [`DependiBackend::with_http_client`] in tests to inject a pre-built
+/// `reqwest::Client` (e.g. one backed by a mock server).
 pub struct DependiBackend {
     client: Client,
     /// Configuration (Arc-wrapped for sharing with debounce tasks)
@@ -523,23 +587,56 @@ pub struct DependiBackend {
 }
 
 impl DependiBackend {
-    /// Create a new DependiBackend with default configuration, parsers, registry clients,
-    /// caches, and an OSV client.
+    /// Create a new [`DependiBackend`] with default configuration, parsers,
+    /// registry clients, caches, and an OSV client.
     ///
-    /// The provided `client` is used for LSP communication. A shared HTTP client is created
-    /// internally and used to construct registry clients bound to that HTTP client.
+    /// Builds a shared `reqwest::Client` internally (TLS-enabled) and uses it
+    /// for all outbound HTTP traffic. All registry clients, the advisory cache,
+    /// and the OSV client are initialised from [`crate::config::Config::default`].
+    /// The configuration is replaced by the values received in the LSP
+    /// `initialize` request.
+    ///
+    /// # Parameters
+    ///
+    /// - `client`: The tower-lsp [`Client`] handle used to push diagnostics,
+    ///   inlay-hint refresh requests, and other server-initiated messages to the
+    ///   editor.
     ///
     /// # Examples
     ///
-    /// ```
-    /// // Obtain an LSP `Client` from the runtime environment and pass it in:
-    /// // let client = /* LSP client */ ;
-    /// // let backend = DependiBackend::new(client);
+    /// ```text
+    /// // Obtain an LSP `Client` from the tower-lsp runtime and pass it in:
+    /// //
+    /// //   let (service, socket) = LspService::new(DependiBackend::new);
+    /// //   Server::new(stdin, stdout, socket).serve(service).await;
+    /// //
+    /// // See the integration tests under dependi-lsp/tests/ for a full example.
     /// ```
     pub fn new(client: Client) -> Self {
         Self::with_http_client(client, None)
     }
 
+    /// Create a [`DependiBackend`] with an optional pre-built HTTP client.
+    ///
+    /// This is the canonical constructor used by both [`DependiBackend::new`] and
+    /// integration tests. Passing `None` for `http_client` is equivalent to
+    /// calling [`DependiBackend::new`]: a shared `reqwest::Client` is built
+    /// automatically.
+    ///
+    /// Passing `Some(client)` lets tests inject a mock HTTP client (e.g. one
+    /// pointing at a local wiremock server) without touching the network.
+    ///
+    /// # Parameters
+    ///
+    /// - `client`: The tower-lsp [`Client`] handle for server-initiated messages.
+    /// - `http_client`: Optional pre-built `reqwest::Client`. Pass `None` to use
+    ///   the default TLS-enabled client.
+    ///
+    /// # Panics
+    ///
+    /// Panics if `http_client` is `None` and building the default
+    /// `reqwest::Client` fails (e.g. TLS initialisation error on the current
+    /// platform).
     pub fn with_http_client(client: Client, http_client: Option<Arc<HttpClient>>) -> Self {
         let http_client = http_client.unwrap_or_else(|| {
             create_shared_client().expect("Failed to create shared HTTP client")
@@ -609,20 +706,30 @@ impl DependiBackend {
         }
     }
 
-    /// Read access to the advisory cache (issue #237).
+    /// Return a clone of the current positive advisory cache.
     ///
-    /// Used by integration tests and observability tooling. Returns the
-    /// hybrid memory+SQLite cache that `OsvClient` consults before issuing
-    /// HTTP requests for individual RustSec advisories. Async because the
-    /// underlying handle is now wrapped in a `RwLock` to support runtime
-    /// reconfiguration in `initialize`.
+    /// Returns the hybrid memory+SQLite [`crate::cache::HybridAdvisoryCache`]
+    /// that [`crate::vulnerabilities::osv::OsvClient`] consults
+    /// before issuing HTTP requests for individual RustSec advisories.
+    ///
+    /// The cache is wrapped in a [`tokio::sync::RwLock`] so the `initialize`
+    /// handler can atomically swap in a cache built from the user's
+    /// [`crate::config::AdvisoryCacheConfig`]. This method acquires a read
+    /// lock and returns an `Arc` clone — callers do not hold the lock.
+    ///
+    /// Primarily used by integration tests and observability tooling.
     pub async fn advisory_cache(&self) -> Arc<crate::cache::HybridAdvisoryCache> {
         Arc::clone(&*self.advisory_cache.read().await)
     }
 
-    /// Read access to the negative advisory cache (issue #237).
+    /// Return a clone of the current negative advisory cache.
     ///
-    /// Used by integration tests to inspect 404 caching state.
+    /// The negative cache stores "not-found" (HTTP 404) advisory responses so
+    /// the server does not re-query OSV for packages with no known advisories.
+    /// Unlike the positive cache it has no SQLite backing layer — 404 entries
+    /// should not persist across LSP sessions.
+    ///
+    /// Primarily used by integration tests to inspect 404 caching state.
     pub async fn negative_advisory_cache(&self) -> Arc<crate::cache::HybridAdvisoryCache> {
         Arc::clone(&*self.negative_advisory_cache.read().await)
     }

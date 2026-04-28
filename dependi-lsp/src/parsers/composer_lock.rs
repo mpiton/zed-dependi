@@ -10,20 +10,39 @@ use crate::parsers::lockfile_resolver::LockfileResolver;
 
 /// Normalize a Composer package name to lowercase.
 ///
-/// Composer package names are case-insensitive (e.g., "Vendor/Package" == "vendor/package").
+/// Composer package names are case-insensitive
+/// (e.g., `"Vendor/Package"` == `"vendor/package"`).
 /// This function ensures consistent lookup between manifest and lockfile entries.
+///
+/// # Examples
+///
+/// ```
+/// use dependi_lsp::parsers::composer_lock::normalize_composer_name;
+/// assert_eq!(normalize_composer_name("Vendor/Package"), "vendor/package");
+/// assert_eq!(normalize_composer_name("symfony/console"), "symfony/console");
+/// ```
 pub fn normalize_composer_name(name: &str) -> String {
     name.to_lowercase()
 }
 
-/// Parse a composer.lock file and return a map of package name → resolved version.
+/// Parse a `composer.lock` file and return a map of package name → resolved version.
 ///
-/// Composer.lock is a JSON file with `"packages"` and `"packages-dev"` arrays.
+/// `composer.lock` is a JSON file with `"packages"` and `"packages-dev"` arrays.
 /// Each entry has `"name"` and `"version"` fields.
 /// Names are normalized to lowercase since Composer is case-insensitive.
-/// Versions with a `v` prefix (e.g., "v3.2.0") are stored as-is since both
-/// Packagist API and composer.lock use the same format per package.
+/// Versions with a `v` prefix (e.g., `"v3.2.0"`) are stored as-is since both
+/// the Packagist API and `composer.lock` use the same format per package.
 /// When a package appears multiple times, the first entry is kept.
+///
+/// # Examples
+///
+/// ```
+/// use dependi_lsp::parsers::composer_lock::parse_composer_lock;
+///
+/// let lock = r#"{"packages":[{"name":"symfony/console","version":"v6.0.0"}],"packages-dev":[]}"#;
+/// let map = parse_composer_lock(lock);
+/// assert_eq!(map.get("symfony/console").map(String::as_str), Some("v6.0.0"));
+/// ```
 pub fn parse_composer_lock(content: &str) -> HashMap<String, String> {
     let mut map = HashMap::new();
 

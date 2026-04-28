@@ -20,10 +20,41 @@ use quick_xml::reader::Reader;
 use crate::parsers::{Dependency, Parser, Span};
 
 /// Parser for Maven `pom.xml` files.
+///
+/// Performs two sequential passes over the XML:
+/// 1. Collect `<properties>` for `${...}` substitution (`extract_properties`).
+/// 2. Extract `<dependency>` blocks from `<dependencies>` and
+///    `<dependencyManagement>`, substituting property references
+///    (`extract_dependencies`).
+///
+/// The dependency `name` uses the Maven `groupId:artifactId` convention.
+///
+/// # Examples
+///
+/// ```
+/// use dependi_lsp::parsers::Parser;
+/// use dependi_lsp::parsers::maven::MavenParser;
+/// let parser = MavenParser::new();
+/// let pom = r#"<?xml version="1.0"?>
+/// <project>
+///   <dependencies>
+///     <dependency>
+///       <groupId>org.slf4j</groupId>
+///       <artifactId>slf4j-api</artifactId>
+///       <version>1.7.30</version>
+///     </dependency>
+///   </dependencies>
+/// </project>"#;
+/// let deps = parser.parse(pom);
+/// assert_eq!(deps.len(), 1);
+/// assert_eq!(deps[0].name, "org.slf4j:slf4j-api");
+/// assert_eq!(deps[0].version, "1.7.30");
+/// ```
 #[derive(Debug, Default)]
 pub struct MavenParser;
 
 impl MavenParser {
+    /// Creates a new [`MavenParser`] instance.
     pub fn new() -> Self {
         Self
     }
@@ -36,8 +67,11 @@ impl Parser for MavenParser {
     }
 }
 
-/// Precomputed byte-offset → (line, column) mapping for a source string.
-/// Lines are 0-indexed, columns are character-based within each line.
+/// Builds a sorted list of byte offsets where each new line begins.
+///
+/// The first element is always `0`.  Used as a lookup table by
+/// [`offset_to_position`] to convert flat byte offsets into `(line, column)`
+/// pairs without scanning from the start each time.
 fn line_offsets(content: &str) -> Vec<usize> {
     let mut offsets = vec![0usize];
     for (i, b) in content.bytes().enumerate() {
@@ -48,7 +82,14 @@ fn line_offsets(content: &str) -> Vec<usize> {
     offsets
 }
 
-/// Convert a byte offset to (line, column), both 0-indexed.
+/// Converts a flat `byte_offset` to `(line, column)`, both 0-indexed.
+///
+/// Uses a binary search over the `offsets` table produced by [`line_offsets`].
+///
+/// **Precondition:** `offsets` must be non-empty and `byte_offset` must be a
+/// valid index into the same buffer that produced `offsets` (i.e. `0 ..=
+/// content.len()`). Out-of-bounds offsets are clamped via `saturating_sub` and
+/// will return the last known line, but the resulting column is meaningless.
 fn offset_to_position(offsets: &[usize], byte_offset: usize) -> (u32, u32) {
     let line_idx = match offsets.binary_search(&byte_offset) {
         Ok(i) => i,

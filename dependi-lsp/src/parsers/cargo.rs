@@ -1,4 +1,17 @@
-//! Parser for Cargo.toml files using structured TOML parsing
+//! Parser for Cargo.toml files using structured TOML parsing.
+//!
+//! Handles all dependency declaration styles supported by Cargo:
+//!
+//! - Simple version string: `serde = "1.0"`
+//! - Inline table: `serde = { version = "1.0", features = ["derive"] }`
+//! - Section table: `[dependencies.serde]` / `version = "1.0"`
+//! - Package alias: `serde1 = { package = "serde", version = "1.0" }`
+//! - Workspace dependencies: `[workspace.dependencies]`
+//! - All three scopes: `[dependencies]`, `[dev-dependencies]`, `[build-dependencies]`
+//!
+//! Parsing is performed with `taplo` so that byte-accurate [`Span`] values are
+//! available for every token; this allows LSP quick-fix `TextEdit`s to replace
+//! only the version literal without touching surrounding TOML syntax.
 
 use taplo::dom::Node;
 use taplo::dom::node::{Bool, DomNode, Key, Str};
@@ -9,8 +22,33 @@ use taplo::syntax::SyntaxElement;
 
 use super::{Dependency, Parser, Span};
 
-/// Extract the `[package].name` field from a Cargo.toml manifest.
-/// Used to pass the root package name to `parse_cargo_lock` for multi-version disambiguation.
+/// Extracts the `[package].name` field from a `Cargo.toml` manifest.
+///
+/// Returns `None` when:
+///
+/// - The TOML is malformed and cannot be parsed.
+/// - The manifest is a virtual workspace (no `[package]` section).
+/// - `[package]` exists but `name` is missing.
+/// - `[package].name` is present but not a string (e.g. an array).
+///
+/// The value is forwarded to the lock-file resolver for multi-version
+/// disambiguation.
+///
+/// # Examples
+///
+/// ```
+/// use dependi_lsp::parsers::cargo::cargo_root_package_name;
+/// let manifest = "[package]\nname = \"my-crate\"\nversion = \"0.1.0\"\n";
+/// assert_eq!(cargo_root_package_name(manifest).as_deref(), Some("my-crate"));
+/// ```
+///
+/// Virtual workspaces (no `[package]` section) return `None`:
+///
+/// ```
+/// use dependi_lsp::parsers::cargo::cargo_root_package_name;
+/// let manifest = "[workspace]\nmembers = [\"crate-a\"]\n";
+/// assert!(cargo_root_package_name(manifest).is_none());
+/// ```
 pub fn cargo_root_package_name(manifest_content: &str) -> Option<String> {
     let value: toml::Value = toml::from_str(manifest_content).ok()?;
     value
@@ -20,11 +58,29 @@ pub fn cargo_root_package_name(manifest_content: &str) -> Option<String> {
         .map(|s| s.to_string())
 }
 
-/// Parser for Rust Cargo.toml dependency files
+/// Parser for Rust `Cargo.toml` dependency files.
+///
+/// Delegates to the `taplo` TOML parser for robust span tracking.
+/// All three standard dependency scopes (`dependencies`, `dev-dependencies`,
+/// `build-dependencies`) as well as `workspace.dependencies` are parsed in a
+/// single pass.
+///
+/// # Examples
+///
+/// ```
+/// use dependi_lsp::parsers::Parser;
+/// use dependi_lsp::parsers::cargo::CargoParser;
+/// let parser = CargoParser::new();
+/// let deps = parser.parse("[dependencies]\ntokio = { version = \"1.0\", features = [\"full\"] }\n");
+/// assert_eq!(deps.len(), 1);
+/// assert_eq!(deps[0].name, "tokio");
+/// assert_eq!(deps[0].version, "1.0");
+/// ```
 #[derive(Debug, Default)]
 pub struct CargoParser;
 
 impl CargoParser {
+    /// Creates a new [`CargoParser`] instance.
     pub fn new() -> Self {
         Self
     }
