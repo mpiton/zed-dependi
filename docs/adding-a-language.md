@@ -94,7 +94,124 @@ pub trait Registry: Send + Sync {
 
 ## 3. Step 1 — Define the file type
 
-_TBD — Task 12._
+Open `dependi-lsp/src/file_types.rs`. You will make six edits.
+
+### 3.1 Add the enum variant
+
+Add `Swift` to the `FileType` enum (the variant order doesn't matter — alphabetical keeps diffs small):
+
+```rust,ignore
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum FileType {
+    Cargo,
+    Csharp,
+    Dart,
+    Go,
+    Maven,
+    Npm,
+    Php,
+    Python,
+    Ruby,
+    Swift,        // ← new
+}
+```
+
+### 3.2 Add detection
+
+`FileType::detect` is an `if`/`else if` chain over `path.ends_with(...)`, not a `match` on the filename. Add your branch alongside the existing ones:
+
+```rust,ignore
+impl FileType {
+    pub fn detect(uri: &Url) -> Option<Self> {
+        let path = uri.path();
+        let filename = path.rsplit('/').next().unwrap_or(path);
+        if path.ends_with("Cargo.toml") {
+            Some(FileType::Cargo)
+        // ... existing arms ...
+        } else if path.ends_with("Package.swift") {              // ← new
+            Some(FileType::Swift)
+        } else {
+            None
+        }
+    }
+}
+```
+
+### 3.3 Add ecosystem mapping
+
+Map the variant to its OSV ecosystem in `to_ecosystem`. The existing arms use the full `FileType::` / `Ecosystem::` paths (not `Self::`). Existing variant names: `CratesIo`, `Npm`, `PyPI`, `Go`, `Packagist`, `Pub`, `NuGet`, `RubyGems`, `Maven`. Add your new pair the same way:
+
+```rust,ignore
+impl FileType {
+    pub fn to_ecosystem(self) -> Ecosystem {
+        match self {
+            FileType::Cargo => Ecosystem::CratesIo,
+            // ... existing arms ...
+            FileType::Swift => Ecosystem::SwiftPM,             // ← new (add to Ecosystem too)
+        }
+    }
+}
+```
+
+You'll need to add `SwiftPM` to the `Ecosystem` enum in `dependi-lsp/src/vulnerabilities/mod.rs` — Step 4 covers that edit.
+
+### 3.4 Add the registry URL formatter, registry name, and cache key
+
+`fmt_registry_package_url` and `fmt_cache_key` both return `impl fmt::Display + fmt::Debug` via the `fmt::from_fn` helper, so each new arm is a `write!(f, ...)` call rather than a `format!(...)` expression. `registry_name` returns `&'static str`. Three additions:
+
+```rust,ignore
+impl FileType {
+    pub fn fmt_registry_package_url(self, name: &str) -> impl fmt::Display + fmt::Debug {
+        fmt::from_fn(move |f| match self {
+            FileType::Cargo => write!(f, "https://crates.io/crates/{name}"),
+            // ... existing arms ...
+            FileType::Swift => write!(f, "https://swiftpackageindex.com/{name}"),
+        })
+    }
+
+    pub fn registry_name(self) -> &'static str {
+        match self {
+            FileType::Cargo => "crates.io",
+            // ... existing arms ...
+            FileType::Swift => "Swift Package Index",
+        }
+    }
+
+    pub fn fmt_cache_key(self, package_name: &str) -> impl fmt::Display + fmt::Debug {
+        fmt::from_fn(move |f| match self {
+            FileType::Cargo => write!(f, "crates:{package_name}"),
+            // ... existing arms ...
+            FileType::Swift => write!(f, "swift:{package_name}"),
+        })
+    }
+}
+```
+
+### 3.5 Verify
+
+Add a unit test in `file_types.rs` (under the existing `#[cfg(test)] mod tests`). Note that `fmt_cache_key` returns an `impl Display`, so call `.to_string()` on it (or use the `cache_key` convenience wrapper):
+
+```rust,ignore
+#[test]
+fn detects_package_swift() {
+    let uri = Url::parse("file:///proj/Package.swift").unwrap();
+    assert_eq!(FileType::detect(&uri), Some(FileType::Swift));
+    assert_eq!(FileType::Swift.registry_name(), "Swift Package Index");
+    assert_eq!(
+        FileType::Swift.cache_key("swift-argument-parser"),
+        "swift:swift-argument-parser"
+    );
+}
+```
+
+Run it:
+
+```bash
+cd dependi-lsp
+cargo test file_types::tests::detects_package_swift
+```
+
+Expected: `1 passed`. If the test does not yet pass, your variant or match arm is missing.
 
 ## 4. Step 2 — Write the parser
 
