@@ -118,7 +118,7 @@ fn extract_properties(content: &str) -> HashMap<String, String> {
             Err(_) => return HashMap::new(),
             Ok(Event::Eof) => break,
             Ok(Event::Start(e)) => {
-                let name = e.name().as_ref().to_vec();
+                let name = e.local_name().as_ref().to_vec();
                 let parent = depth_stack.last().map(|v| v.as_slice());
                 // Properties map: project > properties > <key>
                 if parent == Some(b"properties")
@@ -192,7 +192,7 @@ fn extract_dependencies(content: &str, properties: &HashMap<String, String>) -> 
             Err(_) => return vec![], // invalid XML → empty result
             Ok(Event::Eof) => break,
             Ok(Event::Start(e)) => {
-                let name = e.name().as_ref().to_vec();
+                let name = e.local_name().as_ref().to_vec();
                 match name.as_slice() {
                     b"dependencies" if !in_plugins => in_dependencies = true,
                     b"dependencyManagement" => in_dep_mgmt = true,
@@ -213,7 +213,7 @@ fn extract_dependencies(content: &str, properties: &HashMap<String, String>) -> 
                 current_tag = Some(name);
             }
             Ok(Event::End(e)) => {
-                let name = e.name().as_ref().to_vec();
+                let name = e.local_name().as_ref().to_vec();
                 match name.as_slice() {
                     b"dependencies" => in_dependencies = false,
                     b"dependencyManagement" => in_dep_mgmt = false,
@@ -691,6 +691,88 @@ mod tests {
         assert!(
             deps[0].version_span.line_end > deps[0].version_span.line_start,
             "version span should be non-empty"
+        );
+    }
+
+    #[test]
+    fn test_parse_default_namespace() {
+        let parser = MavenParser::new();
+        let pom = r#"<?xml version="1.0" encoding="UTF-8"?>
+<project xmlns="http://maven.apache.org/POM/4.0.0"
+         xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+         xsi:schemaLocation="http://maven.apache.org/POM/4.0.0 http://maven.apache.org/xsd/maven-4.0.0.xsd">
+    <modelVersion>4.0.0</modelVersion>
+    <groupId>com.example</groupId>
+    <artifactId>app</artifactId>
+    <version>1.0.0</version>
+    <dependencies>
+        <dependency>
+            <groupId>org.slf4j</groupId>
+            <artifactId>slf4j-api</artifactId>
+            <version>1.7.30</version>
+        </dependency>
+    </dependencies>
+</project>
+"#;
+        let deps = parser.parse(pom);
+        assert_eq!(deps.len(), 1, "default xmlns should parse one dependency");
+        assert_eq!(deps[0].name, "org.slf4j:slf4j-api");
+        assert_eq!(deps[0].version, "1.7.30");
+    }
+
+    #[test]
+    fn test_parse_prefixed_namespace() {
+        let parser = MavenParser::new();
+        let pom = r#"<?xml version="1.0" encoding="UTF-8"?>
+<m:project xmlns:m="http://maven.apache.org/POM/4.0.0">
+    <m:modelVersion>4.0.0</m:modelVersion>
+    <m:groupId>com.example</m:groupId>
+    <m:artifactId>app</m:artifactId>
+    <m:version>1.0.0</m:version>
+    <m:dependencies>
+        <m:dependency>
+            <m:groupId>org.slf4j</m:groupId>
+            <m:artifactId>slf4j-api</m:artifactId>
+            <m:version>1.7.30</m:version>
+        </m:dependency>
+    </m:dependencies>
+</m:project>
+"#;
+        let deps = parser.parse(pom);
+        assert_eq!(
+            deps.len(),
+            1,
+            "prefixed namespace should parse one dependency"
+        );
+        assert_eq!(deps[0].name, "org.slf4j:slf4j-api");
+        assert_eq!(deps[0].version, "1.7.30");
+    }
+
+    #[test]
+    fn test_parse_prefixed_namespace_with_property_substitution() {
+        let parser = MavenParser::new();
+        let pom = r#"<?xml version="1.0" encoding="UTF-8"?>
+<m:project xmlns:m="http://maven.apache.org/POM/4.0.0">
+    <m:modelVersion>4.0.0</m:modelVersion>
+    <m:properties>
+        <m:slf4j.version>1.7.30</m:slf4j.version>
+    </m:properties>
+    <m:dependencies>
+        <m:dependency>
+            <m:groupId>org.slf4j</m:groupId>
+            <m:artifactId>slf4j-api</m:artifactId>
+            <m:version>${slf4j.version}</m:version>
+        </m:dependency>
+    </m:dependencies>
+</m:project>
+"#;
+        let deps = parser.parse(pom);
+        assert_eq!(deps.len(), 1);
+        assert_eq!(deps[0].version, "${slf4j.version}");
+        assert_eq!(
+            deps[0].resolved_version.as_deref(),
+            Some("1.7.30"),
+            "property substitution should work under prefixed namespace"
         );
     }
 }
