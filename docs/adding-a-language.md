@@ -98,23 +98,25 @@ Open `dependi-lsp/src/file_types.rs`. You will make six edits.
 
 ### 3.1 Add the enum variant
 
-Add `Swift` to the `FileType` enum (the variant order doesn't matter — alphabetical keeps diffs small):
+Add `Swift` to the `FileType` enum. The real enum lists variants in declaration order (Cargo, Npm, Python, Go, Php, Dart, Csharp, Ruby, Maven) — append yours at the end to keep the diff small:
 
 ```rust,ignore
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+#[derive(Debug, Clone, Copy, PartialEq)]
 pub enum FileType {
     Cargo,
-    Csharp,
-    Dart,
-    Go,
-    Maven,
     Npm,
-    Php,
     Python,
+    Go,
+    Php,
+    Dart,
+    Csharp,
     Ruby,
+    Maven,
     Swift,        // ← new
 }
 ```
+
+`FileType` derives only `PartialEq`, not `Eq` / `Hash`. If your work needs `FileType` as a `HashMap` key, add the extra derives in that PR explicitly rather than assuming they exist.
 
 ### 3.2 Add detection
 
@@ -495,26 +497,39 @@ cargo check
 ```
 Expected: a warning about unused imports (you'll fix it in 6.2). No errors.
 
-### 6.2 Add fields to `ProcessingContext`
+### 6.2 Add fields to `DependiBackend` and `ProcessingContext`
 
-In the `ProcessingContext` struct, add two `Arc<...>` fields:
+`ProcessingContext` is a private struct with bare (module-visible) fields. Add the two new ones at the bottom of the field list, matching the existing style:
 
 ```rust,ignore
-pub(crate) struct ProcessingContext {
+struct ProcessingContext {
     // ... existing fields ...
-    pub(crate) swift_parser: Arc<SwiftParser>,
-    pub(crate) swift_registry: Arc<SwiftPackageIndexRegistry>,
+    swift_parser: Arc<SwiftParser>,
+    swift_registry: Arc<SwiftPackageIndexRegistry>,
 }
 ```
 
-### 6.3 Initialize them in `DependiBackend::new` (or `with_http_client`)
+The `DependiBackend` struct (also in `backend.rs`) holds the same `Arc<...>` parser/registry fields. Add identically named fields there too — `ProcessingContext` is a per-request snapshot of `DependiBackend`'s state.
 
-Wherever `ProcessingContext` is constructed, add:
+### 6.3 Initialize them in `with_http_client` and `create_processing_context`
 
-```rust,ignore
-swift_parser: Arc::new(SwiftParser::new()),
-swift_registry: Arc::new(SwiftPackageIndexRegistry::with_client(Arc::clone(&http_client))),
-```
+`ProcessingContext` is **not** built in `DependiBackend::new` — it is assembled in the private `async fn create_processing_context(&self) -> ProcessingContext` (around `backend.rs:737`) by `Arc::clone`-ing each of `DependiBackend`'s parser/registry fields. Two edits:
+
+1. In `DependiBackend::with_http_client` (the constructor that accepts a custom HTTP client), initialize the new fields:
+
+   ```rust,ignore
+   swift_parser: Arc::new(SwiftParser::new()),
+   swift_registry: Arc::new(
+       SwiftPackageIndexRegistry::with_client(Arc::clone(&http_client))
+   ),
+   ```
+
+2. In `create_processing_context`, propagate them into the snapshot:
+
+   ```rust,ignore
+   swift_parser: Arc::clone(&self.swift_parser),
+   swift_registry: Arc::clone(&self.swift_registry),
+   ```
 
 ```bash
 cd dependi-lsp
@@ -524,7 +539,7 @@ Expected: zero errors.
 
 ### 6.4 Dispatch in `parse_document`
 
-In the `match FileType::detect(uri)` arm:
+`ProcessingContext::parse_document` is an exhaustive `match` over `FileType` (no wildcard arm). Add:
 
 ```rust,ignore
 Some(FileType::Swift) => self.swift_parser.parse(content),
@@ -532,11 +547,24 @@ Some(FileType::Swift) => self.swift_parser.parse(content),
 
 ### 6.5 Dispatch in the registry-fetch loop
 
-Find the `match file_type` block that calls `get_version_info`. Add:
+There are two registry dispatch sites and you must edit both:
 
-```rust,ignore
-FileType::Swift => self.swift_registry.get_version_info(name).await,
-```
+1. `ProcessingContext::get_version_info` (called for cache-aware single-package lookups). Add an arm to the inner `match file_type`:
+
+   ```rust,ignore
+   FileType::Swift => self.swift_registry.get_version_info(package_name).await,
+   ```
+
+2. The async-task loop that fetches versions for every dependency in parallel. Inside that block (around `backend.rs:210-285`), the registry `Arc<...>` values are pre-cloned outside the `.map()` closure and re-cloned into each iteration. Two edits:
+
+   - Just below the existing `let crates_io = Arc::clone(&self.crates_io);` block, add `let swift_registry = Arc::clone(&self.swift_registry);`.
+   - Inside the `.map(|dep| { ... })` body, before `async move`, add `let swift_registry = Arc::clone(&swift_registry);`. Then add the match arm in the `async move { let result = match file_type { ... } }`:
+
+     ```rust,ignore
+     FileType::Swift => swift_registry.get_version_info(&name).await,
+     ```
+
+Both arms reference the captured `Arc`, never `self`, because the closure runs after `self` is borrowed.
 
 ### 6.6 Add the `Ecosystem` variant
 
@@ -576,6 +604,10 @@ If your ecosystem has a lockfile (`Package.resolved` for SwiftPM, `pnpm-lock.yam
 
 ### 7.1 Implement the trait
 
+`LockfileResolver` is the only async trait in this codebase that uses the `async-trait` crate macro (`#[async_trait]`). The reason: the LSP backend stores resolvers behind `Box<dyn LockfileResolver>` so it can dispatch dynamically per file type, and `dyn` traits with `async fn` require the boxed-future shape that `async-trait` produces. The `Registry` trait is *not* used through `dyn` anywhere, so it can use native `async fn` with `#[allow(async_fn_in_trait)]`.
+
+The trait already provides defaults for `normalize_name` (identity) and `resolve_version` (lookup with both sides normalized). Override `normalize_name` if your ecosystem's package names are case- or separator-insensitive (Python PEP 503, NuGet, Composer, RubyGems do this); leave the default `resolve_version` alone unless you need genuinely custom matching.
+
 In a new `dependi-lsp/src/parsers/swift_resolved.rs`:
 
 ```rust,ignore
@@ -583,7 +615,7 @@ use std::path::{Path, PathBuf};
 
 use async_trait::async_trait;
 
-use crate::parsers::{Dependency, lockfile_graph::LockfileGraph,
+use crate::parsers::{lockfile_graph::LockfileGraph,
                      lockfile_resolver::LockfileResolver};
 
 pub struct SwiftLockfileResolver;
@@ -606,15 +638,14 @@ impl LockfileResolver for SwiftLockfileResolver {
         LockfileGraph::default()
     }
 
-    fn resolve_version(
-        &self,
-        dep: &Dependency,
-        graph: &LockfileGraph,
-    ) -> Option<String> {
-        graph.packages.iter()
-            .find(|p| p.name == dep.name)
-            .map(|p| p.version.clone())
-    }
+    // Default `resolve_version` already calls `self.normalize_name` on both
+    // sides — no override needed for SwiftPM, which uses canonical
+    // `owner/repo` identifiers. If your ecosystem requires case-insensitive
+    // matching, override `normalize_name` instead:
+    //
+    //     fn normalize_name(&self, name: &str) -> String {
+    //         name.to_lowercase()
+    //     }
 }
 ```
 
