@@ -144,7 +144,7 @@ sequenceDiagram
 ### Key invariants
 
 - **Debounce** (coalescing rapid keystrokes into one delayed action): every `didChange` writes the new content into `pending_changes`, aborts the previous `JoinHandle`, and spawns a fresh task. After sleeping 200 ms the task verifies *its* content is still the value in `pending_changes` (an equality check on the buffered text) — if a newer keystroke arrived, that buffer was overwritten and this task exits without doing work. An `Arc<AtomicU64>` generation counter is used independently to clean up the per-URI `debounce_tasks` slot via `remove_if(stored_gen == generation)`. Full rationale in [§11 Key Design Decisions](#11-key-design-decisions).
-- **Bounded concurrency:** registry fetches run under a `tokio::sync::Semaphore` (max 5 in-flight). The semaphore is created inline inside `process_document` (`backend.rs`) — it is **not** a field of `ProcessingContext`.
+- **Per-document bounded concurrency:** each `process_document` call constructs its own `tokio::sync::Semaphore::new(5)` inline (`backend.rs`) — it is **not** a field of `ProcessingContext` and does **not** cap *global* registry traffic. The cap is per-document: a single document is limited to 5 concurrent registry fetches; multiple documents being processed in parallel each get their own semaphore.
 - **Vulnerabilities never block hints:** the vuln path is a separate `tokio::spawn`. Inlay hints publish first; vulnerability diagnostics arrive in a second pass.
 - **Document state lives in `Arc<DashMap<Url, DocumentState>>`** — `DashMap` shards are independently locked, so two handlers reading different URIs never block each other. Handlers snapshot the fields they need into locals and drop the `Ref` (the `DashMap` shard reference) before any `await`, since shard references are not `Send`.
 
@@ -281,7 +281,7 @@ A single `Arc<reqwest::Client>` is created once at startup by `create_shared_cli
 - `pool_idle_timeout = 90s`
 - `timeout = 10s`, `connect_timeout = 5s`
 
-Sharing the client means **one TCP connection pool serves all 8 registries**, dramatically reducing handshake overhead for the typical "user opened a polyglot monorepo" scenario.
+Sharing the client means **one TCP connection pool serves all 10 registry clients** (`crates_io`, `cargo_sparse`, `npm`, `pypi`, `go_proxy`, `packagist`, `pub_dev`, `nuget`, `rubygems`, `maven_central`), dramatically reducing handshake overhead for the typical "user opened a polyglot monorepo" scenario.
 
 There is no HTTP-level cache. Caching happens at the application layer (see [§7 Cache Strategy](#7-cache-strategy)) where we serialise full `VersionInfo` records, not raw HTTP bodies.
 
@@ -446,7 +446,7 @@ The labels rendered next to versions are produced exclusively by `create_inlay_h
 
 ## 10. Authentication & Private Registries
 
-> **Status — partial implementation.** The auth subsystem is **structurally complete** (`TokenProvider` trait, `TokenProviderManager`, parsers for `~/.cargo/credentials.toml` and `.npmrc`) but the manager is **not yet injected into registry HTTP calls** in production. The cargo-credentials parser is a plain `pub fn` and ready to use, but the `.npmrc` parsers and `TokenProviderManager::get_auth_headers` are currently `#[cfg(test)]`-gated. This section documents the design as built; the wiring will land in a follow-up. See [Private Registries]({% link private-registries.md %}) for user-facing setup once enabled.
+> **Status — two parallel paths.** Production auth flows through **direct config injection** today: tokens from LSP config and `~/.cargo/credentials.toml` (parsed by `cargo_credentials::parse_credentials_content`, a plain `pub fn`) are fed into `CargoSparseRegistry::with_client_and_config`, and npm registry config tokens are fed into `NpmRegistry::with_client_and_config` — both build `Authorization: Bearer …` headers at construction time. The **`TokenProviderManager` dynamic-dispatch path** (the `TokenProvider` trait + longest-prefix lookup described below) is structurally complete and instantiated in `DependiBackend`, but `TokenProviderManager::get_auth_headers` and the `.npmrc` parsers (`parse_token_from_content`, `parse_registry_from_content`, `extract_auth_token`, `resolve_env_var`) are still `#[cfg(test)]`-gated — they are the planned mechanism for runtime-resolved per-request auth (e.g. matching a request URL against many registered scopes), which lands in a follow-up. See [Private Registries]({% link private-registries.md %}) for user-facing setup.
 
 ### `TokenProvider` trait
 
@@ -464,7 +464,7 @@ Stores `tokio::sync::RwLock<hashbrown::HashMap<String, Arc<dyn TokenProvider>>>`
 
 Two safety properties enforced at registration:
 
-1. **HTTPS only.** A non-HTTPS URL returns an error from `register`. Bearer tokens never travel cleartext.
+1. **HTTPS only.** `register` is `pub async fn` returning `()`; non-HTTPS URLs are rejected and logged via `tracing::error!("SECURITY: Refusing to register auth provider for non-HTTPS URL: …")`, and the function returns early without inserting. Bearer tokens never travel cleartext.
 2. **No silent overwrite.** Re-registering the same prefix is permitted but logged.
 
 ### Credential file parsers

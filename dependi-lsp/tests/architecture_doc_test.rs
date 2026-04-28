@@ -121,11 +121,25 @@ fn collect_pub_defs(root: &std::path::Path) -> HashSet<String> {
 #[test]
 fn architecture_doc_exists_and_nonempty() {
     let (path, content) = read_doc();
+    let required_sections = [
+        "## 1. Introduction",
+        "## 2. Top-Level Architecture",
+        "## 3. Request Lifecycle",
+        "## 4. Core Data Structures",
+        "## 7. Cache Strategy",
+        "## 11. Key Design Decisions",
+    ];
+    for section in &required_sections {
+        let display = path.display();
+        assert!(
+            content.contains(section),
+            "{display} is missing required section header `{section}`"
+        );
+    }
+    let display = path.display();
     assert!(
-        content.len() > 5000,
-        "{} is only {} bytes — needs real content",
-        path.display(),
-        content.len()
+        content.contains("```mermaid"),
+        "{display} contains no ```mermaid fenced block — architecture diagrams are required"
     );
 }
 

@@ -86,7 +86,7 @@ jobs:
           cache: 'npm'
 
       - name: Validate mermaid blocks
-        run: ./scripts/check_mermaid_syntax.sh docs/architecture.md
+        run: bash ./scripts/check_mermaid_syntax.sh docs/architecture.md
 
       - name: Validate links (lychee)
         uses: lycheeverse/lychee-action@v2

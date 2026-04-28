@@ -24,8 +24,8 @@ else
 fi
 
 awk -v outdir="$TMP" '
-    /^```mermaid$/ { in_block=1; n++; out=sprintf("%s/block_%02d.mmd", outdir, n); next }
-    /^```$/ && in_block { in_block=0; close(out); next }
+    /^[[:space:]]*```mermaid[[:space:]]*$/ { in_block=1; n++; out=sprintf("%s/block_%02d.mmd", outdir, n); next }
+    /^[[:space:]]*```[[:space:]]*$/ && in_block { in_block=0; close(out); next }
     in_block { print > out }
 ' "$DOC"
 
