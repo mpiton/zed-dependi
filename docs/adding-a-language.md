@@ -26,7 +26,30 @@ Step-by-step guide to adding a new language/ecosystem to Dependi. Worked example
 
 ## 1. Introduction
 
-_TBD — Task 10._
+This guide walks you through adding support for a new language or package manager to Dependi. By the end, your fork will detect the manifest file, parse its dependencies, fetch versions from the upstream registry, surface vulnerabilities via OSV.dev, and offer the same inlay hints, diagnostics, and code actions every other supported ecosystem gets.
+
+The worked example throughout is **Swift Package Manager** (`Package.swift`). At the time of writing, SwiftPM is not yet supported, which makes it a good candidate: you can follow the tutorial end-to-end and ship a real PR. If you target a different ecosystem, use the example as a template — the wire-up steps are identical.
+
+### What you need before you start
+
+- **Rust 1.94 or newer** (this repository is on edition 2024).
+- **Git, Cargo, and the `wasm32-wasip1` target**: `rustup target add wasm32-wasip1`.
+- **Familiarity with `async`/`await`**. Registry clients are async; parsers are synchronous.
+- **A sample manifest from your target ecosystem** to drive your first test.
+- **The OSV.dev ecosystem name**, if your registry is in OSV's coverage list. Look it up at <https://ossf.github.io/osv-schema/#defined-ecosystems> before starting Step 4. For SwiftPM the value the tutorial uses is `"SwiftURL"`; verify against the schema in case it has changed.
+
+### What you'll touch
+
+Five files (six if your ecosystem has lock files):
+
+1. `dependi-lsp/src/file_types.rs` — file detection, ecosystem mapping, cache key.
+2. `dependi-lsp/src/parsers/<your-lang>.rs` (new) plus `parsers/mod.rs` declaration.
+3. `dependi-lsp/src/registries/<your-lang>.rs` (new) plus `registries/mod.rs` declaration.
+4. `dependi-lsp/src/backend.rs` — `ProcessingContext` field, parser dispatch, registry dispatch.
+5. `dependi-lsp/src/vulnerabilities/mod.rs` — `Ecosystem` variant + OSV string.
+6. (Optional) `dependi-lsp/src/parsers/lockfile_resolver.rs` if your ecosystem has lock files.
+
+The "Reference checklist" at the bottom of this page enumerates every individual edit so you can use it as a final review before opening your PR.
 
 ## 2. The big picture
 
