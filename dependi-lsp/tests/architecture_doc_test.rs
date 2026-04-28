@@ -100,7 +100,8 @@ fn read_doc() -> (PathBuf, String) {
 }
 
 fn collect_pub_defs(root: &std::path::Path) -> HashSet<String> {
-    let re = Regex::new(r"^\s*pub (?:struct|enum|trait) (\w+)").unwrap();
+    let item_re = Regex::new(r"^\s*pub (?:struct|enum|trait) (\w+)").unwrap();
+    let cfg_test_re = Regex::new(r"^\s*#\[cfg\(test\)\]").unwrap();
     let mut set = HashSet::new();
     for entry in WalkDir::new(root).into_iter().flatten() {
         if entry.path().extension().and_then(|s| s.to_str()) != Some("rs") {
@@ -109,8 +110,42 @@ fn collect_pub_defs(root: &std::path::Path) -> HashSet<String> {
         let Ok(src) = fs::read_to_string(entry.path()) else {
             continue;
         };
+
+        // Skip items reachable only at test time. Track depth of an enclosing
+        // #[cfg(test)] item via a simple brace counter that opens on the first
+        // `{` after the attribute and closes when the depth returns to zero.
+        // String/comment braces can desync this, but the cost is occasional
+        // false-negatives (an item is excluded that wouldn't have been), which
+        // is acceptable for a validator that flags missing claims.
+        let mut pending_cfg_test = false;
+        let mut depth: i32 = 0;
         for line in src.lines() {
-            if let Some(c) = re.captures(line) {
+            if depth > 0 {
+                depth += line.matches('{').count() as i32;
+                depth -= line.matches('}').count() as i32;
+                if depth <= 0 {
+                    depth = 0;
+                }
+                continue;
+            }
+            if pending_cfg_test {
+                if line.contains('{') {
+                    depth = line.matches('{').count() as i32 - line.matches('}').count() as i32;
+                    if depth <= 0 {
+                        depth = 0;
+                        pending_cfg_test = false;
+                    }
+                    continue;
+                }
+                // Attribute applied to a non-block item (e.g. a `#[cfg(test)] use ...`);
+                // discard the gate and fall through.
+                pending_cfg_test = false;
+            }
+            if cfg_test_re.is_match(line) {
+                pending_cfg_test = true;
+                continue;
+            }
+            if let Some(c) = item_re.captures(line) {
                 set.insert(c[1].to_string());
             }
         }
@@ -160,13 +195,13 @@ fn architecture_doc_has_no_placeholder_comments() {
 }
 
 #[test]
-fn architecture_doc_has_three_mermaid_diagrams() {
+fn architecture_doc_has_four_mermaid_diagrams() {
     let (path, content) = read_doc();
     let count = content.matches("```mermaid").count();
     let path_disp = path.display();
     assert!(
-        count >= 3,
-        "{path_disp} has only {count} mermaid block(s); expected >= 3"
+        count >= 4,
+        "{path_disp} has only {count} mermaid block(s); expected >= 4"
     );
 }
 
