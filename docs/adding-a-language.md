@@ -53,7 +53,44 @@ The "Reference checklist" at the bottom of this page enumerates every individual
 
 ## 2. The big picture
 
-_TBD — Task 11._
+When a user opens a manifest file, the LSP runs roughly this pipeline for every dependency:
+
+```text
+URI ──► file_types::FileType::detect ──► dispatch_parse ──► Vec<Dependency>
+                                                              │
+                                                              ▼
+                                              registry.get_version_info ──► VersionInfo
+                                                              │
+                                                              ▼
+                                                vulnerabilities::check ──► Vec<Vulnerability>
+                                                              │
+                                                              ▼
+                                                  inlay hints / diagnostics / code actions
+```
+
+To plug a new ecosystem in, you teach each stage of that pipeline what to do with your file type. The five stages map to the five files listed in Section 1.
+
+The two trait surfaces a contributor implements are:
+
+```rust,ignore
+// In dependi-lsp/src/parsers/mod.rs
+pub trait Parser: Send + Sync {
+    fn parse(&self, content: &str) -> Vec<Dependency>;
+}
+
+// In dependi-lsp/src/registries/mod.rs
+#[allow(async_fn_in_trait)]
+pub trait Registry: Send + Sync {
+    async fn get_version_info(&self, package_name: &str)
+        -> anyhow::Result<VersionInfo>;
+    fn http_client(&self) -> std::sync::Arc<reqwest::Client>;
+}
+```
+
+[`Parser`]: https://docs.rs/dependi-lsp/latest/dependi_lsp/parsers/trait.Parser.html
+[`Registry`]: https://docs.rs/dependi-lsp/latest/dependi_lsp/registries/trait.Registry.html
+
+`Parser` is synchronous. `Registry` is asynchronous and Send + Sync (so it can be wrapped in `Arc` and shared across the request pool). The trait uses native `async fn` rather than the `async-trait` crate; the `#[allow(async_fn_in_trait)]` attribute is needed because the trait is internal and the `Send + Sync` bound is already declared on the trait itself.
 
 ## 3. Step 1 — Define the file type
 
