@@ -256,9 +256,27 @@ struct DistTags {
     next: Option<String>,
 }
 
+/// The `deprecated` field on an npm version can be either a deprecation message (string)
+/// or a boolean (some packages publish `"deprecated": false`, e.g. react 16.7.0).
+#[derive(Debug, Deserialize)]
+#[serde(untagged)]
+enum DeprecatedField {
+    Message(String),
+    Flag(bool),
+}
+
+impl DeprecatedField {
+    fn is_deprecated(&self) -> bool {
+        match self {
+            DeprecatedField::Message(s) => !s.is_empty(),
+            DeprecatedField::Flag(b) => *b,
+        }
+    }
+}
+
 #[derive(Debug, Deserialize)]
 struct VersionMetadata {
-    deprecated: Option<String>,
+    deprecated: Option<DeprecatedField>,
 }
 
 impl Registry for NpmRegistry {
@@ -328,7 +346,7 @@ impl Registry for NpmRegistry {
             .versions
             .as_ref()
             .and_then(|v| latest.as_ref().and_then(|l| v.get(l)))
-            .is_some_and(|m| m.deprecated.is_some());
+            .is_some_and(|m| m.deprecated.as_ref().is_some_and(|d| d.is_deprecated()));
 
         // Get repository URL
         let repository = pkg.repository.as_ref().and_then(|r| r.url());
@@ -454,6 +472,79 @@ mod tests {
             package_name.to_string()
         };
         assert_eq!(encoded, "lodash");
+    }
+
+    #[test]
+    fn test_deprecated_field_string_message() {
+        let json = r#"{"deprecated": "use foo instead"}"#;
+        let v: VersionMetadata = serde_json::from_str(json).unwrap();
+        assert!(v.deprecated.as_ref().unwrap().is_deprecated());
+    }
+
+    #[test]
+    fn test_deprecated_field_bool_false() {
+        // Regression: react publishes `"deprecated": false` on some versions.
+        // Previously broke deserialization of the entire package response.
+        let json = r#"{"deprecated": false}"#;
+        let v: VersionMetadata = serde_json::from_str(json).unwrap();
+        assert!(!v.deprecated.as_ref().unwrap().is_deprecated());
+    }
+
+    #[test]
+    fn test_deprecated_field_bool_true() {
+        let json = r#"{"deprecated": true}"#;
+        let v: VersionMetadata = serde_json::from_str(json).unwrap();
+        assert!(v.deprecated.as_ref().unwrap().is_deprecated());
+    }
+
+    #[test]
+    fn test_deprecated_field_absent() {
+        let json = r#"{}"#;
+        let v: VersionMetadata = serde_json::from_str(json).unwrap();
+        assert!(v.deprecated.is_none());
+    }
+
+    #[test]
+    fn test_deprecated_field_empty_string_not_deprecated() {
+        let json = r#"{"deprecated": ""}"#;
+        let v: VersionMetadata = serde_json::from_str(json).unwrap();
+        assert!(!v.deprecated.as_ref().unwrap().is_deprecated());
+    }
+
+    #[test]
+    fn test_package_response_with_mixed_deprecated_types() {
+        // Regression: full PackageResponse must deserialize when versions mix
+        // string and bool `deprecated` values (real-world react payload shape).
+        let json = r#"{
+            "dist-tags": {"latest": "19.2.5"},
+            "versions": {
+                "16.7.0": {"deprecated": false},
+                "0.7.1": {"deprecated": "renamed to autoflow"},
+                "19.2.5": {}
+            }
+        }"#;
+        let pkg: PackageResponse = serde_json::from_str(json).unwrap();
+        let versions = pkg.versions.unwrap();
+        assert_eq!(versions.len(), 3);
+        assert!(
+            !versions
+                .get("16.7.0")
+                .unwrap()
+                .deprecated
+                .as_ref()
+                .unwrap()
+                .is_deprecated()
+        );
+        assert!(
+            versions
+                .get("0.7.1")
+                .unwrap()
+                .deprecated
+                .as_ref()
+                .unwrap()
+                .is_deprecated()
+        );
+        assert!(versions.get("19.2.5").unwrap().deprecated.is_none());
     }
 
     #[test]

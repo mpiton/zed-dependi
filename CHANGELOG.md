@@ -7,6 +7,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- npm registry client now accepts both string and boolean values for the
+  per-version `deprecated` field. Some packages (e.g. react 16.7.0,
+  react-dom) publish `"deprecated": false`, which previously caused the
+  whole package metadata response to fail JSON deserialization with
+  "error decoding response body" — leaving versions, latest, and
+  vulnerability info empty in the editor.
+
 ## [1.8.0] - 2026-04-28
 
 ### Added
