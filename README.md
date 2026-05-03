@@ -3,6 +3,7 @@
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 [![Documentation](https://img.shields.io/badge/docs-latest-blue.svg)](https://mpiton.github.io/zed-dependi/)
 [![GitHub CI](https://github.com/mpiton/zed-dependi/actions/workflows/ci.yml/badge.svg)](https://github.com/mpiton/zed-dependi/actions/workflows/ci.yml)
+[![CodSpeed](https://img.shields.io/endpoint?url=https://codspeed.io/badge.json)](https://codspeed.io/mpiton/zed-dependi?utm_source=badge)
 [![GitHub release](https://img.shields.io/github/v/release/mpiton/zed-dependi)](https://github.com/mpiton/zed-dependi/releases)
 [![Issues](https://img.shields.io/github/issues-raw/mpiton/zed-dependi)](https://github.com/mpiton/zed-dependi/issues)
 [![Pull Requests](https://img.shields.io/github/issues-pr-raw/mpiton/zed-dependi)](https://github.com/mpiton/zed-dependi/pulls)

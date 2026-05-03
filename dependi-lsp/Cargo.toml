@@ -43,11 +43,11 @@ json-spanned-value = "0.2.2"
 
 [dev-dependencies]
 serial_test = "3"
-criterion = { version = "0.8.2", features = ["html_reports"] }
 wiremock = "0.6"
 tempfile = "3"
 regex = "1.12.3"
 walkdir = "2.5.0"
+criterion = { version = "4.6.0", package = "codspeed-criterion-compat", features = ["html_reports"] }
 
 [[bench]]
 name = "benchmarks"
