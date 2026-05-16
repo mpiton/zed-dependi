@@ -247,19 +247,26 @@ fn find_dependency_positions(
 
 fn str_content_range(s: &Str) -> Option<TextRange> {
     let quoted_range = s.syntax()?.text_range();
-    Some(TextRange::new(
-        quoted_range.start() + TextSize::from(1),
-        quoted_range.end() - TextSize::from(1),
-    ))
+    let one = TextSize::from(1);
+    let inner_start = quoted_range.start().checked_add(one)?;
+    let inner_end = quoted_range.end().checked_sub(one)?;
+    if inner_start > inner_end {
+        return None;
+    }
+    Some(TextRange::new(inner_start, inner_end))
 }
 
 fn find_range_span(haystack: &[TextRange], needle: TextRange) -> Option<Span> {
     let line_idx = line_range_position(haystack, needle)?;
     let line_range = haystack[line_idx];
+    if needle.start() < line_range.start() || needle.end() > line_range.end() {
+        return None;
+    }
+    let base = line_range.start();
     Some(Span {
         line: line_idx as u32,
-        line_start: (needle.start() - line_range.start()).into(),
-        line_end: (needle.end() - line_range.start()).into(),
+        line_start: (needle.start() - base).into(),
+        line_end: (needle.end() - base).into(),
     })
 }
 
