@@ -100,7 +100,12 @@ impl Parser for CargoParser {
             .map({
                 let mut offset: usize = 0;
                 move |line| {
-                    let range = TextRange::at((offset as u32).into(), (line.len() as u32).into());
+                    let content_len = line
+                        .trim_end_matches('\n')
+                        .trim_end_matches('\r')
+                        .len();
+                    let range =
+                        TextRange::at((offset as u32).into(), (content_len as u32).into());
                     offset += line.len();
                     range
                 }
