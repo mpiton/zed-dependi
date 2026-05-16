@@ -13,10 +13,7 @@ fn assert_spans_within_lines(content: &str) {
 
     for dep in &deps {
         for span in [&dep.name_span, &dep.version_span] {
-            assert!(
-                (span.line as usize) < lines.len(),
-                "span.line out of range"
-            );
+            assert!((span.line as usize) < lines.len(), "span.line out of range");
             let line = lines[span.line as usize];
             let line_len = line.len() as u32;
             assert!(span.line_start <= span.line_end);
