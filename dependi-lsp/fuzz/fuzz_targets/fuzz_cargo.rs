@@ -15,38 +15,28 @@ fuzz_target!(|data: &[u8]| {
             let lines: Vec<&str> = content.lines().collect();
 
             for dep in &deps {
-                assert!(
-                    (dep.line as usize) < lines.len(),
-                    "dep.line out of range"
-                );
+                for span in [&dep.name_span, &dep.version_span] {
+                    assert!(
+                        (span.line as usize) < lines.len(),
+                        "span.line out of range"
+                    );
 
-                let line = lines[dep.line as usize];
-                let line_len = line.len() as u32;
+                    let line = lines[span.line as usize];
+                    let line_len = line.len() as u32;
 
-                assert!(
-                    dep.name_start <= dep.name_end,
-                    "name_start must be <= name_end"
-                );
-                assert!(
-                    dep.name_start <= line_len,
-                    "name_start must be within line bounds"
-                );
-                assert!(
-                    dep.name_end <= line_len,
-                    "name_end must be within line bounds"
-                );
-                assert!(
-                    dep.version_start <= dep.version_end,
-                    "version_start must be <= version_end"
-                );
-                assert!(
-                    dep.version_start <= line_len,
-                    "version_start must be within line bounds"
-                );
-                assert!(
-                    dep.version_end <= line_len,
-                    "version_end must be within line bounds"
-                );
+                    assert!(
+                        span.line_start <= span.line_end,
+                        "line_start must be <= line_end"
+                    );
+                    assert!(
+                        span.line_start <= line_len,
+                        "line_start must be within line bounds"
+                    );
+                    assert!(
+                        span.line_end <= line_len,
+                        "line_end must be within line bounds"
+                    );
+                }
             }
         }
     }
