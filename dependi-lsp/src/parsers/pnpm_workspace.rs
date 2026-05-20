@@ -6,6 +6,12 @@ use super::{Dependency, Parser, Span};
 #[derive(Debug, Default)]
 pub struct PnpmWorkspaceParser;
 
+#[derive(Debug)]
+struct NamedCatalog {
+    name: String,
+    dependencies: Vec<Dependency>,
+}
+
 impl PnpmWorkspaceParser {
     /// Creates a new [`PnpmWorkspaceParser`] instance.
     pub fn new() -> Self {
@@ -31,12 +37,23 @@ pub fn resolve_catalog_references(
     };
 
     let catalog_dependencies = parse_default_catalog(workspace_content);
+    let named_catalogs = parse_named_catalog_collections(workspace_content);
 
     dependencies
         .into_iter()
         .map(|mut dependency| {
             if dependency.version == "catalog:"
                 && let Some(catalog_dependency) = catalog_dependencies
+                    .iter()
+                    .find(|catalog_dependency| catalog_dependency.name == dependency.name)
+            {
+                dependency.version = catalog_dependency.version.clone();
+            } else if let Some(catalog_name) = dependency.version.strip_prefix("catalog:")
+                && let Some(named_catalog) = named_catalogs
+                    .iter()
+                    .find(|named_catalog| named_catalog.name == catalog_name)
+                && let Some(catalog_dependency) = named_catalog
+                    .dependencies
                     .iter()
                     .find(|catalog_dependency| catalog_dependency.name == dependency.name)
             {
@@ -81,10 +98,17 @@ fn parse_default_catalog(content: &str) -> Vec<Dependency> {
 }
 
 fn parse_named_catalogs(content: &str) -> Vec<Dependency> {
-    let mut dependencies = Vec::new();
+    parse_named_catalog_collections(content)
+        .into_iter()
+        .flat_map(|catalog| catalog.dependencies)
+        .collect()
+}
+
+fn parse_named_catalog_collections(content: &str) -> Vec<NamedCatalog> {
+    let mut catalogs = Vec::new();
+    let mut current_catalog: Option<NamedCatalog> = None;
     let mut in_catalogs = false;
     let mut catalogs_indent = 0usize;
-    let mut in_named_catalog = false;
     let mut named_catalog_indent = 0usize;
 
     for (line_number, line) in content.lines().enumerate() {
@@ -97,7 +121,9 @@ fn parse_named_catalogs(content: &str) -> Vec<Dependency> {
         let indent = line.len() - line.trim_start().len();
         if in_catalogs && indent <= catalogs_indent {
             in_catalogs = false;
-            in_named_catalog = false;
+            if let Some(catalog) = current_catalog.take() {
+                catalogs.push(catalog);
+            }
         }
 
         if !in_catalogs {
@@ -108,32 +134,44 @@ fn parse_named_catalogs(content: &str) -> Vec<Dependency> {
             continue;
         }
 
-        if in_named_catalog && indent <= named_catalog_indent {
-            in_named_catalog = false;
+        if current_catalog.is_some() && indent <= named_catalog_indent {
+            if let Some(catalog) = current_catalog.take() {
+                catalogs.push(catalog);
+            }
         }
 
-        if !in_named_catalog {
-            if is_named_catalog_header(trimmed) {
-                in_named_catalog = true;
+        if current_catalog.is_none() {
+            if let Some(name) = parse_named_catalog_header(trimmed) {
+                current_catalog = Some(NamedCatalog {
+                    name: name.to_string(),
+                    dependencies: Vec::new(),
+                });
                 named_catalog_indent = indent;
             }
             continue;
         }
 
         if let Some(dependency) = parse_catalog_entry(line_number as u32, line) {
-            dependencies.push(dependency);
+            current_catalog
+                .as_mut()
+                .expect("current named catalog")
+                .dependencies
+                .push(dependency);
         }
     }
 
-    dependencies
+    if let Some(catalog) = current_catalog {
+        catalogs.push(catalog);
+    }
+
+    catalogs
 }
 
-fn is_named_catalog_header(line: &str) -> bool {
-    let Some((name, value)) = line.split_once(':') else {
-        return false;
-    };
+fn parse_named_catalog_header(line: &str) -> Option<&str> {
+    let (name, value) = line.split_once(':')?;
+    let name = name.trim();
 
-    !name.trim().is_empty() && value.trim().is_empty()
+    (!name.is_empty() && value.trim().is_empty()).then_some(name)
 }
 
 fn parse_catalog_entry(line_number: u32, line: &str) -> Option<Dependency> {
