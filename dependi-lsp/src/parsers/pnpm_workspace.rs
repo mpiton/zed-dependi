@@ -25,7 +25,8 @@ fn parse_default_catalog(content: &str) -> Vec<Dependency> {
     let mut catalog_indent = 0usize;
 
     for (line_number, line) in content.lines().enumerate() {
-        let trimmed = line.trim();
+        let without_comment = strip_inline_comment(line);
+        let trimmed = without_comment.trim();
         if trimmed.is_empty() || trimmed.starts_with('#') {
             continue;
         }
@@ -53,16 +54,20 @@ fn parse_default_catalog(content: &str) -> Vec<Dependency> {
 
 fn parse_catalog_entry(line_number: u32, line: &str) -> Option<Dependency> {
     let indent = line.len() - line.trim_start().len();
-    let trimmed = line.trim();
+    let without_comment = strip_inline_comment(line);
+    let trimmed = without_comment.trim();
     let (name, version) = trimmed.split_once(':')?;
     let name = name.trim();
-    let version = version.trim();
+    let raw_version = version.trim();
+    let version = trim_quotes(raw_version);
     if name.is_empty() || version.is_empty() {
         return None;
     }
 
     let name_start = indent + trimmed.find(name)?;
-    let version_start = line.find(version)?;
+    let raw_version_start = line.find(raw_version)?;
+    let quote_offset = raw_version.len() - raw_version.trim_start_matches(['"', '\'']).len();
+    let version_start = raw_version_start + quote_offset;
 
     Some(Dependency {
         name: name.to_string(),
@@ -82,4 +87,21 @@ fn parse_catalog_entry(line_number: u32, line: &str) -> Option<Dependency> {
         registry: None,
         resolved_version: None,
     })
+}
+
+fn strip_inline_comment(line: &str) -> &str {
+    line.split_once('#')
+        .map_or(line, |(before_comment, _)| before_comment)
+}
+
+fn trim_quotes(value: &str) -> &str {
+    value
+        .strip_prefix('"')
+        .and_then(|unquoted| unquoted.strip_suffix('"'))
+        .or_else(|| {
+            value
+                .strip_prefix('\'')
+                .and_then(|unquoted| unquoted.strip_suffix('\''))
+        })
+        .unwrap_or(value)
 }
