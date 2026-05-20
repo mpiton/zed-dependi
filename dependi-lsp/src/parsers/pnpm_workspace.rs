@@ -49,7 +49,7 @@ pub fn resolve_catalog_references(
                     .iter()
                     .find(|catalog_dependency| catalog_dependency.name == dependency.name)
             {
-                dependency.version = catalog_dependency.version.clone();
+                dependency.resolved_version = Some(catalog_dependency.version.clone());
             } else if let Some(catalog_name) = dependency.version.strip_prefix("catalog:")
                 && let Some(named_catalog) = named_catalogs
                     .iter()
@@ -59,7 +59,7 @@ pub fn resolve_catalog_references(
                     .iter()
                     .find(|catalog_dependency| catalog_dependency.name == dependency.name)
             {
-                dependency.version = catalog_dependency.version.clone();
+                dependency.resolved_version = Some(catalog_dependency.version.clone());
             }
             dependency
         })
@@ -238,7 +238,7 @@ fn parse_inline_named_catalog(
     let delimiter = find_top_level_colon(trimmed)?;
     let name_part = &trimmed[..delimiter];
     let value_part = &trimmed[delimiter + 1..];
-    let name = name_part.trim();
+    let name = trim_quotes(name_part.trim());
     if name.is_empty() {
         return None;
     }
@@ -264,7 +264,7 @@ fn parse_flow_named_catalogs(
             let delimiter = find_top_level_colon(segment.text)?;
             let name_part = &segment.text[..delimiter];
             let value_part = &segment.text[delimiter + 1..];
-            let name = name_part.trim();
+            let name = trim_quotes(name_part.trim());
             if name.is_empty() {
                 return None;
             }
@@ -388,7 +388,7 @@ fn find_top_level_colon(value: &str) -> Option<usize> {
 
 fn parse_named_catalog_header(line: &str) -> Option<&str> {
     let (name, value) = line.split_once(':')?;
-    let name = name.trim();
+    let name = trim_quotes(name.trim());
 
     (!name.is_empty() && value.trim().is_empty()).then_some(name)
 }

@@ -157,7 +157,9 @@ catalog:
         .iter()
         .find(|dependency| dependency.name == "react")
         .unwrap();
-    assert_eq!(react.version, "^18.3.1");
+    assert_eq!(react.version, "catalog:");
+    assert_eq!(react.resolved_version.as_deref(), Some("^18.3.1"));
+    assert_eq!(react.effective_version(), "^18.3.1");
 }
 
 #[test]
@@ -185,6 +187,7 @@ catalogs:
         .find(|dependency| dependency.name == "react")
         .unwrap();
     assert_eq!(react.version, "catalog:");
+    assert_eq!(react.resolved_version, None);
 }
 
 #[test]
@@ -229,7 +232,37 @@ catalogs:
         .iter()
         .find(|dependency| dependency.name == "react-dom")
         .unwrap();
-    assert_eq!(react_dom.version, "^18.2.0");
+    assert_eq!(react_dom.version, "catalog:react18");
+    assert_eq!(react_dom.resolved_version.as_deref(), Some("^18.2.0"));
+    assert_eq!(react_dom.effective_version(), "^18.2.0");
+}
+
+#[test]
+fn quoted_named_catalog_reference_resolves_through_unquoted_catalog_name() {
+    let workspace_yaml = r#"
+packages:
+  - packages/*
+
+catalogs:
+  "react18":
+    react: ^18.2.0
+"#;
+    let package_json = r#"{
+  "name": "@example/app",
+  "dependencies": {
+    "react": "catalog:react18"
+  }
+}"#;
+
+    let dependencies =
+        resolve_catalog_references(NpmParser::new().parse(package_json), Some(workspace_yaml));
+
+    let react = dependencies
+        .iter()
+        .find(|dependency| dependency.name == "react")
+        .unwrap();
+    assert_eq!(react.version, "catalog:react18");
+    assert_eq!(react.resolved_version.as_deref(), Some("^18.2.0"));
 }
 
 #[tokio::test]
@@ -266,5 +299,6 @@ async fn package_json_catalog_resolution_reads_nearest_workspace_file() {
         .iter()
         .find(|dependency| dependency.name == "react")
         .unwrap();
-    assert_eq!(react.version, "^18.3.1");
+    assert_eq!(react.version, "catalog:");
+    assert_eq!(react.resolved_version.as_deref(), Some("^18.3.1"));
 }
