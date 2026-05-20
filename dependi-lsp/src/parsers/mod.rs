@@ -151,6 +151,7 @@ pub mod npm;
 pub mod npm_lock;
 pub mod packages_lock_json;
 pub mod php;
+pub mod pnpm_workspace;
 pub mod pubspec_lock;
 pub mod python;
 pub mod python_lock;
