@@ -19,20 +19,27 @@ fn default_catalog_entries_accept_inline_comments_and_quoted_versions() {
     let workspace_yaml = r#"
 packages: [packages/*]
 catalog: # shared dependency versions
+  "@types/node": "^20.0.0"
   git-dep: "github:example/repo#v1.2.3" # pinned git ref
   react: "^18.3.1" # pinned for React 18 apps
   redux: '^5.0.1'
+  unquoted-git: github:example/repo#v1.2.3 # plain scalar keeps git ref
 "#;
 
     assert_eq!(
         dependency_pairs(workspace_yaml),
         vec![
+            ("@types/node".to_string(), "^20.0.0".to_string()),
             (
                 "git-dep".to_string(),
                 "github:example/repo#v1.2.3".to_string(),
             ),
             ("react".to_string(), "^18.3.1".to_string()),
             ("redux".to_string(), "^5.0.1".to_string()),
+            (
+                "unquoted-git".to_string(),
+                "github:example/repo#v1.2.3".to_string(),
+            ),
         ]
     );
 }
@@ -51,8 +58,13 @@ fn default_catalog_shapes_determine_discovered_npm_dependencies() {
             ],
         ),
         (
-            "packages: [packages/*]\ncatalog: { react: ^18.3.1, redux: ^5.0.1 }\n",
+            "packages: [packages/*]\ncatalog: { \"@types/node\": ^20.0.0, git-dep: github:example/repo#v1.2.3, react: ^18.3.1, redux: ^5.0.1 }\n",
             vec![
+                ("@types/node".to_string(), "^20.0.0".to_string()),
+                (
+                    "git-dep".to_string(),
+                    "github:example/repo#v1.2.3".to_string(),
+                ),
                 ("react".to_string(), "^18.3.1".to_string()),
                 ("redux".to_string(), "^5.0.1".to_string()),
             ],

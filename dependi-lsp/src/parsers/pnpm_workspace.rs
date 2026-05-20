@@ -398,14 +398,17 @@ fn parse_catalog_entry(line_number: u32, line: &str) -> Option<Dependency> {
     let without_comment = strip_inline_comment(line);
     let trimmed = without_comment.trim();
     let (name, version) = trimmed.split_once(':')?;
-    let name = name.trim();
+    let raw_name = name.trim();
+    let name = trim_quotes(raw_name);
     let raw_version = version.trim();
     let version = trim_quotes(raw_version);
     if name.is_empty() || version.is_empty() {
         return None;
     }
 
-    let name_start = indent + trimmed.find(name)?;
+    let raw_name_start = indent + trimmed.find(raw_name)?;
+    let name_quote_offset = raw_name.len() - raw_name.trim_start_matches(['"', '\'']).len();
+    let name_start = raw_name_start + name_quote_offset;
     let delimiter_start = line.find(':')?;
     let raw_version_start = line[delimiter_start + 1..].find(raw_version)? + delimiter_start + 1;
     let quote_offset = raw_version.len() - raw_version.trim_start_matches(['"', '\'']).len();
@@ -439,14 +442,17 @@ fn parse_flow_catalog_entry(
     let delimiter = find_top_level_colon(segment)?;
     let name_part = &segment[..delimiter];
     let raw_version_part = &segment[delimiter + 1..];
-    let name = name_part.trim();
+    let raw_name = name_part.trim();
+    let name = trim_quotes(raw_name);
     let raw_version = raw_version_part.trim();
     let version = trim_quotes(raw_version);
     if name.is_empty() || version.is_empty() {
         return None;
     }
 
-    let name_start = segment_start + (name_part.len() - name_part.trim_start().len());
+    let raw_name_start = segment_start + (name_part.len() - name_part.trim_start().len());
+    let name_quote_offset = raw_name.len() - raw_name.trim_start_matches(['"', '\'']).len();
+    let name_start = raw_name_start + name_quote_offset;
     let raw_version_start = segment_start
         + delimiter
         + 1
@@ -489,12 +495,22 @@ fn strip_inline_comment(line: &str) -> &str {
             '\\' => escaped = true,
             '\'' if !in_double_quote => in_single_quote = !in_single_quote,
             '"' if !in_single_quote => in_double_quote = !in_double_quote,
-            '#' if !in_single_quote && !in_double_quote => return &line[..index],
+            '#' if !in_single_quote && !in_double_quote && starts_yaml_comment(line, index) => {
+                return &line[..index];
+            }
             _ => {}
         }
     }
 
     line
+}
+
+fn starts_yaml_comment(line: &str, index: usize) -> bool {
+    index == 0
+        || line[..index]
+            .chars()
+            .next_back()
+            .is_some_and(char::is_whitespace)
 }
 
 fn trim_quotes(value: &str) -> &str {
