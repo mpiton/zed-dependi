@@ -144,3 +144,48 @@ catalogs:
         .unwrap();
     assert_eq!(react.version, "catalog:");
 }
+
+#[test]
+fn react_dom_named_catalog_reference_resolves_through_react18() {
+    // Given a workspace file "pnpm-workspace.yaml" containing:
+    //   packages:
+    //     - packages/*
+    //
+    //   catalogs:
+    //     react18:
+    //       react: ^18.2.0
+    //       react-dom: ^18.2.0
+    // And a package file "packages/example-components/package.json" containing:
+    //   {
+    //     "name": "@example/components",
+    //     "dependencies": {
+    //       "react-dom": "catalog:react18"
+    //     }
+    //   }
+    // When Dependi inspects "packages/example-components/package.json"
+    // Then the dependency "react-dom" resolves to npm version range "^18.2.0"
+    let workspace_yaml = r#"
+packages:
+  - packages/*
+
+catalogs:
+  react18:
+    react: ^18.2.0
+    react-dom: ^18.2.0
+"#;
+    let package_json = r#"{
+  "name": "@example/components",
+  "dependencies": {
+    "react-dom": "catalog:react18"
+  }
+}"#;
+
+    let dependencies =
+        resolve_catalog_references(NpmParser::new().parse(package_json), Some(workspace_yaml));
+
+    let react_dom = dependencies
+        .iter()
+        .find(|dependency| dependency.name == "react-dom")
+        .unwrap();
+    assert_eq!(react_dom.version, "^18.2.0");
+}
