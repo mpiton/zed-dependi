@@ -51,6 +51,31 @@ fn default_catalog_shapes_determine_discovered_npm_dependencies() {
 }
 
 #[test]
+fn named_catalog_shapes_determine_discovered_npm_dependencies() {
+    // Given a workspace file "pnpm-workspace.yaml" represented as compact YAML "<workspace_yaml>"
+    // When Dependi inspects "pnpm-workspace.yaml"
+    // Then the discovered npm dependencies are "<expected_dependencies>"
+    let cases = [
+        (
+            "packages: [packages/*]\ncatalogs:\n  react18:\n    react: ^18.2.0\n    react-dom: ^18.2.0\n",
+            vec![
+                ("react".to_string(), "^18.2.0".to_string()),
+                ("react-dom".to_string(), "^18.2.0".to_string()),
+            ],
+        ),
+        (
+            "packages: [packages/*]\ncatalogs:\n  react18: {}\n",
+            Vec::new(),
+        ),
+        ("packages: [packages/*]\ncatalogs: {}\n", Vec::new()),
+    ];
+
+    for (workspace_yaml, expected_dependencies) in cases {
+        assert_eq!(dependency_pairs(workspace_yaml), expected_dependencies);
+    }
+}
+
+#[test]
 fn react_catalog_shorthand_resolves_through_the_default_catalog() {
     // Given a workspace file "pnpm-workspace.yaml" containing:
     //   packages:
