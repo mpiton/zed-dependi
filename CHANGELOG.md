@@ -7,6 +7,39 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.9.0] - 2026-05-20
+
+### Added
+
+- Support pnpm workspace catalog dependencies from `pnpm-workspace.yaml`,
+  including default catalog entries, shorthand `catalog:` references, and
+  named catalog references such as `catalog:react18`. Diagnostics, inlay
+  hints, and update code actions now resolve catalog-backed versions while
+  preserving catalog markers. ([#318](https://github.com/mpiton/zed-dependi/pull/318))
+- CodSpeed continuous performance testing for benchmarks on push and pull
+  request workflows, plus the README CodSpeed badge. ([#282](https://github.com/mpiton/zed-dependi/pull/282))
+
+### Changed
+
+- Updated project dependencies across Rust crates, docs gems, and GitHub
+  Actions workflows. This includes `tokio`, `reqwest`, `dashmap`,
+  `hashbrown`, `quick-xml`, Jekyll, Just the Docs, `actions/setup-node`, and
+  `moonrepo/setup-rust`. ([#319](https://github.com/mpiton/zed-dependi/pull/319))
+- CI now validates the Jekyll documentation build on pull requests with Ruby
+  3.2 and Bundler cache, while keeping GitHub Pages deployment restricted to
+  pushes to `main`. ([#319](https://github.com/mpiton/zed-dependi/pull/319))
+
+### Fixed
+
+- Cargo parser span handling no longer panics on malformed multiline TOML
+  strings that previously triggered `TextSize` underflow. Invalid ranges are
+  skipped instead of crashing the parser. ([#288](https://github.com/mpiton/zed-dependi/pull/288))
+- Cargo parser line ranges now exclude trailing newline bytes, preventing
+  spans whose `line_end` points past the visible line content. ([#289](https://github.com/mpiton/zed-dependi/pull/289))
+- Fuzz targets now validate the nested `name_span` and `version_span` API
+  independently, restoring fuzz build compatibility after the span model
+  change. ([#287](https://github.com/mpiton/zed-dependi/pull/287))
+
 ## [1.8.1] - 2026-05-01
 
 ### Fixed
@@ -655,7 +688,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - In-memory caching for version data
 - Parallel registry requests (5 concurrent)
 
-[Unreleased]: https://github.com/mpiton/zed-dependi/compare/v1.8.1...HEAD
+[Unreleased]: https://github.com/mpiton/zed-dependi/compare/v1.9.0...HEAD
+[1.9.0]: https://github.com/mpiton/zed-dependi/compare/v1.8.1...v1.9.0
 [1.8.1]: https://github.com/mpiton/zed-dependi/compare/v1.8.0...v1.8.1
 [1.8.0]: https://github.com/mpiton/zed-dependi/compare/v1.7.0...v1.8.0
 [1.7.0]: https://github.com/mpiton/zed-dependi/compare/v1.6.1...v1.7.0
