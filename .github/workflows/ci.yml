@@ -74,7 +74,7 @@ jobs:
           cargo build --release --target wasm32-wasip1
 
   docs-validation:
-    name: Validate architecture doc
+    name: Validate documentation
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v6
@@ -83,6 +83,20 @@ jobs:
         uses: actions/setup-node@v6
         with:
           node-version: '20'
+
+      - name: Setup Ruby
+        uses: ruby/setup-ruby@v1
+        with:
+          ruby-version: '3.2'
+          bundler-cache: true
+          working-directory: docs
+
+      - name: Build documentation
+        run: |
+          cd docs
+          bundle exec jekyll build --baseurl "/zed-dependi"
+        env:
+          JEKYLL_ENV: production
 
       - name: Validate mermaid blocks
         run: bash ./scripts/check_mermaid_syntax.sh docs/architecture.md
