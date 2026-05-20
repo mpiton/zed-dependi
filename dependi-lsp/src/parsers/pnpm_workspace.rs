@@ -134,10 +134,10 @@ fn parse_named_catalog_collections(content: &str) -> Vec<NamedCatalog> {
             continue;
         }
 
-        if current_catalog.is_some() && indent <= named_catalog_indent {
-            if let Some(catalog) = current_catalog.take() {
-                catalogs.push(catalog);
-            }
+        if indent <= named_catalog_indent
+            && let Some(catalog) = current_catalog.take()
+        {
+            catalogs.push(catalog);
         }
 
         if current_catalog.is_none() {
