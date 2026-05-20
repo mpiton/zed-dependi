@@ -1,6 +1,8 @@
 use dependi_lsp::parsers::Parser;
 use dependi_lsp::parsers::npm::NpmParser;
-use dependi_lsp::parsers::pnpm_workspace::{PnpmWorkspaceParser, resolve_catalog_references};
+use dependi_lsp::parsers::pnpm_workspace::{
+    PnpmWorkspaceParser, read_pnpm_workspace_for_package, resolve_catalog_references,
+};
 
 fn dependency_pairs(content: &str) -> Vec<(String, String)> {
     let mut pairs = PnpmWorkspaceParser::new()
@@ -48,6 +50,13 @@ fn default_catalog_shapes_determine_discovered_npm_dependencies() {
                 ("redux".to_string(), "^5.0.1".to_string()),
             ],
         ),
+        (
+            "packages: [packages/*]\ncatalog: { react: ^18.3.1, redux: ^5.0.1 }\n",
+            vec![
+                ("react".to_string(), "^18.3.1".to_string()),
+                ("redux".to_string(), "^5.0.1".to_string()),
+            ],
+        ),
         ("packages: [packages/*]\ncatalog: {}\n", Vec::new()),
         ("packages: [packages/*]\n", Vec::new()),
     ];
@@ -65,6 +74,20 @@ fn named_catalog_shapes_determine_discovered_npm_dependencies() {
     let cases = [
         (
             "packages: [packages/*]\ncatalogs:\n  react18:\n    react: ^18.2.0\n    react-dom: ^18.2.0\n",
+            vec![
+                ("react".to_string(), "^18.2.0".to_string()),
+                ("react-dom".to_string(), "^18.2.0".to_string()),
+            ],
+        ),
+        (
+            "packages: [packages/*]\ncatalogs: { react18: { react: ^18.2.0, react-dom: ^18.2.0 } }\n",
+            vec![
+                ("react".to_string(), "^18.2.0".to_string()),
+                ("react-dom".to_string(), "^18.2.0".to_string()),
+            ],
+        ),
+        (
+            "packages: [packages/*]\ncatalogs:\n  react18: { react: ^18.2.0, react-dom: ^18.2.0 }\n",
             vec![
                 ("react".to_string(), "^18.2.0".to_string()),
                 ("react-dom".to_string(), "^18.2.0".to_string()),
@@ -195,4 +218,41 @@ catalogs:
         .find(|dependency| dependency.name == "react-dom")
         .unwrap();
     assert_eq!(react_dom.version, "^18.2.0");
+}
+
+#[tokio::test]
+async fn package_json_catalog_resolution_reads_nearest_workspace_file() {
+    let tmp = tempfile::tempdir().expect("tempdir");
+    let workspace_path = tmp.path().join("pnpm-workspace.yaml");
+    let package_dir = tmp.path().join("packages").join("example-app");
+    let package_path = package_dir.join("package.json");
+
+    std::fs::create_dir_all(&package_dir).expect("create package dir");
+    std::fs::write(
+        &workspace_path,
+        "packages: [packages/*]\ncatalog: { react: ^18.3.1 }\n",
+    )
+    .expect("write workspace");
+    std::fs::write(
+        &package_path,
+        r#"{
+  "dependencies": {
+    "react": "catalog:"
+  }
+}"#,
+    )
+    .expect("write package");
+
+    let package_json = std::fs::read_to_string(&package_path).expect("read package");
+    let workspace_content = read_pnpm_workspace_for_package(&package_path).await;
+    let dependencies = resolve_catalog_references(
+        NpmParser::new().parse(&package_json),
+        workspace_content.as_deref(),
+    );
+
+    let react = dependencies
+        .iter()
+        .find(|dependency| dependency.name == "react")
+        .unwrap();
+    assert_eq!(react.version, "^18.3.1");
 }

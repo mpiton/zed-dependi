@@ -61,6 +61,7 @@ use crate::parsers::go::GoParser;
 use crate::parsers::maven::MavenParser;
 use crate::parsers::npm::NpmParser;
 use crate::parsers::php::PhpParser;
+use crate::parsers::pnpm_workspace::{read_pnpm_workspace_for_package, resolve_catalog_references};
 use crate::parsers::python::PythonParser;
 use crate::parsers::ruby::RubyParser;
 use crate::providers::code_actions::create_code_actions;
@@ -179,6 +180,12 @@ impl ProcessingContext {
         };
 
         let mut dependencies = self.parse_document(uri, content);
+        if file_type == FileType::Npm
+            && let Ok(manifest_path) = uri.to_file_path()
+        {
+            let workspace_content = read_pnpm_workspace_for_package(&manifest_path).await;
+            dependencies = resolve_catalog_references(dependencies, workspace_content.as_deref());
+        }
 
         let lockfile_graph = if let Ok(manifest_path) = uri.to_file_path() {
             if let Some(resolver) = crate::parsers::lockfile_resolver::select_resolver(
