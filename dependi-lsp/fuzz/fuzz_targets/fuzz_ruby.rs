@@ -1,7 +1,7 @@
 #![no_main]
 
-use dependi_lsp::parsers::ruby::RubyParser;
 use dependi_lsp::parsers::Parser;
+use dependi_lsp::parsers::ruby::RubyParser;
 use libfuzzer_sys::fuzz_target;
 use std::panic::AssertUnwindSafe;
 
@@ -16,10 +16,7 @@ fuzz_target!(|data: &[u8]| {
 
             for dep in &deps {
                 for span in [&dep.name_span, &dep.version_span] {
-                    assert!(
-                        (span.line as usize) < lines.len(),
-                        "span.line out of range"
-                    );
+                    assert!((span.line as usize) < lines.len(), "span.line out of range");
 
                     let line = lines[span.line as usize];
                     let line_len = line.len() as u32;
