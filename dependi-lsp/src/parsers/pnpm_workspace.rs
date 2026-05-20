@@ -19,6 +19,32 @@ impl Parser for PnpmWorkspaceParser {
     }
 }
 
+/// Resolve npm `catalog:` dependency references against a pnpm workspace file.
+pub fn resolve_catalog_references(
+    dependencies: Vec<Dependency>,
+    workspace_content: Option<&str>,
+) -> Vec<Dependency> {
+    let Some(workspace_content) = workspace_content else {
+        return dependencies;
+    };
+
+    let catalog_dependencies = PnpmWorkspaceParser::new().parse(workspace_content);
+
+    dependencies
+        .into_iter()
+        .map(|mut dependency| {
+            if dependency.version == "catalog:"
+                && let Some(catalog_dependency) = catalog_dependencies
+                    .iter()
+                    .find(|catalog_dependency| catalog_dependency.name == dependency.name)
+            {
+                dependency.version = catalog_dependency.version.clone();
+            }
+            dependency
+        })
+        .collect()
+}
+
 fn parse_default_catalog(content: &str) -> Vec<Dependency> {
     let mut dependencies = Vec::new();
     let mut in_catalog = false;

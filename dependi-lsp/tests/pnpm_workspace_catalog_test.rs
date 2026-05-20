@@ -1,5 +1,6 @@
 use dependi_lsp::parsers::Parser;
-use dependi_lsp::parsers::pnpm_workspace::PnpmWorkspaceParser;
+use dependi_lsp::parsers::npm::NpmParser;
+use dependi_lsp::parsers::pnpm_workspace::{PnpmWorkspaceParser, resolve_catalog_references};
 
 fn dependency_pairs(content: &str) -> Vec<(String, String)> {
     PnpmWorkspaceParser::new()
@@ -47,4 +48,47 @@ fn default_catalog_shapes_determine_discovered_npm_dependencies() {
     for (workspace_yaml, expected_dependencies) in cases {
         assert_eq!(dependency_pairs(workspace_yaml), expected_dependencies);
     }
+}
+
+#[test]
+fn react_catalog_shorthand_resolves_through_the_default_catalog() {
+    // Given a workspace file "pnpm-workspace.yaml" containing:
+    //   packages:
+    //     - packages/*
+    //
+    //   catalog:
+    //     react: ^18.3.1
+    //     redux: ^5.0.1
+    // And a package file "packages/example-app/package.json" containing:
+    //   {
+    //     "name": "@example/app",
+    //     "dependencies": {
+    //       "react": "catalog:"
+    //     }
+    //   }
+    // When Dependi inspects "packages/example-app/package.json"
+    // Then the dependency "react" resolves to npm version range "^18.3.1"
+    let workspace_yaml = r#"
+packages:
+  - packages/*
+
+catalog:
+  react: ^18.3.1
+  redux: ^5.0.1
+"#;
+    let package_json = r#"{
+  "name": "@example/app",
+  "dependencies": {
+    "react": "catalog:"
+  }
+}"#;
+
+    let dependencies =
+        resolve_catalog_references(NpmParser::new().parse(package_json), Some(workspace_yaml));
+
+    let react = dependencies
+        .iter()
+        .find(|dependency| dependency.name == "react")
+        .unwrap();
+    assert_eq!(react.version, "^18.3.1");
 }
