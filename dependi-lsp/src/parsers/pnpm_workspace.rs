@@ -187,7 +187,8 @@ fn parse_catalog_entry(line_number: u32, line: &str) -> Option<Dependency> {
     }
 
     let name_start = indent + trimmed.find(name)?;
-    let raw_version_start = line.find(raw_version)?;
+    let delimiter_start = line.find(':')?;
+    let raw_version_start = line[delimiter_start + 1..].find(raw_version)? + delimiter_start + 1;
     let quote_offset = raw_version.len() - raw_version.trim_start_matches(['"', '\'']).len();
     let version_start = raw_version_start + quote_offset;
 
@@ -212,8 +213,26 @@ fn parse_catalog_entry(line_number: u32, line: &str) -> Option<Dependency> {
 }
 
 fn strip_inline_comment(line: &str) -> &str {
-    line.split_once('#')
-        .map_or(line, |(before_comment, _)| before_comment)
+    let mut in_single_quote = false;
+    let mut in_double_quote = false;
+    let mut escaped = false;
+
+    for (index, character) in line.char_indices() {
+        if escaped {
+            escaped = false;
+            continue;
+        }
+
+        match character {
+            '\\' => escaped = true,
+            '\'' if !in_double_quote => in_single_quote = !in_single_quote,
+            '"' if !in_single_quote => in_double_quote = !in_double_quote,
+            '#' if !in_single_quote && !in_double_quote => return &line[..index],
+            _ => {}
+        }
+    }
+
+    line
 }
 
 fn trim_quotes(value: &str) -> &str {

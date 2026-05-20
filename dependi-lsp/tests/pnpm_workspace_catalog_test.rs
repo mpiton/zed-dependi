@@ -3,11 +3,13 @@ use dependi_lsp::parsers::npm::NpmParser;
 use dependi_lsp::parsers::pnpm_workspace::{PnpmWorkspaceParser, resolve_catalog_references};
 
 fn dependency_pairs(content: &str) -> Vec<(String, String)> {
-    PnpmWorkspaceParser::new()
+    let mut pairs = PnpmWorkspaceParser::new()
         .parse(content)
         .into_iter()
         .map(|dependency| (dependency.name, dependency.version))
-        .collect()
+        .collect::<Vec<_>>();
+    pairs.sort_unstable();
+    pairs
 }
 
 #[test]
@@ -15,6 +17,7 @@ fn default_catalog_entries_accept_inline_comments_and_quoted_versions() {
     let workspace_yaml = r#"
 packages: [packages/*]
 catalog: # shared dependency versions
+  git-dep: "github:example/repo#v1.2.3" # pinned git ref
   react: "^18.3.1" # pinned for React 18 apps
   redux: '^5.0.1'
 "#;
@@ -22,6 +25,10 @@ catalog: # shared dependency versions
     assert_eq!(
         dependency_pairs(workspace_yaml),
         vec![
+            (
+                "git-dep".to_string(),
+                "github:example/repo#v1.2.3".to_string(),
+            ),
             ("react".to_string(), "^18.3.1".to_string()),
             ("redux".to_string(), "^5.0.1".to_string()),
         ]
