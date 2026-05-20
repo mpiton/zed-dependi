@@ -1,0 +1,107 @@
+//! Parser for pnpm `pnpm-workspace.yaml` catalog dependencies.
+
+use super::{Dependency, Parser, Span};
+
+/// Parser for pnpm workspace catalog dependency files.
+#[derive(Debug, Default)]
+pub struct PnpmWorkspaceParser;
+
+impl PnpmWorkspaceParser {
+    /// Creates a new [`PnpmWorkspaceParser`] instance.
+    pub fn new() -> Self {
+        Self
+    }
+}
+
+impl Parser for PnpmWorkspaceParser {
+    fn parse(&self, content: &str) -> Vec<Dependency> {
+        parse_default_catalog(content)
+    }
+}
+
+fn parse_default_catalog(content: &str) -> Vec<Dependency> {
+    let mut dependencies = Vec::new();
+    let mut in_catalog = false;
+    let mut catalog_indent = 0usize;
+
+    for (line_number, line) in content.lines().enumerate() {
+        let without_comment = strip_inline_comment(line);
+        let trimmed = without_comment.trim();
+        if trimmed.is_empty() || trimmed.starts_with('#') {
+            continue;
+        }
+
+        let indent = line.len() - line.trim_start().len();
+        if in_catalog && indent <= catalog_indent {
+            in_catalog = false;
+        }
+
+        if !in_catalog {
+            if trimmed == "catalog:" {
+                in_catalog = true;
+                catalog_indent = indent;
+            }
+            continue;
+        }
+
+        if let Some(dependency) = parse_catalog_entry(line_number as u32, line) {
+            dependencies.push(dependency);
+        }
+    }
+
+    dependencies
+}
+
+fn parse_catalog_entry(line_number: u32, line: &str) -> Option<Dependency> {
+    let indent = line.len() - line.trim_start().len();
+    let without_comment = strip_inline_comment(line);
+    let trimmed = without_comment.trim();
+    let (name, version) = trimmed.split_once(':')?;
+    let name = name.trim();
+    let raw_version = version.trim();
+    let version = trim_quotes(raw_version);
+    if name.is_empty() || version.is_empty() {
+        return None;
+    }
+
+    let name_start = indent + trimmed.find(name)?;
+    let raw_version_start = line.find(raw_version)?;
+    let quote_offset = raw_version.len() - raw_version.trim_start_matches(['"', '\'']).len();
+    let version_start = raw_version_start + quote_offset;
+
+    Some(Dependency {
+        name: name.to_string(),
+        version: version.to_string(),
+        name_span: Span {
+            line: line_number,
+            line_start: name_start as u32,
+            line_end: (name_start + name.len()) as u32,
+        },
+        version_span: Span {
+            line: line_number,
+            line_start: version_start as u32,
+            line_end: (version_start + version.len()) as u32,
+        },
+        dev: false,
+        optional: false,
+        registry: None,
+        resolved_version: None,
+    })
+}
+
+fn strip_inline_comment(line: &str) -> &str {
+    line.split_once('#')
+        .map_or(line, |(before_comment, _)| before_comment)
+}
+
+fn trim_quotes(value: &str) -> &str {
+    value
+        .strip_prefix('"')
+        .and_then(|unquoted| unquoted.strip_suffix('"'))
+        .or_else(|| {
+            value
+                .strip_prefix('\'')
+                .and_then(|unquoted| unquoted.strip_suffix('\''))
+        })
+        .unwrap_or(value)
+}
