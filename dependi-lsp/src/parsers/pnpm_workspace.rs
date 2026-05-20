@@ -30,7 +30,7 @@ pub fn resolve_catalog_references(
         return dependencies;
     };
 
-    let catalog_dependencies = PnpmWorkspaceParser::new().parse(workspace_content);
+    let catalog_dependencies = parse_default_catalog(workspace_content);
 
     dependencies
         .into_iter()

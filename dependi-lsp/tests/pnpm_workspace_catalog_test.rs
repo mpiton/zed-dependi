@@ -117,3 +117,30 @@ catalog:
         .unwrap();
     assert_eq!(react.version, "^18.3.1");
 }
+
+#[test]
+fn catalog_shorthand_ignores_named_catalog_entries_without_default_catalog() {
+    let workspace_yaml = r#"
+packages:
+  - packages/*
+
+catalogs:
+  react18:
+    react: ^18.2.0
+"#;
+    let package_json = r#"{
+  "name": "@example/app",
+  "dependencies": {
+    "react": "catalog:"
+  }
+}"#;
+
+    let dependencies =
+        resolve_catalog_references(NpmParser::new().parse(package_json), Some(workspace_yaml));
+
+    let react = dependencies
+        .iter()
+        .find(|dependency| dependency.name == "react")
+        .unwrap();
+    assert_eq!(react.version, "catalog:");
+}
