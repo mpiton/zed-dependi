@@ -194,7 +194,7 @@ pub async fn create_code_actions(
     //   - ignore_candidates:  in-range, non-ignored — eligible for the Ignore action
     //                         (property refs CAN still be ignored even though they
     //                         can't safely be Updated)
-    //   - update_candidates:  in-range, non-ignored, NOT property reference —
+    //   - update_candidates:  in-range, non-ignored, NOT managed indirectly —
     //                         eligible for individual Update actions
     let non_ignored: Vec<&Dependency> = dependencies
         .iter()
@@ -210,7 +210,7 @@ pub async fn create_code_actions(
     let update_candidates: Vec<&Dependency> = ignore_candidates
         .iter()
         .copied()
-        .filter(|dep| !is_property_reference(dep))
+        .filter(|dep| !is_indirectly_managed_version(dep))
         .collect();
 
     let mut actions: Vec<CodeActionOrCommand> = Vec::new();
@@ -245,6 +245,14 @@ pub async fn create_code_actions(
 /// sharing the same property — so the "update version" quick-fix is suppressed.
 fn is_property_reference(dep: &Dependency) -> bool {
     dep.version.starts_with("${") && dep.version.ends_with('}')
+}
+
+fn is_catalog_reference(dep: &Dependency) -> bool {
+    dep.version.starts_with("catalog:")
+}
+
+fn is_indirectly_managed_version(dep: &Dependency) -> bool {
+    is_property_reference(dep) || is_catalog_reference(dep)
 }
 
 /// Extract Python version operator prefix from a version string (e.g., "~=" from "~=14.3")
@@ -362,7 +370,7 @@ async fn create_update_all_action(
     let filtered: Vec<&Dependency> = dependencies
         .iter()
         .copied()
-        .filter(|dep| !is_property_reference(dep))
+        .filter(|dep| !is_indirectly_managed_version(dep))
         .collect();
 
     let cache_keys: Vec<String> = filtered.iter().map(|dep| cache_key_fn(&dep.name)).collect();
@@ -569,6 +577,50 @@ mod tests {
             }
             _ => panic!("Expected CodeAction"),
         }
+    }
+
+    #[tokio::test]
+    async fn test_no_update_action_for_catalog_reference() {
+        let cache = MemoryCache::new();
+        cache
+            .insert(
+                "test:react".to_string(),
+                VersionInfo {
+                    latest: Some("19.0.0".to_string()),
+                    ..Default::default()
+                },
+            )
+            .await;
+
+        let mut react = create_test_dependency("react", "catalog:", 5);
+        react.resolved_version = Some("^18.3.1".to_string());
+        let deps = vec![react];
+        let uri = Url::parse("file:///test/package.json").unwrap();
+        let range = Range {
+            start: Position {
+                line: 0,
+                character: 0,
+            },
+            end: Position {
+                line: 10,
+                character: 0,
+            },
+        };
+
+        let actions = create_code_actions(
+            &deps,
+            &cache,
+            &uri,
+            range,
+            FileType::Npm,
+            |name| format!("test:{name}"),
+            &[],
+            None,
+            None,
+        )
+        .await;
+
+        assert_eq!(actions.len(), 0);
     }
 
     #[tokio::test]

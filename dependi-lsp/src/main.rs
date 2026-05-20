@@ -213,8 +213,8 @@ async fn run_scan(
         Parser, cargo::CargoParser, cargo_lock, composer_lock, csharp::CsharpParser,
         dart::DartParser, gemfile_lock, go::GoParser, lockfile_graph::LockfileGraph,
         lockfile_graph::LockfilePackage, lockfile_graph::read_lockfile_capped, maven::MavenParser,
-        npm::NpmParser, npm_lock, php::PhpParser, python::PythonParser, python_lock,
-        ruby::RubyParser,
+        npm::NpmParser, npm_lock, php::PhpParser, pnpm_workspace, python::PythonParser,
+        python_lock, ruby::RubyParser,
     };
     use dependi_lsp::registries::VulnerabilitySeverity;
     use dependi_lsp::reports::{
@@ -259,7 +259,12 @@ async fn run_scan(
     let (dependencies, ecosystem) = if file_name == "Cargo.toml" {
         (CargoParser::new().parse(&content), Ecosystem::CratesIo)
     } else if file_name == "package.json" {
-        (NpmParser::new().parse(&content), Ecosystem::Npm)
+        let dependencies = NpmParser::new().parse(&content);
+        let workspace_content = pnpm_workspace::read_pnpm_workspace_for_package(&file).await;
+        (
+            pnpm_workspace::resolve_catalog_references(dependencies, workspace_content.as_deref()),
+            Ecosystem::Npm,
+        )
     } else if file_name == "requirements.txt" || file_name == "pyproject.toml" {
         (PythonParser::new().parse(&content), Ecosystem::PyPI)
     } else if file_name == "go.mod" {
