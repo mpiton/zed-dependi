@@ -51,6 +51,31 @@ fn default_catalog_shapes_determine_discovered_npm_dependencies() {
 }
 
 #[test]
+fn named_catalog_shapes_determine_discovered_npm_dependencies() {
+    // Given a workspace file "pnpm-workspace.yaml" represented as compact YAML "<workspace_yaml>"
+    // When Dependi inspects "pnpm-workspace.yaml"
+    // Then the discovered npm dependencies are "<expected_dependencies>"
+    let cases = [
+        (
+            "packages: [packages/*]\ncatalogs:\n  react18:\n    react: ^18.2.0\n    react-dom: ^18.2.0\n",
+            vec![
+                ("react".to_string(), "^18.2.0".to_string()),
+                ("react-dom".to_string(), "^18.2.0".to_string()),
+            ],
+        ),
+        (
+            "packages: [packages/*]\ncatalogs:\n  react18: {}\n",
+            Vec::new(),
+        ),
+        ("packages: [packages/*]\ncatalogs: {}\n", Vec::new()),
+    ];
+
+    for (workspace_yaml, expected_dependencies) in cases {
+        assert_eq!(dependency_pairs(workspace_yaml), expected_dependencies);
+    }
+}
+
+#[test]
 fn react_catalog_shorthand_resolves_through_the_default_catalog() {
     // Given a workspace file "pnpm-workspace.yaml" containing:
     //   packages:
@@ -91,4 +116,31 @@ catalog:
         .find(|dependency| dependency.name == "react")
         .unwrap();
     assert_eq!(react.version, "^18.3.1");
+}
+
+#[test]
+fn catalog_shorthand_ignores_named_catalog_entries_without_default_catalog() {
+    let workspace_yaml = r#"
+packages:
+  - packages/*
+
+catalogs:
+  react18:
+    react: ^18.2.0
+"#;
+    let package_json = r#"{
+  "name": "@example/app",
+  "dependencies": {
+    "react": "catalog:"
+  }
+}"#;
+
+    let dependencies =
+        resolve_catalog_references(NpmParser::new().parse(package_json), Some(workspace_yaml));
+
+    let react = dependencies
+        .iter()
+        .find(|dependency| dependency.name == "react")
+        .unwrap();
+    assert_eq!(react.version, "catalog:");
 }
