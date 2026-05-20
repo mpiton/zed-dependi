@@ -15,7 +15,9 @@ impl PnpmWorkspaceParser {
 
 impl Parser for PnpmWorkspaceParser {
     fn parse(&self, content: &str) -> Vec<Dependency> {
-        parse_default_catalog(content)
+        let mut dependencies = parse_default_catalog(content);
+        dependencies.extend(parse_named_catalogs(content));
+        dependencies
     }
 }
 
@@ -76,6 +78,62 @@ fn parse_default_catalog(content: &str) -> Vec<Dependency> {
     }
 
     dependencies
+}
+
+fn parse_named_catalogs(content: &str) -> Vec<Dependency> {
+    let mut dependencies = Vec::new();
+    let mut in_catalogs = false;
+    let mut catalogs_indent = 0usize;
+    let mut in_named_catalog = false;
+    let mut named_catalog_indent = 0usize;
+
+    for (line_number, line) in content.lines().enumerate() {
+        let without_comment = strip_inline_comment(line);
+        let trimmed = without_comment.trim();
+        if trimmed.is_empty() || trimmed.starts_with('#') {
+            continue;
+        }
+
+        let indent = line.len() - line.trim_start().len();
+        if in_catalogs && indent <= catalogs_indent {
+            in_catalogs = false;
+            in_named_catalog = false;
+        }
+
+        if !in_catalogs {
+            if trimmed == "catalogs:" {
+                in_catalogs = true;
+                catalogs_indent = indent;
+            }
+            continue;
+        }
+
+        if in_named_catalog && indent <= named_catalog_indent {
+            in_named_catalog = false;
+        }
+
+        if !in_named_catalog {
+            if is_named_catalog_header(trimmed) {
+                in_named_catalog = true;
+                named_catalog_indent = indent;
+            }
+            continue;
+        }
+
+        if let Some(dependency) = parse_catalog_entry(line_number as u32, line) {
+            dependencies.push(dependency);
+        }
+    }
+
+    dependencies
+}
+
+fn is_named_catalog_header(line: &str) -> bool {
+    let Some((name, value)) = line.split_once(':') else {
+        return false;
+    };
+
+    !name.trim().is_empty() && value.trim().is_empty()
 }
 
 fn parse_catalog_entry(line_number: u32, line: &str) -> Option<Dependency> {
