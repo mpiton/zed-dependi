@@ -22,6 +22,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   Files** table with Ruby (`Gemfile`), Java (`pom.xml`), and the previously
   missing Python entries (`constraints.txt`, `hatch.toml`) so the CLI
   reference now matches `dependi-lsp/src/file_types.rs`.
+- `README.md`: re-synced with the current code:
+  - Added Java/Maven Central to the **Supported Languages** table,
+    the **CI/CD Supported Files** list, and the FAQ registries table.
+    Added Ruby to the CLI **Supported Files** list (it was already in
+    the main table but missing from the CI/CD section).
+  - Added the `html` output format and `--no-use-lockfile` flag to the
+    CI/CD **Options** table.
+  - Refreshed the **Project Structure** tree with `parsers/maven.rs`,
+    `parsers/pnpm_workspace.rs`, `parsers/json_spans.rs`,
+    `parsers/lockfile_graph.rs`, `parsers/lockfile_resolver.rs`,
+    `registries/maven_central.rs`, and `registries/url_sanitizer.rs`.
+  - Updated the **Architecture** diagram to include `pom.xml`,
+    `pnpm-workspace`, and the Maven Central registry node.
 
 ### Changed
 

@@ -48,13 +48,14 @@ Dependency management extension for the [Zed](https://zed.dev) editor.
 | Language | File | Registry | Status |
 |----------|------|----------|--------|
 | Rust | `Cargo.toml` | crates.io + alternative registries | ✅ |
-| JavaScript/TypeScript | `package.json` | npm | ✅ |
+| JavaScript/TypeScript | `package.json` | npm (+ pnpm workspace catalogs) | ✅ |
 | Python | `requirements.txt`, `constraints.txt`, `pyproject.toml`, `hatch.toml` | PyPI | ✅ |
 | Go | `go.mod` | proxy.golang.org | ✅ |
 | PHP | `composer.json` | Packagist | ✅ |
 | Dart/Flutter | `pubspec.yaml` | pub.dev | ✅ |
 | C#/.NET | `*.csproj` | NuGet | ✅ |
 | Ruby | `Gemfile` | RubyGems.org | ✅ |
+| Java | `pom.xml` | Maven Central | ✅ |
 
 ## Installation
 
@@ -105,6 +106,7 @@ zed-dependi/
 │   │   │   ├── cargo_lock.rs # Cargo.lock lockfile
 │   │   │   ├── npm.rs     # package.json parser
 │   │   │   ├── npm_lock.rs # package-lock.json, yarn.lock, pnpm-lock.yaml, bun.lock
+│   │   │   ├── pnpm_workspace.rs # pnpm-workspace.yaml catalog resolution
 │   │   │   ├── python.rs  # requirements.txt, constraints.txt, pyproject.toml, hatch.toml
 │   │   │   ├── python_lock.rs # poetry.lock, uv.lock, pdm.lock, Pipfile.lock
 │   │   │   ├── go.rs      # go.mod parser
@@ -116,7 +118,11 @@ zed-dependi/
 │   │   │   ├── dart.rs    # pubspec.yaml parser
 │   │   │   ├── pubspec_lock.rs # pubspec.lock lockfile
 │   │   │   ├── csharp.rs  # *.csproj parser
-│   │   │   └── packages_lock_json.rs # packages.lock.json lockfile
+│   │   │   ├── packages_lock_json.rs # packages.lock.json lockfile
+│   │   │   ├── maven.rs   # pom.xml parser
+│   │   │   ├── json_spans.rs # Shared JSON span tracking
+│   │   │   ├── lockfile_graph.rs # Transitive dependency graph
+│   │   │   └── lockfile_resolver.rs # Manifest ↔ lockfile resolution
 │   │   ├── registries/    # Package registry clients
 │   │   │   ├── crates_io.rs    # crates.io API
 │   │   │   ├── cargo_sparse.rs # Cargo alternative registries (sparse index)
@@ -127,7 +133,9 @@ zed-dependi/
 │   │   │   ├── pub_dev.rs      # pub.dev (Dart)
 │   │   │   ├── nuget.rs        # NuGet (.NET)
 │   │   │   ├── rubygems.rs     # RubyGems
+│   │   │   ├── maven_central.rs # Maven Central (Java)
 │   │   │   ├── http_client.rs  # Shared HTTP client
+│   │   │   ├── url_sanitizer.rs # Registry URL hardening
 │   │   │   └── version_utils.rs # Shared version utilities
 │   │   ├── providers/     # LSP feature providers
 │   │   │   ├── inlay_hints.rs
@@ -340,9 +348,10 @@ dependi-lsp scan --file <path> [options]
 | Option | Short | Default | Description |
 |--------|-------|---------|-------------|
 | `--file <path>` | `-f` | required | Path to dependency file to scan |
-| `--output <format>` | `-o` | `summary` | Output format: `summary`, `json`, `markdown` |
+| `--output <format>` | `-o` | `summary` | Output format: `summary`, `json`, `markdown`, `html` |
 | `--min-severity <level>` | `-m` | `low` | Minimum severity to report: `low`, `medium`, `high`, `critical` |
 | `--fail-on-vulns` | | `true` | Exit with code 1 if vulnerabilities are found |
+| `--no-use-lockfile` | | (off) | Disable lockfile-based scanning. By default, when a sibling lockfile is present (`Cargo.lock`, `package-lock.json`, `pnpm-lock.yaml`, `yarn.lock`, `bun.lock`, `go.sum`, `composer.lock`, `pubspec.lock`, `packages.lock.json`, `Gemfile.lock`, `poetry.lock`, `uv.lock`, `pdm.lock`, `Pipfile.lock`), the scanner walks the full dependency graph; this flag restricts it to direct dependencies only. |
 
 #### Supported Files
 
@@ -353,6 +362,8 @@ dependi-lsp scan --file <path> [options]
 - PHP: `composer.json`
 - Dart/Flutter: `pubspec.yaml`
 - C#/.NET: `*.csproj`
+- Ruby: `Gemfile`
+- Java: `pom.xml`
 
 #### Exit Codes
 
@@ -518,14 +529,16 @@ security-scan:
 │  ├──────────────┤  ├──────────────┤  ├──────────────┤      │
 │  │ • Cargo.toml │  │ • Inlay Hints│  │ • crates.io  │      │
 │  │ • package.json│ │ • Diagnostics│  │ • Cargo alt  │      │
-│  │ • requirements│ │ • Code Action│  │ • npm        │      │
-│  │ • constraints│  │ • Completion │  │ • PyPI       │      │
-│  │ • pyproject  │  │ • Hover      │  │ • Go Proxy   │      │
-│  │ • go.mod     │  │ • Doc Links  │  │ • Packagist  │      │
-│  │ • composer   │  └──────────────┘  │ • pub.dev    │      │
-│  │ • pubspec    │                    │ • NuGet      │      │
-│  │ • *.csproj   │                    │ • RubyGems   │      │
+│  │ • pnpm-workspace│ • Code Action│  │ • npm        │      │
+│  │ • requirements│ │ • Completion │  │ • PyPI       │      │
+│  │ • constraints│  │ • Hover      │  │ • Go Proxy   │      │
+│  │ • pyproject  │  │ • Doc Links  │  │ • Packagist  │      │
+│  │ • go.mod     │  └──────────────┘  │ • pub.dev    │      │
+│  │ • composer   │                    │ • NuGet      │      │
+│  │ • pubspec    │                    │ • RubyGems   │      │
+│  │ • *.csproj   │                    │ • Maven Cent.│      │
 │  │ • Gemfile    │                    └──────────────┘      │
+│  │ • pom.xml    │                                           │
 │  └──────────────┘                                           │
 │                                                             │
 │  ┌──────────────────────────────────────────────────────┐  │
@@ -705,6 +718,7 @@ Yes, with limitations. If packages were previously cached, their information rem
 | Dart/Flutter | pub.dev | https://pub.dev |
 | C#/.NET | NuGet | https://api.nuget.org |
 | Ruby | RubyGems | https://rubygems.org |
+| Java | Maven Central | https://repo.maven.apache.org/maven2 |
 
 ### What data does the extension collect?
 
