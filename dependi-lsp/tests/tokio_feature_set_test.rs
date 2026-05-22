@@ -62,7 +62,7 @@ version = "0.0.0"
 edition = "2024"
 
 [dependencies]
-tokio = {{ version = "1.52.3", features = [{feature_list}] }}
+tokio = {{ version = "=1.52.3", features = [{feature_list}] }}
 "#
         ),
     )
