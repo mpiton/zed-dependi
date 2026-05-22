@@ -7,6 +7,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+
+- Declared `tokio` features explicitly in `dependi-lsp/Cargo.toml`: the
+  trimmed set now includes `sync` and `time` alongside `rt-multi-thread`,
+  `macros`, `io-util`, `io-std`, and `fs`. The crate uses
+  `tokio::sync::{RwLock, Mutex, Semaphore}` and
+  `tokio::time::{sleep, timeout, interval}` directly, so relying on
+  transitive feature unification through other dependencies was fragile.
+  Acceptance scenarios and `tokio_feature_set_test.rs` were updated to
+  match the seven-feature set.
+  ([#336](https://github.com/mpiton/zed-dependi/pull/336))
+
 ## [1.9.0] - 2026-05-20
 
 ### Added

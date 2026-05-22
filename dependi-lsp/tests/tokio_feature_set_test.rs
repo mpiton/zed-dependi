@@ -4,7 +4,15 @@ use toml::Value;
 
 const DEPENDI_LSP_MANIFEST: &str = include_str!("../Cargo.toml");
 const TOKIO_FEATURE_MEASUREMENTS: &str = include_str!("fixtures/tokio_feature_measurements.toml");
-const EXPECTED_TOKIO_FEATURES: [&str; 5] = ["fs", "io-std", "io-util", "macros", "rt-multi-thread"];
+const EXPECTED_TOKIO_FEATURES: [&str; 7] = [
+    "fs",
+    "io-std",
+    "io-util",
+    "macros",
+    "rt-multi-thread",
+    "sync",
+    "time",
+];
 
 fn tokio_features(manifest: &str) -> BTreeSet<String> {
     let manifest = toml::from_str::<Value>(manifest).expect("dependi-lsp Cargo.toml is valid TOML");
@@ -158,9 +166,9 @@ fn comparable_measurements(
 #[test]
 fn dependi_lsp_uses_the_trimmed_tokio_feature_set() {
     // Given the `dependi-lsp/Cargo.toml` dependency line for `tokio` is:
-    //   tokio = { version = "1.52.3", features = ["rt-multi-thread", "macros", "io-util", "io-std", "fs"] }
+    //   tokio = { version = "1.52.3", features = ["rt-multi-thread", "macros", "io-util", "io-std", "fs", "sync", "time"] }
     // When the Tokio dependency features are inspected
-    // Then the direct Tokio feature set is exactly "fs, io-std, io-util, macros, rt-multi-thread"
+    // Then the direct Tokio feature set is exactly "fs, io-std, io-util, macros, rt-multi-thread, sync, time"
     // And the direct Tokio feature set does not include "full"
     let features = tokio_features(DEPENDI_LSP_MANIFEST);
 
@@ -187,7 +195,7 @@ fn a_required_explicit_tokio_feature_is_missing() {
     // Given the `dependi-lsp/Cargo.toml` dependency line for `tokio` is:
     //   tokio = { version = "1.52.3", features = ["rt-multi-thread", "macros", "io-util"] }
     // When the Tokio dependency features are inspected
-    // Then the dependency violates R-01 because the direct Tokio feature set is missing "fs, io-std"
+    // Then the dependency violates R-01 because the direct Tokio feature set is missing "fs, io-std, sync, time"
     let manifest = manifest_with_dependencies(
         r#"tokio = { version = "1.52.3", features = ["rt-multi-thread", "macros", "io-util"] }"#,
     );
@@ -195,36 +203,41 @@ fn a_required_explicit_tokio_feature_is_missing() {
 
     assert_eq!(
         missing_expected_tokio_features(&features),
-        BTreeSet::from(["fs".to_string(), "io-std".to_string()])
+        BTreeSet::from([
+            "fs".to_string(),
+            "io-std".to_string(),
+            "sync".to_string(),
+            "time".to_string(),
+        ])
     );
 }
 
 #[test]
 fn extra_unrelated_direct_tokio_features_are_rejected() {
     // Given the `dependi-lsp/Cargo.toml` dependency line for `tokio` is:
-    //   tokio = { version = "1.52.3", features = ["rt-multi-thread", "macros", "io-util", "io-std", "fs", "sync", "time"] }
+    //   tokio = { version = "1.52.3", features = ["rt-multi-thread", "macros", "io-util", "io-std", "fs", "sync", "time", "signal", "process"] }
     // When the Tokio dependency features are inspected
-    // Then the dependency violates R-01 because the direct Tokio feature set includes unrelated features "sync, time"
+    // Then the dependency violates R-01 because the direct Tokio feature set includes unrelated features "process, signal"
     let manifest = manifest_with_dependencies(
-        r#"tokio = { version = "1.52.3", features = ["rt-multi-thread", "macros", "io-util", "io-std", "fs", "sync", "time"] }"#,
+        r#"tokio = { version = "1.52.3", features = ["rt-multi-thread", "macros", "io-util", "io-std", "fs", "sync", "time", "signal", "process"] }"#,
     );
     let features = tokio_features(&manifest);
 
     assert_eq!(
         unrelated_tokio_features(&features),
-        BTreeSet::from(["sync".to_string(), "time".to_string()])
+        BTreeSet::from(["process".to_string(), "signal".to_string()])
     );
 }
 
 #[test]
 fn feature_equality_ignores_cargo_list_ordering() {
     // Given the `dependi-lsp/Cargo.toml` dependency line for `tokio` is:
-    //   tokio = { version = "1.52.3", features = ["fs", "io-std", "io-util", "macros", "rt-multi-thread"] }
+    //   tokio = { version = "1.52.3", features = ["fs", "io-std", "io-util", "macros", "rt-multi-thread", "sync", "time"] }
     // When the Tokio dependency features are inspected
-    // Then the direct Tokio feature set is exactly "fs, io-std, io-util, macros, rt-multi-thread"
+    // Then the direct Tokio feature set is exactly "fs, io-std, io-util, macros, rt-multi-thread, sync, time"
     // And the dependency satisfies R-01
     let manifest = manifest_with_dependencies(
-        r#"tokio = { version = "1.52.3", features = ["fs", "io-std", "io-util", "macros", "rt-multi-thread"] }"#,
+        r#"tokio = { version = "1.52.3", features = ["fs", "io-std", "io-util", "macros", "rt-multi-thread", "sync", "time"] }"#,
     );
     let features = tokio_features(&manifest);
 
@@ -233,7 +246,7 @@ fn feature_equality_ignores_cargo_list_ordering() {
 
 #[tokio::test(flavor = "multi_thread")]
 async fn trimmed_features_keep_each_required_tokio_and_reqwest_capability() {
-    // Given the `dependi-lsp` crate directly enables Tokio features "rt-multi-thread, macros, io-util, io-std, fs"
+    // Given the `dependi-lsp` crate directly enables Tokio features "rt-multi-thread, macros, io-util, io-std, fs, sync, time"
     // And the `dependi-lsp` crate depends on `reqwest` version "0.13.3"
     // When `cargo check -p dependi-lsp` runs
     // Then code using "<capability_code>" for "<capability>" compiles
@@ -246,6 +259,8 @@ async fn trimmed_features_keep_each_required_tokio_and_reqwest_capability() {
     let cargo_toml = tokio::fs::read_to_string("Cargo.toml").await.unwrap();
     let _stdin = tokio::io::stdin();
     let _client = reqwest::Client::new();
+    let _lock = tokio::sync::RwLock::new(0_u8);
+    tokio::time::sleep(std::time::Duration::from_millis(0)).await;
 
     assert_eq!(bytes_read, 0);
     assert!(cargo_toml.contains("[package]"));
@@ -265,24 +280,32 @@ fn missing_direct_tokio_features_break_required_capabilities() {
     // And the dependency graph violates R-02
     let cases = [
         (
-            ["rt-multi-thread", "io-util", "io-std", "fs"].as_slice(),
+            ["rt-multi-thread", "io-util", "io-std", "fs", "sync", "time"].as_slice(),
             "#[tokio::main]\nasync fn main() {}\n",
         ),
         (
-            ["macros", "io-util", "io-std", "fs"].as_slice(),
+            ["macros", "io-util", "io-std", "fs", "sync", "time"].as_slice(),
             "#[tokio::main]\nasync fn main() {}\n",
         ),
         (
-            ["rt-multi-thread", "macros", "fs", "io-std"].as_slice(),
+            ["rt-multi-thread", "macros", "fs", "io-std", "sync", "time"].as_slice(),
             "use tokio::io::AsyncReadExt;\nfn main() {}\n",
         ),
         (
-            ["rt-multi-thread", "macros", "io-util", "fs"].as_slice(),
+            ["rt-multi-thread", "macros", "io-util", "fs", "sync", "time"].as_slice(),
             "fn main() { let _stdin = tokio::io::stdin(); }\n",
         ),
         (
-            ["rt-multi-thread", "macros", "io-util", "io-std"].as_slice(),
+            ["rt-multi-thread", "macros", "io-util", "io-std", "sync", "time"].as_slice(),
             "fn main() { let _read = tokio::fs::read_to_string(\"Cargo.toml\"); }\n",
+        ),
+        (
+            ["rt-multi-thread", "macros", "io-util", "io-std", "fs", "time"].as_slice(),
+            "fn main() { let _lock = tokio::sync::RwLock::new(0_u8); }\n",
+        ),
+        (
+            ["rt-multi-thread", "macros", "io-util", "io-std", "fs", "sync"].as_slice(),
+            "fn main() { let _f = tokio::time::sleep(std::time::Duration::from_millis(0)); }\n",
         ),
     ];
 
@@ -309,7 +332,7 @@ fn missing_reqwest_support_breaks_network_capability() {
 
 #[test]
 fn network_capability_comes_from_reqwest_instead_of_a_direct_tokio_feature() {
-    // Given the `dependi-lsp` crate directly enables Tokio features "rt-multi-thread, macros, io-util, io-std, fs"
+    // Given the `dependi-lsp` crate directly enables Tokio features "rt-multi-thread, macros, io-util, io-std, fs, sync, time"
     // And the `dependi-lsp` crate depends on `reqwest` version "0.13.3"
     // When the resolved Cargo dependency graph is inspected
     // Then HTTPS client code through `reqwest::Client` is available
