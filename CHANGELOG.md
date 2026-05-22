@@ -24,9 +24,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   without grepping the repo root.
 - `docs/cli.md`: documented the `html` output format and the
   `--no-use-lockfile` flag on `dependi-lsp scan`. Extended the **Supported
-  Files** table with Ruby (`Gemfile`), Java (`pom.xml`), and the previously
-  missing Python entries (`constraints.txt`, `hatch.toml`) so the CLI
-  reference now matches `dependi-lsp/src/file_types.rs`.
+  Files** table with Ruby (`Gemfile`) and Java (`pom.xml`). Python
+  entries are limited to `requirements.txt` and `pyproject.toml` because
+  `run_scan` in `dependi-lsp/src/main.rs` does not currently route
+  `constraints.txt` or `hatch.toml`; a callout points readers to the
+  broader LSP-mode coverage. The README CI/CD list mirrors the same
+  scope and callout.
 - `README.md`: re-synced with the current code:
   - Added Java/Maven Central to the **Supported Languages** table,
     the **CI/CD Supported Files** list, and the FAQ registries table.

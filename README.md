@@ -357,13 +357,18 @@ dependi-lsp scan --file <path> [options]
 
 - Rust: `Cargo.toml`
 - JavaScript/TypeScript: `package.json`
-- Python: `requirements.txt`, `constraints.txt`, `pyproject.toml`, `hatch.toml`
+- Python: `requirements.txt`, `pyproject.toml`
 - Go: `go.mod`
 - PHP: `composer.json`
 - Dart/Flutter: `pubspec.yaml`
 - C#/.NET: `*.csproj`
 - Ruby: `Gemfile`
 - Java: `pom.xml`
+
+> **Note:** The CLI `scan` subcommand only routes the files listed above.
+> Inside the LSP (when editing in Zed) `constraints.txt` and `hatch.toml`
+> are also recognised as Python manifests; the standalone CLI scanner does
+> not currently route them.
 
 #### Exit Codes
 

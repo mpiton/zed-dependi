@@ -45,13 +45,19 @@ dependi-lsp scan --file <path> [options]
 |----------|-------|
 | Rust | `Cargo.toml` |
 | Node.js | `package.json` |
-| Python | `requirements.txt`, `constraints.txt`, `pyproject.toml`, `hatch.toml` |
+| Python | `requirements.txt`, `pyproject.toml` |
 | Go | `go.mod` |
 | PHP | `composer.json` |
 | Dart | `pubspec.yaml` |
 | .NET | `*.csproj` |
 | Ruby | `Gemfile` |
 | Java | `pom.xml` |
+
+{: .note }
+The CLI `scan` subcommand only routes the files listed above. Inside the LSP
+(when editing in Zed) a broader set is recognised, including
+`constraints.txt` and `hatch.toml` for Python — see the
+[Supported Languages]({% link index.md %}) table.
 
 ### Exit Codes
 
