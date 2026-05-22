@@ -34,9 +34,10 @@ dependi-lsp scan --file <path> [options]
 | Option | Short | Default | Description |
 |--------|-------|---------|-------------|
 | `--file <path>` | `-f` | required | Path to dependency file |
-| `--output <format>` | `-o` | `summary` | Output format: `summary`, `json`, `markdown` |
+| `--output <format>` | `-o` | `summary` | Output format: `summary`, `json`, `markdown`, `html` |
 | `--min-severity <level>` | `-m` | `low` | Minimum severity: `low`, `medium`, `high`, `critical` |
 | `--fail-on-vulns` | | `true` | Exit with code 1 if vulnerabilities found |
+| `--no-use-lockfile` | | (off) | Disable lockfile-based scanning. By default, when a sibling lockfile from one of the wired ecosystems exists next to the manifest, the scanner resolves transitive dependencies from it. Pass this flag to scan only the manifest's direct dependencies. Lockfiles with full graph support today: `Cargo.lock`, `package-lock.json`, `yarn.lock`, `pnpm-lock.yaml`, `poetry.lock`, `uv.lock`, `Pipfile.lock`, `composer.lock`, `Gemfile.lock`. Lockfiles detected but currently treated as empty graphs (no transitive coverage): `bun.lock`, `pdm.lock`. Go (`go.sum`), Dart (`pubspec.lock`), .NET (`packages.lock.json`), and Maven have no lockfile graph parser yet — those scans only see direct dependencies regardless of this flag. |
 
 ### Supported Files
 
@@ -49,6 +50,14 @@ dependi-lsp scan --file <path> [options]
 | PHP | `composer.json` |
 | Dart | `pubspec.yaml` |
 | .NET | `*.csproj` |
+| Ruby | `Gemfile` |
+| Java | `pom.xml` |
+
+{: .note }
+The CLI `scan` subcommand only routes the files listed above. Inside the LSP
+(when editing in Zed) a broader set is recognised, including
+`constraints.txt` and `hatch.toml` for Python — see the
+[Supported Languages]({% link index.md %}) table.
 
 ### Exit Codes
 
