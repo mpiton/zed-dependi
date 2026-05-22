@@ -1,4 +1,4 @@
-use std::collections::BTreeSet;
+use std::{collections::BTreeSet, fs, process::Command};
 
 use toml::Value;
 
@@ -42,6 +42,45 @@ fn manifest_without_dependency(manifest: &str, dependency_name: &str) -> String 
 
 fn has_reqwest_network_capability(manifest: &str) -> bool {
     has_dependency(manifest, "reqwest") && !tokio_features(manifest).contains("net")
+}
+
+fn cargo_check_probe_succeeds(features: &[&str], main_rs: &str) -> bool {
+    let project = tempfile::tempdir().expect("probe temp dir is created");
+    let src_dir = project.path().join("src");
+    fs::create_dir(&src_dir).expect("probe src dir is created");
+    let feature_list = features
+        .iter()
+        .map(|feature| format!(r#""{feature}""#))
+        .collect::<Vec<_>>()
+        .join(", ");
+    fs::write(
+        project.path().join("Cargo.toml"),
+        format!(
+            r#"[package]
+name = "tokio-feature-probe"
+version = "0.0.0"
+edition = "2024"
+
+[dependencies]
+tokio = {{ version = "1.52.3", features = [{feature_list}] }}
+"#
+        ),
+    )
+    .expect("probe manifest is written");
+    fs::write(src_dir.join("main.rs"), main_rs).expect("probe main is written");
+
+    let cargo = std::env::var("CARGO").unwrap_or_else(|_| "cargo".to_string());
+    Command::new(cargo)
+        .arg("check")
+        .arg("--quiet")
+        .arg("--manifest-path")
+        .arg(project.path().join("Cargo.toml"))
+        .arg("--target-dir")
+        .arg(project.path().join("target"))
+        .output()
+        .expect("cargo check probe runs")
+        .status
+        .success()
 }
 
 fn expected_tokio_features() -> BTreeSet<String> {
@@ -226,33 +265,31 @@ fn missing_direct_tokio_features_break_required_capabilities() {
     // And the dependency graph violates R-02
     let cases = [
         (
-            r#"tokio = { version = "1.52.3", features = ["rt-multi-thread", "io-util", "io-std", "fs"] }"#,
-            "macros",
+            ["rt-multi-thread", "io-util", "io-std", "fs"].as_slice(),
+            "#[tokio::main]\nasync fn main() {}\n",
         ),
         (
-            r#"tokio = { version = "1.52.3", features = ["macros", "io-util", "io-std", "fs"] }"#,
-            "rt-multi-thread",
+            ["macros", "io-util", "io-std", "fs"].as_slice(),
+            "#[tokio::main]\nasync fn main() {}\n",
         ),
         (
-            r#"tokio = { version = "1.52.3", features = ["rt-multi-thread", "macros", "fs", "io-std"] }"#,
-            "io-util",
+            ["rt-multi-thread", "macros", "fs", "io-std"].as_slice(),
+            "use tokio::io::AsyncReadExt;\nfn main() {}\n",
         ),
         (
-            r#"tokio = { version = "1.52.3", features = ["rt-multi-thread", "macros", "io-util", "fs"] }"#,
-            "io-std",
+            ["rt-multi-thread", "macros", "io-util", "fs"].as_slice(),
+            "fn main() { let _stdin = tokio::io::stdin(); }\n",
         ),
         (
-            r#"tokio = { version = "1.52.3", features = ["rt-multi-thread", "macros", "io-util", "io-std"] }"#,
-            "fs",
+            ["rt-multi-thread", "macros", "io-util", "io-std"].as_slice(),
+            "fn main() { let _read = tokio::fs::read_to_string(\"Cargo.toml\"); }\n",
         ),
     ];
 
-    for (dependency, missing_feature) in cases {
-        let manifest = manifest_with_dependencies(dependency);
-        let features = tokio_features(&manifest);
+    for (enabled_features, capability_code) in cases {
         assert!(
-            missing_expected_tokio_features(&features).contains(missing_feature),
-            "{missing_feature} should be detected as missing from {features:?}"
+            !cargo_check_probe_succeeds(enabled_features, capability_code),
+            "{capability_code} should fail to compile with features {enabled_features:?}"
         );
     }
 }
