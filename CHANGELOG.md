@@ -18,10 +18,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   token-variable row clarifies that `.npmrc` `${VAR}` expansion is
   test-only and not wired into the runtime auth path.
 - `CONTRIBUTING.md`: added a **Developer Scripts** table covering
-  `build-and-deploy.sh`, `run-benchmarks.sh`, `scripts/coverage.sh`,
-  `scripts/fuzz.sh`, `scripts/profile-*.sh`, and
-  `scripts/check_mermaid_syntax.sh` so contributors discover the helper scripts
-  without grepping the repo root.
+  `run-benchmarks.sh`, `scripts/coverage.sh`, `scripts/fuzz.sh`,
+  `scripts/profile-*.sh`, and `scripts/check_mermaid_syntax.sh` so
+  contributors discover the helper scripts without grepping the repo
+  root. (`build-and-deploy.sh` is not included because it is
+  `.gitignore`d as a personal dev helper, not a tracked file.)
+- `docs/cli.md` and `README.md`: the `--no-use-lockfile` row now lists
+  only the lockfiles `run_scan` actually wires into a graph
+  (`Cargo.lock`, `package-lock.json`, `yarn.lock`, `pnpm-lock.yaml`,
+  `poetry.lock`, `uv.lock`, `Pipfile.lock`, `composer.lock`,
+  `Gemfile.lock`), calls out `bun.lock` and `pdm.lock` as detected but
+  empty, and notes that Go, Dart, .NET, and Maven have no lockfile
+  graph parser yet. Avoids implying transitive-vuln coverage for
+  ecosystems that fall through the `_ => {}` arm in `src/main.rs`.
 - `docs/cli.md`: documented the `html` output format and the
   `--no-use-lockfile` flag on `dependi-lsp scan`. Extended the **Supported
   Files** table with Ruby (`Gemfile`) and Java (`pom.xml`). Python

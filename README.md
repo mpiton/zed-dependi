@@ -351,7 +351,7 @@ dependi-lsp scan --file <path> [options]
 | `--output <format>` | `-o` | `summary` | Output format: `summary`, `json`, `markdown`, `html` |
 | `--min-severity <level>` | `-m` | `low` | Minimum severity to report: `low`, `medium`, `high`, `critical` |
 | `--fail-on-vulns` | | `true` | Exit with code 1 if vulnerabilities are found |
-| `--no-use-lockfile` | | (off) | Disable lockfile-based scanning. By default, when a sibling lockfile is present (`Cargo.lock`, `package-lock.json`, `pnpm-lock.yaml`, `yarn.lock`, `bun.lock`, `go.sum`, `composer.lock`, `pubspec.lock`, `packages.lock.json`, `Gemfile.lock`, `poetry.lock`, `uv.lock`, `pdm.lock`, `Pipfile.lock`), the scanner walks the full dependency graph; this flag restricts it to direct dependencies only. |
+| `--no-use-lockfile` | | (off) | Disable lockfile-based scanning. By default, when a sibling lockfile from one of the wired ecosystems is present, the scanner walks the full dependency graph; this flag restricts it to direct dependencies only. Lockfiles with full graph support today: `Cargo.lock`, `package-lock.json`, `yarn.lock`, `pnpm-lock.yaml`, `poetry.lock`, `uv.lock`, `Pipfile.lock`, `composer.lock`, `Gemfile.lock`. Lockfiles detected but currently treated as empty graphs: `bun.lock`, `pdm.lock`. Go (`go.sum`), Dart (`pubspec.lock`), .NET (`packages.lock.json`), and Maven have no lockfile graph parser yet. |
 
 #### Supported Files
 
