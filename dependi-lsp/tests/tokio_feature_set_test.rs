@@ -296,15 +296,39 @@ fn missing_direct_tokio_features_break_required_capabilities() {
             "fn main() { let _stdin = tokio::io::stdin(); }\n",
         ),
         (
-            ["rt-multi-thread", "macros", "io-util", "io-std", "sync", "time"].as_slice(),
+            [
+                "rt-multi-thread",
+                "macros",
+                "io-util",
+                "io-std",
+                "sync",
+                "time",
+            ]
+            .as_slice(),
             "fn main() { let _read = tokio::fs::read_to_string(\"Cargo.toml\"); }\n",
         ),
         (
-            ["rt-multi-thread", "macros", "io-util", "io-std", "fs", "time"].as_slice(),
+            [
+                "rt-multi-thread",
+                "macros",
+                "io-util",
+                "io-std",
+                "fs",
+                "time",
+            ]
+            .as_slice(),
             "fn main() { let _lock = tokio::sync::RwLock::new(0_u8); }\n",
         ),
         (
-            ["rt-multi-thread", "macros", "io-util", "io-std", "fs", "sync"].as_slice(),
+            [
+                "rt-multi-thread",
+                "macros",
+                "io-util",
+                "io-std",
+                "fs",
+                "sync",
+            ]
+            .as_slice(),
             "fn main() { let _f = tokio::time::sleep(std::time::Duration::from_millis(0)); }\n",
         ),
     ];
