@@ -395,9 +395,9 @@ any of them; they exist for advanced configuration and tests.
 | Variable | Used by | Description |
 |----------|---------|-------------|
 | `RUST_LOG` | `tracing-subscriber` | Log filter (e.g. `debug`, `dependi_lsp=trace`). |
-| `OSV_ENDPOINT` | `dependi-lsp` CLI (`scan`/`profile-*`) | Override the OSV.dev base URL for vulnerability queries. Used by the integration test harness to point at a local mock server; can also be set to a private OSV-compatible mirror. |
+| `OSV_ENDPOINT` | `dependi-lsp scan` | Override the OSV.dev base URL for vulnerability queries. Honored only by the `scan` subcommand (see `dependi-lsp/src/main.rs::run_scan`); `profile-parse`, `profile-registry`, and `profile-full` construct `OsvClient::default()` directly and ignore this variable. Used by the integration test harness to point at a local mock server; can also be set to a private OSV-compatible mirror. |
 | `CARGO_HOME` | Cargo registry auth resolver | Standard Cargo variable. When set, the LSP reads `${CARGO_HOME}/credentials.toml` instead of `~/.cargo/credentials.toml` to discover alternative registry tokens. |
-| `GITHUB_TOKEN` | npm registry auth (`.npmrc` `${VAR}` expansion) | Resolved when an `.npmrc` line references it, e.g. `//npm.pkg.github.com/:_authToken=${GITHUB_TOKEN}`. The variable name itself is not special — any name referenced from `.npmrc` is read from the environment. |
+| `<TOKEN_VAR>` (e.g. `GITHUB_TOKEN`, `COMPANY_NPM_TOKEN`) | `EnvTokenProvider` in `src/auth/mod.rs` | Read at LSP startup for every registry whose settings declare `"auth": { "type": "env", "variable": "<NAME>" }` (Cargo alternative registries and npm scoped registries — see the configuration examples above). The variable name is whatever the JSON references; there are no hardcoded names. Note: `.npmrc` `${VAR}` expansion is **not** currently wired into the runtime auth path (`src/auth/npmrc.rs` is test-only, gated on `#[cfg(test)]`) — tokens must come from LSP settings. |
 
 #### Example — pointing `scan` at a mock OSV server
 

@@ -10,8 +10,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Documentation
 
 - `docs/configuration.md`: added an **Environment Variables** subsection
-  documenting `RUST_LOG`, `OSV_ENDPOINT`, `CARGO_HOME`, and `GITHUB_TOKEN`.
-  `OSV_ENDPOINT` was previously only discoverable from `dependi-lsp/src/main.rs`.
+  documenting `RUST_LOG`, `OSV_ENDPOINT`, `CARGO_HOME`, and the
+  `EnvTokenProvider` token-variable pattern used by Cargo alternative
+  registries and npm scoped registries. The `OSV_ENDPOINT` row now
+  reflects that only the `scan` subcommand reads it (the three
+  `profile-*` paths construct `OsvClient::default()` directly), and the
+  token-variable row clarifies that `.npmrc` `${VAR}` expansion is
+  test-only and not wired into the runtime auth path.
 - `CONTRIBUTING.md`: added a **Developer Scripts** table covering
   `build-and-deploy.sh`, `run-benchmarks.sh`, `scripts/coverage.sh`,
   `scripts/fuzz.sh`, `scripts/profile-*.sh`, and
