@@ -3,6 +3,7 @@ use std::collections::BTreeSet;
 use toml::Value;
 
 const DEPENDI_LSP_MANIFEST: &str = include_str!("../Cargo.toml");
+const TOKIO_FEATURE_MEASUREMENTS: &str = include_str!("fixtures/tokio_feature_measurements.toml");
 const EXPECTED_TOKIO_FEATURES: [&str; 5] = ["fs", "io-std", "io-util", "macros", "rt-multi-thread"];
 
 fn tokio_features(manifest: &str) -> BTreeSet<String> {
@@ -27,6 +28,20 @@ fn manifest_with_dependencies(dependencies: &str) -> String {
 fn has_dependency(manifest: &str, dependency_name: &str) -> bool {
     let manifest = toml::from_str::<Value>(manifest).expect("manifest fixture is valid TOML");
     manifest["dependencies"].get(dependency_name).is_some()
+}
+
+fn manifest_without_dependency(manifest: &str, dependency_name: &str) -> String {
+    let mut manifest = toml::from_str::<Value>(manifest).expect("manifest fixture is valid TOML");
+    manifest["dependencies"]
+        .as_table_mut()
+        .expect("manifest has dependency table")
+        .remove(dependency_name)
+        .expect("dependency exists before removal");
+    toml::to_string(&manifest).expect("mutated manifest serializes as TOML")
+}
+
+fn has_reqwest_network_capability(manifest: &str) -> bool {
+    has_dependency(manifest, "reqwest") && !tokio_features(manifest).contains("net")
 }
 
 fn expected_tokio_features() -> BTreeSet<String> {
@@ -58,6 +73,24 @@ fn performance_floor_satisfied(
 ) -> bool {
     trimmed_binary_size * 100 <= baseline_binary_size * 95
         && trimmed_clean_seconds * 100 <= baseline_clean_seconds * 90
+}
+
+fn measurement_case(case_name: &str) -> (u64, u64, u64, u64) {
+    let fixture =
+        toml::from_str::<Value>(TOKIO_FEATURE_MEASUREMENTS).expect("measurement fixture is valid");
+    let case = &fixture["cases"][case_name];
+    let get_u64 = |key: &str| {
+        case[key]
+            .as_integer()
+            .unwrap_or_else(|| panic!("{case_name}.{key} is an integer")) as u64
+    };
+
+    (
+        get_u64("baseline_binary_size"),
+        get_u64("baseline_clean_seconds"),
+        get_u64("trimmed_binary_size"),
+        get_u64("trimmed_clean_seconds"),
+    )
 }
 
 #[derive(Debug)]
@@ -231,11 +264,10 @@ fn missing_reqwest_support_breaks_network_capability() {
     // When `cargo check -p dependi-lsp` runs
     // Then code issuing an HTTPS request through `reqwest::Client` fails to compile
     // And the dependency graph violates R-02
-    let manifest = manifest_with_dependencies(
-        r#"tokio = { version = "1.52.3", features = ["rt-multi-thread", "macros", "io-util", "io-std", "fs"] }"#,
-    );
+    let manifest = manifest_without_dependency(DEPENDI_LSP_MANIFEST, "reqwest");
 
-    assert!(!has_dependency(&manifest, "reqwest"));
+    assert!(has_reqwest_network_capability(DEPENDI_LSP_MANIFEST));
+    assert!(!has_reqwest_network_capability(&manifest));
 }
 
 #[test]
@@ -263,12 +295,17 @@ fn trimmed_build_meets_the_minimum_improvement_floor() {
     // Then the binary-size reduction is at least 5 percent
     // And the clean-build-time reduction is at least 10 percent
     // And the performance result satisfies R-03
-    assert!(performance_floor_satisfied(
-        50_000_000, 120, 47_500_000, 108
-    ));
-    assert!(performance_floor_satisfied(
-        50_000_000, 120, 45_000_000, 102
-    ));
+    for case_name in ["pass_lower_bound", "pass_inside_range"] {
+        let (baseline_binary, baseline_seconds, trimmed_binary, trimmed_seconds) =
+            measurement_case(case_name);
+
+        assert!(performance_floor_satisfied(
+            baseline_binary,
+            baseline_seconds,
+            trimmed_binary,
+            trimmed_seconds
+        ));
+    }
 }
 
 #[test]
@@ -279,12 +316,17 @@ fn trimmed_build_below_either_improvement_floor_fails_the_rule() {
     // And the trimmed Tokio clean build takes <trimmed_build_seconds> seconds
     // When the improvement is calculated against the baseline
     // Then the performance result violates R-03 with reason "<reason>"
-    assert!(!performance_floor_satisfied(
-        50_000_000, 120, 48_000_000, 108
-    ));
-    assert!(!performance_floor_satisfied(
-        50_000_000, 120, 47_500_000, 109
-    ));
+    for case_name in ["fail_binary", "fail_build_time"] {
+        let (baseline_binary, baseline_seconds, trimmed_binary, trimmed_seconds) =
+            measurement_case(case_name);
+
+        assert!(!performance_floor_satisfied(
+            baseline_binary,
+            baseline_seconds,
+            trimmed_binary,
+            trimmed_seconds
+        ));
+    }
 }
 
 #[test]
