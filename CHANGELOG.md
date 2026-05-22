@@ -7,6 +7,22 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Documentation
+
+- `docs/configuration.md`: added an **Environment Variables** subsection
+  documenting `RUST_LOG`, `OSV_ENDPOINT`, `CARGO_HOME`, and `GITHUB_TOKEN`.
+  `OSV_ENDPOINT` was previously only discoverable from `dependi-lsp/src/main.rs`.
+- `CONTRIBUTING.md`: added a **Developer Scripts** table covering
+  `build-and-deploy.sh`, `run-benchmarks.sh`, `scripts/coverage.sh`,
+  `scripts/fuzz.sh`, `scripts/profile-*.sh`, and
+  `scripts/check_mermaid_syntax.sh` so contributors discover the helper scripts
+  without grepping the repo root.
+- `docs/cli.md`: documented the `html` output format and the
+  `--no-use-lockfile` flag on `dependi-lsp scan`. Extended the **Supported
+  Files** table with Ruby (`Gemfile`), Java (`pom.xml`), and the previously
+  missing Python entries (`constraints.txt`, `hatch.toml`) so the CLI
+  reference now matches `dependi-lsp/src/file_types.rs`.
+
 ### Changed
 
 - Declared `tokio` features explicitly in `dependi-lsp/Cargo.toml`: the

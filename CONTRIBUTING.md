@@ -400,6 +400,22 @@ cargo clippy --all-targets -- -D warnings
 cargo test
 ```
 
+### Developer Scripts
+
+Helper scripts live at the repo root and in `scripts/`. All paths are relative to
+the repository root.
+
+| Script | Purpose |
+|--------|---------|
+| `./build-and-deploy.sh` | Build the LSP in release mode and copy the binary into the local `dependi-zed/dependi-lsp-1.0.0/` dev-extension dir plus every installed `~/.local/share/zed/extensions/work/dependi/dependi-lsp-v*` directory (macOS path under `~/Library/Application Support/Zed/...`). Restart Zed afterwards. |
+| `./run-benchmarks.sh [FILTER]` | Run Criterion benchmarks. Flags: `--baseline` saves results as `main` baseline; `--compare` diffs the current run against it. Opens the HTML report when a browser opener is available. |
+| `scripts/coverage.sh` | Generate test coverage with `cargo-tarpaulin` (HTML + JSON in `coverage/`). Honors `FAIL_UNDER=<pct>` to fail the run below a threshold. |
+| `scripts/fuzz.sh [TARGET] [SECONDS]` | Run cargo-fuzz targets via the nightly toolchain. `--list` enumerates targets; default duration is 30s per target. See the Fuzz Testing section above. |
+| `scripts/profile-parse.sh [FILE] [ITERATIONS]` | Flamegraph profile of the parser hot path. Requires `cargo install flamegraph`. |
+| `scripts/profile-registry.sh [FILE] [ITERATIONS]` | Flamegraph profile of registry client fetches. |
+| `scripts/profile-full.sh [FILE] [ITERATIONS]` | Flamegraph profile of the full document-processing workflow (parse + registry + cache + vulnerabilities). |
+| `scripts/check_mermaid_syntax.sh [DOC.md]` | Validate every fenced ` ```mermaid ` block in a markdown file using `@mermaid-js/mermaid-cli`. Defaults to `docs/architecture.md`. Used in CI to prevent broken diagrams. |
+
 ## Bug Reports
 
 When reporting bugs, please include:

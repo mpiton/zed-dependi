@@ -34,9 +34,10 @@ dependi-lsp scan --file <path> [options]
 | Option | Short | Default | Description |
 |--------|-------|---------|-------------|
 | `--file <path>` | `-f` | required | Path to dependency file |
-| `--output <format>` | `-o` | `summary` | Output format: `summary`, `json`, `markdown` |
+| `--output <format>` | `-o` | `summary` | Output format: `summary`, `json`, `markdown`, `html` |
 | `--min-severity <level>` | `-m` | `low` | Minimum severity: `low`, `medium`, `high`, `critical` |
 | `--fail-on-vulns` | | `true` | Exit with code 1 if vulnerabilities found |
+| `--no-use-lockfile` | | (off) | Disable lockfile-based scanning. By default, when a sibling lockfile (e.g. `Cargo.lock`, `package-lock.json`, `pnpm-lock.yaml`, `go.sum`, `composer.lock`, `pubspec.lock`, `packages.lock.json`, `Gemfile.lock`) exists next to the manifest, the scanner resolves transitive dependencies from it. Pass this flag to scan only the manifest's direct dependencies. |
 
 ### Supported Files
 
@@ -44,11 +45,13 @@ dependi-lsp scan --file <path> [options]
 |----------|-------|
 | Rust | `Cargo.toml` |
 | Node.js | `package.json` |
-| Python | `requirements.txt`, `pyproject.toml` |
+| Python | `requirements.txt`, `constraints.txt`, `pyproject.toml`, `hatch.toml` |
 | Go | `go.mod` |
 | PHP | `composer.json` |
 | Dart | `pubspec.yaml` |
 | .NET | `*.csproj` |
+| Ruby | `Gemfile` |
+| Java | `pom.xml` |
 
 ### Exit Codes
 
