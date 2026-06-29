@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.9.1] - 2026-06-29
+
 ### Documentation
 
 - `docs/configuration.md`: added an **Environment Variables** subsection
@@ -67,6 +69,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `vulnerabilities::osv` test server's use of `tokio::net::TcpListener`
   no longer depends on `wiremock`'s transitive feature enablement.
   ([#336](https://github.com/mpiton/zed-dependi/pull/336))
+- Updated Rust dependencies and GitHub Actions to the latest Dependabot
+  targets, including `anyhow`, `chrono`, `reqwest`, `rusqlite`,
+  `serde_json`, `regex`, `serial_test`, `actions/checkout`, and
+  `actions/cache`. The lockfile also updates `quinn-proto` to 0.11.15
+  for the latest RustSec advisory, and checkout steps now disable
+  persisted Git credentials. ([#348](https://github.com/mpiton/zed-dependi/pull/348))
 
 ## [1.9.0] - 2026-05-20
 
@@ -749,7 +757,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - In-memory caching for version data
 - Parallel registry requests (5 concurrent)
 
-[Unreleased]: https://github.com/mpiton/zed-dependi/compare/v1.9.0...HEAD
+[Unreleased]: https://github.com/mpiton/zed-dependi/compare/v1.9.1...HEAD
+[1.9.1]: https://github.com/mpiton/zed-dependi/compare/v1.9.0...v1.9.1
 [1.9.0]: https://github.com/mpiton/zed-dependi/compare/v1.8.1...v1.9.0
 [1.8.1]: https://github.com/mpiton/zed-dependi/compare/v1.8.0...v1.8.1
 [1.8.0]: https://github.com/mpiton/zed-dependi/compare/v1.7.0...v1.8.0
