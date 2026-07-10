@@ -218,7 +218,7 @@ fn validate_latest(latest: &str, file_type: FileType) -> Option<&str> {
 
 fn is_version_token(token: &str, file_type: FileType) -> bool {
     if token.is_empty()
-        || (file_type != FileType::Go && token.starts_with('v'))
+        || (!matches!(file_type, FileType::Go | FileType::Python) && token.starts_with('v'))
         || token.contains("..")
         || token.ends_with(['.', '-', '+', '_', '!'])
         || token.bytes().any(|byte| {
@@ -521,11 +521,18 @@ mod tests {
     }
 
     #[test]
-    fn rejects_v_prefixed_versions_outside_go() {
+    fn renders_python_v_prefixed_constraint() {
+        assert_eq!(
+            render_version_update(&dependency("==v1.2"), "2.3.4", FileType::Python),
+            Some("==2.3.4".to_string())
+        );
+    }
+
+    #[test]
+    fn rejects_v_prefixed_versions_outside_go_and_python() {
         let cases = [
             (FileType::Cargo, "^v1.2"),
             (FileType::Npm, "^v1.2"),
-            (FileType::Python, "==v1.2"),
             (FileType::Php, "^v1.2"),
             (FileType::Dart, "^v1.2"),
             (FileType::Csharp, "[v1.2]"),
