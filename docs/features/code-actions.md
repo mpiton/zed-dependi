@@ -114,7 +114,8 @@ This encourages safer update practices while still making major updates accessib
 
 ## Version Constraints
 
-Code actions respect your version constraint syntax:
+Code actions preserve the structure of simple, recognized version constraints.
+The same safety rules apply to individual and bulk updates:
 
 | Original | Action | Result |
 |----------|--------|--------|
@@ -122,6 +123,22 @@ Code actions respect your version constraint syntax:
 | `"^1.0.0"` | Update to 1.5.0 | `"^1.5.0"` |
 | `"~1.0.0"` | Update to 1.0.5 | `"~1.0.5"` |
 | `">=1.0"` | Update to 1.5.0 | `">=1.5.0"` |
+| `"~=14.2"` | Update to 14.3.3 | `"~=14.3"` |
+| `"~> 7.0"` | Update to 8.1.4 | `"~> 8.1"` |
+| `"[1.0]"` | Update to 2.0 | `"[2.0]"` |
+
+Operators, spacing, exact-version wrappers, and range-shaping precision are
+retained when Dependi can prove that replacing the single version anchor is
+safe. Go module updates preserve exactly one existing `v` prefix. Unprefixed,
+multiply-prefixed, or otherwise unsupported prefix shapes receive no automatic
+update.
+
+Compound ranges and indirect versions do not receive automatic update actions.
+This includes multiple bounds, unions, wildcards, strict or exclusion
+constraints, aliases, workspace protocols, pnpm catalogs, Maven properties,
+URLs, and other unknown forms. Dependi omits the update instead of replacing
+the declaration with a bare version; other actions such as **Ignore package**
+remain available.
 
 ## Workflow Tips
 

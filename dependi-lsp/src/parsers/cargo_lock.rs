@@ -561,6 +561,7 @@ version = "1.0.0"
             optional: false,
             registry: None,
             resolved_version: None,
+            has_additional_version_constraints: false,
         };
         // Root package's dependency string `"multi 1.0.0"` should override
         // the first-wins `"2.0.0"` from the graph order.
@@ -603,6 +604,7 @@ version = "5.5.5"
             optional: false,
             registry: None,
             resolved_version: None,
+            has_additional_version_constraints: false,
         };
         assert_eq!(
             resolver.resolve_version(&dep, &graph),

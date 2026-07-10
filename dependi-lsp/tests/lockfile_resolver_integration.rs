@@ -27,6 +27,7 @@ fn dep(name: &str, version: &str) -> Dependency {
         optional: false,
         registry: None,
         resolved_version: None,
+        has_additional_version_constraints: false,
     }
 }
 

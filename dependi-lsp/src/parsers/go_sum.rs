@@ -306,6 +306,7 @@ github.com/foo/bar v1.0.0
             optional: false,
             registry: None,
             resolved_version: None,
+            has_additional_version_constraints: false,
         };
         assert_eq!(
             resolver.resolve_version(&dep_with_match, &graph),
@@ -371,6 +372,7 @@ github.com/foo/bar v1.0.0
             optional: false,
             registry: None,
             resolved_version: None,
+            has_additional_version_constraints: false,
         };
         // Two identical entries collapse to one unique candidate → return it.
         assert_eq!(

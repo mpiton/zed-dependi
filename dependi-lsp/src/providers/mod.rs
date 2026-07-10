@@ -18,3 +18,5 @@ pub mod document_links;
 
 /// Inlay hint provider (latest version shown next to the declared version).
 pub mod inlay_hints;
+
+pub(crate) mod version_edit;

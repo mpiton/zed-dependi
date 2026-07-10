@@ -174,6 +174,7 @@ fn parse_require_with_positions(
         optional: is_indirect,
         registry: None,
         resolved_version: None,
+        has_additional_version_constraints: false,
     })
 }
 

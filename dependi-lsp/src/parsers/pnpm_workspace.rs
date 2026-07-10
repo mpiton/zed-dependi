@@ -431,6 +431,7 @@ fn parse_catalog_entry(line_number: u32, line: &str) -> Option<Dependency> {
         optional: false,
         registry: None,
         resolved_version: None,
+        has_additional_version_constraints: false,
     })
 }
 
@@ -477,6 +478,7 @@ fn parse_flow_catalog_entry(
         optional: false,
         registry: None,
         resolved_version: None,
+        has_additional_version_constraints: false,
     })
 }
 

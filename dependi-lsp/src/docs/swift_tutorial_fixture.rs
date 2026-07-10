@@ -42,6 +42,7 @@
 //!     optional: false,
 //!     registry: None,
 //!     resolved_version: None,
+//!     has_additional_version_constraints: false,
 //! };
 //! assert_eq!(dep.effective_version(), "1.3.0");
 //! ```
@@ -103,6 +104,7 @@
 //!                 optional: false,
 //!                 registry: None,
 //!                 resolved_version: None,
+//!                 has_additional_version_constraints: false,
 //!             });
 //!         }
 //!         deps
@@ -240,6 +242,7 @@
 //!             optional: false,
 //!             registry: None,
 //!             resolved_version: None,
+//!             has_additional_version_constraints: false,
 //!         }]
 //!     }
 //! }

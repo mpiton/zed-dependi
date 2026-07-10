@@ -80,15 +80,12 @@ fn parse_package_reference(line: &str, line_num: u32) -> Option<Dependency> {
         let version_content = &line[version_attr_start + 9..];
         let version_end = version_content.find('"')?;
         version_content[..version_end].to_string()
-    } else if let Some(version_elem_start) = line.find("<Version>") {
+    } else {
+        let version_elem_start = line.find("<Version>")?;
         // Format: <Version>1.0.0</Version>
         let version_content = &line[version_elem_start + 9..];
         let version_end = version_content.find('<')?;
         version_content[..version_end].to_string()
-    } else {
-        // Version might be centrally managed (Directory.Packages.props)
-        // Skip for now
-        return None;
     };
 
     // Calculate positions
@@ -117,6 +114,7 @@ fn parse_package_reference(line: &str, line_num: u32) -> Option<Dependency> {
         optional: false,
         registry: None,
         resolved_version: None,
+        has_additional_version_constraints: false,
     })
 }
 

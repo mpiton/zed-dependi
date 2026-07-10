@@ -288,6 +288,7 @@ fn extract_dependencies(content: &str, properties: &HashMap<String, String>) -> 
                                 optional,
                                 registry: None,
                                 resolved_version,
+                                has_additional_version_constraints: false,
                             });
                         }
                     }
