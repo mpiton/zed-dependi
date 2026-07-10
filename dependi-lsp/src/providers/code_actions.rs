@@ -20,6 +20,7 @@ use crate::cache::ReadCache;
 use crate::file_types::FileType;
 use crate::parsers::Dependency;
 use crate::providers::inlay_hints::{VersionStatus, compare_versions};
+use crate::providers::version_edit::render_version_update;
 
 /// Classification of a semantic-version bump.
 ///
@@ -194,8 +195,8 @@ pub async fn create_code_actions(
     //   - ignore_candidates:  in-range, non-ignored — eligible for the Ignore action
     //                         (property refs CAN still be ignored even though they
     //                         can't safely be Updated)
-    //   - update_candidates:  in-range, non-ignored, NOT managed indirectly —
-    //                         eligible for individual Update actions
+    // Update safety is decided by the shared renderer after version comparison;
+    // ignore candidates stay independent so unsafe declarations remain ignorable.
     let non_ignored: Vec<&Dependency> = dependencies
         .iter()
         .filter(|dep| !crate::config::is_package_ignored(&dep.name, ignored))
@@ -207,15 +208,9 @@ pub async fn create_code_actions(
         .filter(|dep| (range.start.line..=range.end.line).contains(&dep.version_span.line))
         .collect();
 
-    let update_candidates: Vec<&Dependency> = ignore_candidates
-        .iter()
-        .copied()
-        .filter(|dep| !is_indirectly_managed_version(dep))
-        .collect();
-
     let mut actions: Vec<CodeActionOrCommand> = Vec::new();
 
-    for dep in &update_candidates {
+    for dep in &ignore_candidates {
         if let Some(update) = create_update_action(dep, cache, uri, file_type, &cache_key_fn).await
         {
             actions.push(update);
@@ -239,31 +234,6 @@ pub async fn create_code_actions(
     actions
 }
 
-/// Whether the manifest text at `version_span` is a Maven property reference
-/// (e.g. `${spring.version}`). Replacing the placeholder with a literal would
-/// silently break property-driven version management for every other artifact
-/// sharing the same property — so the "update version" quick-fix is suppressed.
-fn is_property_reference(dep: &Dependency) -> bool {
-    dep.version.starts_with("${") && dep.version.ends_with('}')
-}
-
-fn is_catalog_reference(dep: &Dependency) -> bool {
-    dep.version.starts_with("catalog:")
-}
-
-fn is_indirectly_managed_version(dep: &Dependency) -> bool {
-    is_property_reference(dep) || is_catalog_reference(dep)
-}
-
-/// Extract Python version operator prefix from a version string (e.g., "~=" from "~=14.3")
-fn extract_python_operator(version: &str) -> Option<&str> {
-    let operators = ["===", "~=", "==", ">=", "<=", "!=", ">", "<"];
-    operators
-        .iter()
-        .find(|op| version.starts_with(*op))
-        .copied()
-}
-
 /// Create an "Update to X.Y.Z" code action for a dependency
 async fn create_update_action(
     dep: &Dependency,
@@ -279,7 +249,7 @@ async fn create_update_action(
     match compare_versions(dep.effective_version(), &version_info) {
         VersionStatus::UpdateAvailable(new_version) => {
             let update_type = compare_update_type(dep.effective_version(), &new_version);
-            let new_text = format_version_for_dep(&new_version, file_type, &dep.version);
+            let new_text = render_version_update(dep, &new_version, file_type)?;
 
             let edit = TextEdit {
                 range: Range {
@@ -367,15 +337,13 @@ async fn create_update_all_action(
     // number of `spawn_blocking` SQLite jobs (which are not cancelable). Tag each
     // future with its index so we can stitch results back to the right Dependency.
     const PREFETCH_CONCURRENCY: usize = 8;
-    let filtered: Vec<&Dependency> = dependencies
+    let cache_keys: Vec<String> = dependencies
         .iter()
-        .copied()
-        .filter(|dep| !is_indirectly_managed_version(dep))
+        .map(|dep| cache_key_fn(&dep.name))
         .collect();
 
-    let cache_keys: Vec<String> = filtered.iter().map(|dep| cache_key_fn(&dep.name)).collect();
-
-    let mut cache_results: Vec<Option<crate::registries::VersionInfo>> = vec![None; filtered.len()];
+    let mut cache_results: Vec<Option<crate::registries::VersionInfo>> =
+        vec![None; dependencies.len()];
     let lookups = cache_keys
         .into_iter()
         .enumerate()
@@ -385,39 +353,37 @@ async fn create_update_all_action(
         cache_results[idx] = value;
     }
 
-    let mut outdated_deps: Vec<(&Dependency, String)> = Vec::new();
-    for (dep, version_info) in filtered.iter().zip(cache_results) {
+    let mut safe_updates: Vec<(&Dependency, String)> = Vec::new();
+    for (dep, version_info) in dependencies.iter().copied().zip(cache_results) {
         let Some(version_info) = version_info else {
             continue;
         };
         if let VersionStatus::UpdateAvailable(new_version) =
             compare_versions(dep.effective_version(), &version_info)
+            && let Some(new_text) = render_version_update(dep, &new_version, file_type)
         {
-            outdated_deps.push((dep, new_version));
+            safe_updates.push((dep, new_text));
         }
     }
 
-    if outdated_deps.len() < 2 {
+    if safe_updates.len() < 2 {
         return None;
     }
 
-    let edits: Vec<TextEdit> = outdated_deps
+    let edits: Vec<TextEdit> = safe_updates
         .iter()
-        .map(|(dep, new_version)| {
-            let new_text = format_version_for_dep(new_version, file_type, &dep.version);
-            TextEdit {
-                range: Range {
-                    start: Position {
-                        line: dep.version_span.line,
-                        character: dep.version_span.line_start,
-                    },
-                    end: Position {
-                        line: dep.version_span.line,
-                        character: dep.version_span.line_end,
-                    },
+        .map(|(dep, new_text)| TextEdit {
+            range: Range {
+                start: Position {
+                    line: dep.version_span.line,
+                    character: dep.version_span.line_start,
                 },
-                new_text,
-            }
+                end: Position {
+                    line: dep.version_span.line,
+                    character: dep.version_span.line_end,
+                },
+            },
+            new_text: new_text.clone(),
         })
         .collect();
 
@@ -428,7 +394,7 @@ async fn create_update_all_action(
     let mut changes = std::collections::HashMap::new();
     changes.insert(uri.clone(), edits);
 
-    let count = outdated_deps.len();
+    let count = safe_updates.len();
     let title = format!("Update all {count} dependencies");
 
     Some(CodeActionOrCommand::CodeAction(CodeAction {
@@ -445,61 +411,6 @@ async fn create_update_all_action(
         disabled: None,
         data: None,
     }))
-}
-
-/// Format version string based on file type
-fn format_version(version: &str, file_type: FileType) -> String {
-    match file_type {
-        FileType::Cargo | FileType::Npm | FileType::Php => {
-            // Keep the version as-is. version_span covers the inner token text
-            // only (no surrounding quotes), so callers replace just the version
-            // literal and the existing quote pair is preserved.
-            version.to_string()
-        }
-        FileType::Python => {
-            // Python uses operators like == or >=
-            // Just replace the version number
-            version.to_string()
-        }
-        FileType::Go => {
-            // Go versions start with 'v'
-            if version.starts_with('v') {
-                version.to_string()
-            } else {
-                format!("v{version}")
-            }
-        }
-        FileType::Dart => {
-            // Dart pubspec.yaml uses caret syntax (^1.0.0) or simple versions
-            version.to_string()
-        }
-        FileType::Csharp => {
-            // C# .csproj uses simple version strings
-            version.to_string()
-        }
-        FileType::Ruby => {
-            // Ruby Gemfile uses operators like ~> or >=
-            version.to_string()
-        }
-        FileType::Maven => {
-            // Maven pom.xml uses plain version strings inside <version>...</version>
-            version.to_string()
-        }
-    }
-}
-
-/// Format version for a dependency update, preserving the original operator for Python
-fn format_version_for_dep(
-    new_version: &str,
-    file_type: FileType,
-    original_version: &str,
-) -> String {
-    if file_type == FileType::Python
-        && let Some(op) = extract_python_operator(original_version)
-    {
-        return format!("{op}{}", format_version(new_version, file_type));
-    }
-    format_version(new_version, file_type)
 }
 
 #[cfg(test)]
@@ -527,6 +438,7 @@ mod tests {
             optional: false,
             registry: None,
             resolved_version: None,
+            has_additional_version_constraints: false,
         }
     }
 
@@ -663,15 +575,6 @@ mod tests {
         .await;
 
         assert_eq!(actions.len(), 0);
-    }
-
-    #[test]
-    fn test_format_version() {
-        assert_eq!(format_version("1.0.0", FileType::Cargo), "1.0.0");
-        assert_eq!(format_version("1.0.0", FileType::Npm), "1.0.0");
-        assert_eq!(format_version("1.0.0", FileType::Python), "1.0.0");
-        assert_eq!(format_version("1.0.0", FileType::Go), "v1.0.0");
-        assert_eq!(format_version("v1.0.0", FileType::Go), "v1.0.0");
     }
 
     #[tokio::test]
@@ -1086,20 +989,6 @@ mod tests {
     }
 
     #[test]
-    fn test_format_version_all_file_types() {
-        assert_eq!(format_version("1.0.0", FileType::Cargo), "1.0.0");
-        assert_eq!(format_version("1.0.0", FileType::Npm), "1.0.0");
-        assert_eq!(format_version("1.0.0", FileType::Python), "1.0.0");
-        assert_eq!(format_version("1.0.0", FileType::Go), "v1.0.0");
-        assert_eq!(format_version("v1.0.0", FileType::Go), "v1.0.0");
-        assert_eq!(format_version("1.0.0", FileType::Php), "1.0.0");
-        assert_eq!(format_version("1.0.0", FileType::Dart), "1.0.0");
-        assert_eq!(format_version("1.0.0", FileType::Csharp), "1.0.0");
-        assert_eq!(format_version("1.0.0", FileType::Ruby), "1.0.0");
-        assert_eq!(format_version("1.0.0", FileType::Maven), "1.0.0");
-    }
-
-    #[test]
     fn test_normalize_version_with_partial_versions() {
         let normalized = super::normalize_version("1");
         assert_eq!(normalized, "1.0.0");
@@ -1137,30 +1026,6 @@ mod tests {
 
         let normalized = super::normalize_version("!=1.0");
         assert_eq!(normalized, "1.0.0");
-    }
-
-    #[test]
-    fn test_format_version_for_dep_python_compatible_release() {
-        // ~= operator should be preserved in replacement
-        assert_eq!(
-            format_version_for_dep("14.3", FileType::Python, "~=14.2"),
-            "~=14.3"
-        );
-        // == operator preserved
-        assert_eq!(
-            format_version_for_dep("3.0.0", FileType::Python, "==2.0.0"),
-            "==3.0.0"
-        );
-        // >= operator preserved
-        assert_eq!(
-            format_version_for_dep("3.0.0", FileType::Python, ">=2.0.0"),
-            ">=3.0.0"
-        );
-        // Non-Python file types are unchanged
-        assert_eq!(
-            format_version_for_dep("2.0.0", FileType::Cargo, "1.0.0"),
-            "2.0.0"
-        );
     }
 
     #[tokio::test]
@@ -1699,5 +1564,214 @@ mod tests {
         assert_eq!(ignore.kind, Some(CodeActionKind::QUICKFIX));
         assert_eq!(ignore.is_preferred, Some(false));
         assert!(ignore.edit.is_some());
+    }
+
+    #[tokio::test]
+    async fn npm_update_preserves_the_declared_caret() {
+        let cache = MemoryCache::new();
+        cache
+            .insert(
+                "test:package".to_string(),
+                VersionInfo {
+                    latest: Some("5.1.0".to_string()),
+                    ..Default::default()
+                },
+            )
+            .await;
+        let deps = vec![create_test_dependency("package", "^4.0.2", 1)];
+        let uri = Url::parse("file:///test/package.json").unwrap();
+        let range = Range {
+            start: Position::new(1, 0),
+            end: Position::new(1, 100),
+        };
+
+        let actions = create_code_actions(
+            &deps,
+            &cache,
+            &uri,
+            range,
+            FileType::Npm,
+            |name| format!("test:{name}"),
+            &[],
+            None,
+            None,
+        )
+        .await;
+
+        let CodeActionOrCommand::CodeAction(action) = &actions[0] else {
+            panic!("expected code action");
+        };
+        let edit = &action.edit.as_ref().unwrap().changes.as_ref().unwrap()[&uri][0];
+        assert_eq!(edit.new_text, "^5.1.0");
+    }
+
+    #[tokio::test]
+    async fn unsafe_constraint_keeps_only_the_ignore_action() {
+        let cache = MemoryCache::new();
+        cache
+            .insert(
+                "test:package".to_string(),
+                VersionInfo {
+                    latest: Some("2.0.0".to_string()),
+                    ..Default::default()
+                },
+            )
+            .await;
+        let deps = vec![create_test_dependency("package", ">=1.0,<2.0", 1)];
+        let uri = Url::parse("file:///test/requirements.txt").unwrap();
+        let range = Range {
+            start: Position::new(1, 0),
+            end: Position::new(1, 100),
+        };
+        let workspace = std::path::Path::new("/tmp/ws");
+
+        let actions = create_code_actions(
+            &deps,
+            &cache,
+            &uri,
+            range,
+            FileType::Python,
+            |name| format!("test:{name}"),
+            &[],
+            Some(workspace),
+            None,
+        )
+        .await;
+
+        assert_eq!(actions.len(), 1);
+        let CodeActionOrCommand::CodeAction(action) = &actions[0] else {
+            panic!("expected code action");
+        };
+        assert_eq!(action.title, "Ignore package \"package\"");
+    }
+
+    #[tokio::test]
+    async fn bulk_update_counts_and_edits_only_safe_constraints() {
+        let cache = MemoryCache::new();
+        for name in ["caret", "compound", "tilde"] {
+            cache
+                .insert(
+                    format!("test:{name}"),
+                    VersionInfo {
+                        latest: Some("2.1.0".to_string()),
+                        ..Default::default()
+                    },
+                )
+                .await;
+        }
+        let deps = vec![
+            create_test_dependency("caret", "^1.0.0", 1),
+            create_test_dependency("compound", ">=1.0.0 <2.0.0", 2),
+            create_test_dependency("tilde", "~1.0.0", 3),
+        ];
+        let uri = Url::parse("file:///test/package.json").unwrap();
+        let outside_range = Range {
+            start: Position::new(50, 0),
+            end: Position::new(50, 0),
+        };
+
+        let actions = create_code_actions(
+            &deps,
+            &cache,
+            &uri,
+            outside_range,
+            FileType::Npm,
+            |name| format!("test:{name}"),
+            &[],
+            None,
+            None,
+        )
+        .await;
+
+        assert_eq!(actions.len(), 1);
+        let CodeActionOrCommand::CodeAction(action) = &actions[0] else {
+            panic!("expected code action");
+        };
+        assert_eq!(action.title, "Update all 2 dependencies");
+        let edits = &action.edit.as_ref().unwrap().changes.as_ref().unwrap()[&uri];
+        assert_eq!(edits.len(), 2);
+        assert_eq!(edits[0].new_text, "^2.1.0");
+        assert_eq!(edits[1].new_text, "~2.1.0");
+    }
+
+    #[tokio::test]
+    async fn bulk_update_is_hidden_when_only_one_safe_edit_remains() {
+        let cache = MemoryCache::new();
+        for name in ["caret", "compound"] {
+            cache
+                .insert(
+                    format!("test:{name}"),
+                    VersionInfo {
+                        latest: Some("2.1.0".to_string()),
+                        ..Default::default()
+                    },
+                )
+                .await;
+        }
+        let deps = vec![
+            create_test_dependency("caret", "^1.0.0", 1),
+            create_test_dependency("compound", ">=1.0.0 <2.0.0", 2),
+        ];
+        let uri = Url::parse("file:///test/package.json").unwrap();
+        let outside_range = Range {
+            start: Position::new(50, 0),
+            end: Position::new(50, 0),
+        };
+
+        let actions = create_code_actions(
+            &deps,
+            &cache,
+            &uri,
+            outside_range,
+            FileType::Npm,
+            |name| format!("test:{name}"),
+            &[],
+            None,
+            None,
+        )
+        .await;
+
+        assert!(actions.is_empty());
+    }
+
+    #[tokio::test]
+    async fn lockfile_backed_partial_constraints_do_not_create_noop_updates() {
+        let cache = MemoryCache::new();
+        for name in ["first", "second"] {
+            cache
+                .insert(
+                    format!("test:{name}"),
+                    VersionInfo {
+                        latest: Some("1.2.4".to_string()),
+                        ..Default::default()
+                    },
+                )
+                .await;
+        }
+        let mut first = create_test_dependency("first", "1.2", 1);
+        first.resolved_version = Some("1.2.3".to_string());
+        let mut second = create_test_dependency("second", "1.2", 2);
+        second.resolved_version = Some("1.2.3".to_string());
+        let deps = vec![first, second];
+        let uri = Url::parse("file:///test/Cargo.toml").unwrap();
+        let range = Range {
+            start: Position::new(0, 0),
+            end: Position::new(10, 0),
+        };
+
+        let actions = create_code_actions(
+            &deps,
+            &cache,
+            &uri,
+            range,
+            FileType::Cargo,
+            |name| format!("test:{name}"),
+            &[],
+            None,
+            None,
+        )
+        .await;
+
+        assert!(actions.is_empty());
     }
 }

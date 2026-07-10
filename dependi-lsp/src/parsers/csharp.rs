@@ -117,6 +117,7 @@ fn parse_package_reference(line: &str, line_num: u32) -> Option<Dependency> {
         optional: false,
         registry: None,
         resolved_version: None,
+        has_additional_version_constraints: false,
     })
 }
 

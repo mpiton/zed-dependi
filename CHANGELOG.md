@@ -7,6 +7,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- Dependency update actions now preserve recognized version constraint
+  operators, spacing, wrappers, and range-shaping precision across supported
+  ecosystems. Unsafe compound or indirect declarations are omitted from
+  individual and bulk updates instead of being replaced with a bare version.
+  ([#351](https://github.com/mpiton/zed-dependi/issues/351))
+
 ## [1.9.1] - 2026-06-29
 
 ### Documentation

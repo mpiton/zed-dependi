@@ -113,36 +113,45 @@ fn parse_gem_declaration(line: &str, line_num: u32, dev: bool) -> Option<Depende
     };
 
     // Parse the arguments
-    let (name, version, name_start, name_end, version_start, version_end) =
-        parse_gem_args(line, after_gem)?;
+    let parsed = parse_gem_args(line, after_gem)?;
 
     Some(Dependency {
-        name,
-        version,
+        name: parsed.name,
+        version: parsed.version,
         name_span: Span {
             line: line_num,
-            line_start: name_start,
-            line_end: name_end,
+            line_start: parsed.name_start,
+            line_end: parsed.name_end,
         },
         version_span: Span {
             line: line_num,
-            line_start: version_start,
-            line_end: version_end,
+            line_start: parsed.version_start,
+            line_end: parsed.version_end,
         },
         dev,
         optional: false,
         registry: None,
         resolved_version: None,
+        has_additional_version_constraints: parsed.has_additional_version_constraints,
     })
 }
 
-/// Parses the argument list of a `gem` declaration and returns
-/// `(name, version, name_start, name_end, version_start, version_end)`.
+struct ParsedGemArgs {
+    name: String,
+    version: String,
+    name_start: u32,
+    name_end: u32,
+    version_start: u32,
+    version_end: u32,
+    has_additional_version_constraints: bool,
+}
+
+/// Parses the argument list of a `gem` declaration.
 ///
 /// Both single-quoted and double-quoted strings are accepted.
 /// Returns `None` when the second argument is absent, unquoted (e.g. a hash
 /// key), or contains a colon (version-as-symbol form).
-fn parse_gem_args(line: &str, args_str: &str) -> Option<(String, String, u32, u32, u32, u32)> {
+fn parse_gem_args(line: &str, args_str: &str) -> Option<ParsedGemArgs> {
     let bytes = args_str.as_bytes();
     let len = bytes.len();
 
@@ -175,7 +184,7 @@ fn parse_gem_args(line: &str, args_str: &str) -> Option<(String, String, u32, u3
     }
 
     // Parse second argument (version)
-    let (version, _) = parse_quoted_string(bytes, idx)?;
+    let (version, version_end_idx) = parse_quoted_string(bytes, idx)?;
 
     // Skip if version looks like a hash key
     if version.is_empty() || version.contains(':') {
@@ -185,15 +194,56 @@ fn parse_gem_args(line: &str, args_str: &str) -> Option<(String, String, u32, u3
     // Find positions in the original line
     let (name_start, name_end) = find_quoted_position(line, &name)?;
     let (version_start, version_end) = find_quoted_position(line, &version)?;
+    let has_additional_version_constraints = has_unproven_trailing_argument(bytes, version_end_idx);
 
-    Some((
+    Some(ParsedGemArgs {
         name,
         version,
         name_start,
         name_end,
         version_start,
         version_end,
-    ))
+        has_additional_version_constraints,
+    })
+}
+
+fn has_unproven_trailing_argument(bytes: &[u8], mut index: usize) -> bool {
+    while matches!(bytes.get(index), Some(b' ' | b'\t')) {
+        index += 1;
+    }
+    if bytes.get(index) != Some(&b',') {
+        return false;
+    }
+    index += 1;
+    while matches!(bytes.get(index), Some(b' ' | b'\t')) {
+        index += 1;
+    }
+
+    let Some(tail) = bytes.get(index..) else {
+        return true;
+    };
+    tail.is_empty() || !is_options_argument(tail)
+}
+
+fn is_options_argument(bytes: &[u8]) -> bool {
+    let Ok(argument) = std::str::from_utf8(bytes) else {
+        return false;
+    };
+    let argument = argument.trim_start();
+    if argument.starts_with('{') {
+        return true;
+    }
+    if let Some(symbol) = argument.strip_prefix(':') {
+        let key_end = symbol
+            .find(|character: char| !character.is_ascii_alphanumeric() && character != '_')
+            .unwrap_or(symbol.len());
+        return key_end > 0 && symbol[key_end..].trim_start().starts_with("=>");
+    }
+
+    let key_end = argument
+        .find(|character: char| !character.is_ascii_alphanumeric() && character != '_')
+        .unwrap_or(argument.len());
+    key_end > 0 && argument[key_end..].starts_with(':')
 }
 
 /// Parses a single- or double-quoted string from `bytes` starting at `start`.
@@ -464,5 +514,40 @@ end
         assert_eq!(deps.len(), 1);
         assert_eq!(deps[0].name, "rails");
         assert_eq!(deps[0].version, "~> 7.0");
+    }
+
+    #[test]
+    fn tracks_additional_positional_constraints_but_not_options() {
+        let content = concat!(
+            "gem \"single\", \">= 1\", require: false\n",
+            "gem \"hash-option\", \">= 1\", { require: false }\n",
+            "gem \"legacy-option\", \">= 1\", :require => false\n",
+            "gem \"compound\", \">= 1\", \"< 2\"\n",
+            "gem \"variable-bound\", \">= 1\", UPPER_BOUND\n",
+            "gem(\"multiline-bound\", \">= 1\",\n",
+            "  \"< 2\")\n"
+        );
+        let deps = RubyParser::new().parse(content);
+
+        let single = deps.iter().find(|dep| dep.name == "single").unwrap();
+        assert!(!single.has_additional_version_constraints);
+        let hash_option = deps.iter().find(|dep| dep.name == "hash-option").unwrap();
+        assert!(!hash_option.has_additional_version_constraints);
+        let legacy_option = deps.iter().find(|dep| dep.name == "legacy-option").unwrap();
+        assert!(!legacy_option.has_additional_version_constraints);
+
+        let compound = deps.iter().find(|dep| dep.name == "compound").unwrap();
+        assert_eq!(compound.version, ">= 1");
+        assert!(compound.has_additional_version_constraints);
+        let variable_bound = deps
+            .iter()
+            .find(|dep| dep.name == "variable-bound")
+            .unwrap();
+        assert!(variable_bound.has_additional_version_constraints);
+        let multiline_bound = deps
+            .iter()
+            .find(|dep| dep.name == "multiline-bound")
+            .unwrap();
+        assert!(multiline_bound.has_additional_version_constraints);
     }
 }

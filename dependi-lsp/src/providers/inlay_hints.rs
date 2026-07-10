@@ -70,6 +70,7 @@ pub enum VersionStatus {
 ///     name_span: Span { line: 5, line_start: 0, line_end: 5 },
 ///     version_span: Span { line: 5, line_start: 9, line_end: 14 },
 ///     dev: false, optional: false, registry: None, resolved_version: None,
+///     has_additional_version_constraints: false,
 /// };
 /// let info = VersionInfo { latest: Some("1.0.0".to_string()), ..Default::default() };
 /// let hint = create_inlay_hint(&dep, Some(&info), FileType::Cargo);
@@ -720,6 +721,7 @@ mod tests {
             optional: false,
             registry: None,
             resolved_version: None,
+            has_additional_version_constraints: false,
         }
     }
 
@@ -1491,6 +1493,7 @@ mod tests {
             optional: false,
             registry: None,
             resolved_version: Some(resolved.to_string()),
+            has_additional_version_constraints: false,
         }
     }
 

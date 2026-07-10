@@ -175,87 +175,19 @@ fn parse_requirements_txt(content: &str) -> Vec<Dependency> {
 
 /// Parse a single requirement line
 fn parse_requirement_line(line: &str, line_num: u32, dev: bool) -> Option<Dependency> {
-    let trimmed = line.trim();
-
-    // Remove inline comments
-    let without_comment = if let Some(pos) = trimmed.find('#') {
-        &trimmed[..pos]
-    } else {
-        trimmed
-    };
-    let without_comment = without_comment.trim();
-
-    if without_comment.is_empty() {
-        return None;
-    }
-
-    // Extract package name (before version specifier or extras)
-    // Operators: ==, >=, <=, !=, ~=, >, <, ===
-    let operators = ["===", "==", ">=", "<=", "!=", "~=", ">", "<"];
-
-    let mut name_end_pos = without_comment.len();
-    let mut version_op_pos = None;
-    let mut version_op_len = 0;
-
-    for op in &operators {
-        if let Some(pos) = without_comment.find(op)
-            && pos < name_end_pos
-        {
-            name_end_pos = pos;
-            version_op_pos = Some(pos);
-            version_op_len = op.len();
-        }
-    }
-
-    // Handle extras: package[extra1,extra2]>=1.0
-    let name_part = &without_comment[..name_end_pos];
-    let name = if let Some(bracket_pos) = name_part.find('[') {
-        &name_part[..bracket_pos]
-    } else {
-        name_part
-    };
-    let name = name.trim();
-
-    if name.is_empty() {
-        return None;
-    }
-
-    // Extract version (including the operator, to align with Ruby/npm behavior)
-    let version = {
-        let op_pos = version_op_pos?;
-        let operator = &without_comment[op_pos..op_pos + version_op_len];
-        let version_part = &without_comment[op_pos + version_op_len..];
-        // Handle comma-separated version constraints: >=1.0,<2.0
-        let version_num = if let Some(comma_pos) = version_part.find(',') {
-            &version_part[..comma_pos]
-        } else {
-            version_part
-        };
-        // Remove environment markers: ; python_version >= "3.8"
-        let version_num = if let Some(semi_pos) = version_num.find(';') {
-            &version_num[..semi_pos]
-        } else {
-            version_num
-        };
-        let version_num = version_num.trim();
-        format!("{operator}{version_num}")
-    };
-
-    if version.is_empty() {
-        return None;
-    }
-
-    // Calculate positions
-    let name_start = line.find(name)? as u32;
-    let name_end = name_start + name.len() as u32;
-
-    // Find version (with operator) position in the original line
-    let version_start = line.find(&version)? as u32;
-    let version_end = version_start + version.len() as u32;
+    let without_comment = line
+        .split_once('#')
+        .map_or(line, |(before_comment, _)| before_comment)
+        .trim_end();
+    let parsed = parse_pep508_dependency(without_comment)?;
+    let name_start = u32::try_from(parsed.name_byte_range.0).ok()?;
+    let name_end = u32::try_from(parsed.name_byte_range.1).ok()?;
+    let version_start = u32::try_from(parsed.version_byte_range.0).ok()?;
+    let version_end = u32::try_from(parsed.version_byte_range.1).ok()?;
 
     Some(Dependency {
-        name: name.to_string(),
-        version,
+        name: parsed.name,
+        version: parsed.version,
         name_span: Span {
             line: line_num,
             line_start: name_start,
@@ -270,6 +202,7 @@ fn parse_requirement_line(line: &str, line_num: u32, dev: bool) -> Option<Depend
         optional: false,
         registry: None,
         resolved_version: None,
+        has_additional_version_constraints: parsed.has_additional_version_constraints,
     })
 }
 
@@ -419,6 +352,7 @@ fn parse_pep621_deps(dom: &Node, line_ranges: &[TextRange], deps: &mut Vec<Depen
         let Some((name_span, version_span)) = pep508_spans(item, &parsed, line_ranges) else {
             continue;
         };
+        let has_additional_version_constraints = parsed.has_additional_version_constraints;
         deps.push(Dependency {
             name: parsed.name,
             version: parsed.version,
@@ -428,6 +362,7 @@ fn parse_pep621_deps(dom: &Node, line_ranges: &[TextRange], deps: &mut Vec<Depen
             optional: false,
             registry: None,
             resolved_version: None,
+            has_additional_version_constraints,
         });
     }
 }
@@ -457,6 +392,7 @@ fn parse_pep621_optional(dom: &Node, line_ranges: &[TextRange], deps: &mut Vec<D
             let Some((name_span, version_span)) = pep508_spans(item, &parsed, line_ranges) else {
                 continue;
             };
+            let has_additional_version_constraints = parsed.has_additional_version_constraints;
             deps.push(Dependency {
                 name: parsed.name,
                 version: parsed.version,
@@ -466,6 +402,7 @@ fn parse_pep621_optional(dom: &Node, line_ranges: &[TextRange], deps: &mut Vec<D
                 optional: true,
                 registry: None,
                 resolved_version: None,
+                has_additional_version_constraints,
             });
         }
     }
@@ -506,6 +443,7 @@ fn parse_poetry_main(dom: &Node, line_ranges: &[TextRange], deps: &mut Vec<Depen
             optional,
             registry: None,
             resolved_version: None,
+            has_additional_version_constraints: false,
         });
     }
 }
@@ -541,6 +479,7 @@ fn parse_poetry_dev_legacy(dom: &Node, line_ranges: &[TextRange], deps: &mut Vec
             optional,
             registry: None,
             resolved_version: None,
+            has_additional_version_constraints: false,
         });
     }
 }
@@ -590,6 +529,7 @@ fn parse_poetry_groups(dom: &Node, line_ranges: &[TextRange], deps: &mut Vec<Dep
                 optional,
                 registry: None,
                 resolved_version: None,
+                has_additional_version_constraints: false,
             });
         }
     }
@@ -620,6 +560,7 @@ fn parse_pep735_groups(dom: &Node, line_ranges: &[TextRange], deps: &mut Vec<Dep
             let Some((name_span, version_span)) = pep508_spans(item, &parsed, line_ranges) else {
                 continue;
             };
+            let has_additional_version_constraints = parsed.has_additional_version_constraints;
             deps.push(Dependency {
                 name: parsed.name,
                 version: parsed.version,
@@ -629,6 +570,7 @@ fn parse_pep735_groups(dom: &Node, line_ranges: &[TextRange], deps: &mut Vec<Dep
                 optional: false,
                 registry: None,
                 resolved_version: None,
+                has_additional_version_constraints,
             });
         }
     }
@@ -664,6 +606,7 @@ fn parse_hatch_envs(envs_node: &Node, line_ranges: &[TextRange], deps: &mut Vec<
                 else {
                     continue;
                 };
+                let has_additional_version_constraints = parsed.has_additional_version_constraints;
                 deps.push(Dependency {
                     name: parsed.name,
                     version: parsed.version,
@@ -673,6 +616,7 @@ fn parse_hatch_envs(envs_node: &Node, line_ranges: &[TextRange], deps: &mut Vec<
                     optional: false,
                     registry: None,
                     resolved_version: None,
+                    has_additional_version_constraints,
                 });
             }
         }
@@ -708,12 +652,14 @@ fn parse_hatch_toml(content: &str) -> Vec<Dependency> {
 /// LSP quick-fixes can edit safely.
 struct Pep508Parsed {
     name: String,
-    /// Operator + version, formatted with no whitespace (e.g., `">=2.28.0"`).
+    /// Operator + first version anchor with source whitespace preserved.
     version: String,
     /// Byte range in `dep_str` covering the package name (excludes extras like `[security]`).
     name_byte_range: (usize, usize),
     /// Byte range in `dep_str` covering operator + version (whitespace inside is preserved).
     version_byte_range: (usize, usize),
+    /// Whether later comma-separated constraints exist outside `version_byte_range`.
+    has_additional_version_constraints: bool,
 }
 
 /// Parse PEP 508 dependency string: "package>=1.0.0" or "package[extra]>=1.0.0"
@@ -768,7 +714,6 @@ fn parse_pep508_dependency(dep_str: &str) -> Option<Pep508Parsed> {
     let name_end = name_start + name_trimmed.len();
 
     // Extract version (operator + numeric part, taking only the first constraint).
-    let operator = &without_markers[op_pos..op_pos + op_len];
     let version_part = &without_markers[op_pos + op_len..];
     let version_num_substr = if let Some(comma_pos) = version_part.find(',') {
         &version_part[..comma_pos]
@@ -786,12 +731,14 @@ fn parse_pep508_dependency(dep_str: &str) -> Option<Pep508Parsed> {
     let version_num_end_in_part = version_num_substr.trim_end().len();
     let v_start = wm_offset + op_pos;
     let v_end = wm_offset + op_pos + op_len + version_num_end_in_part;
+    let version = dep_str.get(v_start..v_end)?.to_string();
 
     Some(Pep508Parsed {
         name: name_trimmed.to_string(),
-        version: format!("{operator}{version_num}"),
+        version,
         name_byte_range: (name_start, name_end),
         version_byte_range: (v_start, v_end),
+        has_additional_version_constraints: version_part.contains(','),
     })
 }
 
@@ -1655,5 +1602,40 @@ dependencies = ["ruff>=0.1.0"]
         assert_eq!(dep.version, ">=0.1.0");
         assert_eq!(slice_span(content, &dep.version_span), ">=0.1.0");
         assert_eq!(slice_span(content, &dep.name_span), "ruff");
+    }
+
+    #[test]
+    fn requirements_preserve_spacing_and_track_additional_constraints() {
+        let content = "single>= 1.0\ncompound>= 1.0, < 2.0\n";
+        let deps = PythonParser::new().parse(content);
+
+        let single = deps.iter().find(|dep| dep.name == "single").unwrap();
+        assert_eq!(single.version, ">= 1.0");
+        assert_eq!(slice_span(content, &single.version_span), ">= 1.0");
+        assert!(!single.has_additional_version_constraints);
+
+        let compound = deps.iter().find(|dep| dep.name == "compound").unwrap();
+        assert_eq!(compound.version, ">= 1.0");
+        assert_eq!(slice_span(content, &compound.version_span), ">= 1.0");
+        assert!(compound.has_additional_version_constraints);
+    }
+
+    #[test]
+    fn pep508_arrays_preserve_spacing_and_track_additional_constraints() {
+        let content = concat!(
+            "[project]\n",
+            "dependencies = [\"single>= 1.0\", \"compound>= 1.0, < 2.0\"]\n"
+        );
+        let deps = PythonParser::new().parse(content);
+
+        let single = deps.iter().find(|dep| dep.name == "single").unwrap();
+        assert_eq!(single.version, ">= 1.0");
+        assert_eq!(slice_span(content, &single.version_span), ">= 1.0");
+        assert!(!single.has_additional_version_constraints);
+
+        let compound = deps.iter().find(|dep| dep.name == "compound").unwrap();
+        assert_eq!(compound.version, ">= 1.0");
+        assert_eq!(slice_span(content, &compound.version_span), ">= 1.0");
+        assert!(compound.has_additional_version_constraints);
     }
 }

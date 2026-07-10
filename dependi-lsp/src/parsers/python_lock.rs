@@ -1127,6 +1127,7 @@ version = "0.5.0"
             optional: false,
             registry: None,
             resolved_version: None,
+            has_additional_version_constraints: false,
         };
         // PEP 503: "some.package" → "some-package" should match "Some-Package" → "some-package"
         let v = resolver.resolve_version(&dep, &graph);

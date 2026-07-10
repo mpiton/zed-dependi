@@ -139,6 +139,7 @@ fn parse_section(
             optional,
             registry: None,
             resolved_version: None,
+            has_additional_version_constraints: false,
         });
     }
 }

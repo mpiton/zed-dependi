@@ -54,6 +54,12 @@ pub struct Dependency {
     /// When set, [`Self::effective_version`] returns this value instead of
     /// [`Self::version`] for registry comparisons and hover text.
     pub resolved_version: Option<String>,
+    /// Whether source syntax contains additional version constraints outside
+    /// [`Self::version`] and [`Self::version_span`].
+    ///
+    /// Providers use this source-shape metadata to avoid edits that would
+    /// update only one anchor of a compound declaration.
+    pub has_additional_version_constraints: bool,
 }
 
 /// A half-open byte range within a single source line.
@@ -105,6 +111,7 @@ impl Dependency {
     ///     optional: false,
     ///     registry: None,
     ///     resolved_version: Some("1.0.196".into()),
+    ///     has_additional_version_constraints: false,
     /// };
     /// assert_eq!(dep.effective_version(), "1.0.196");
     /// ```
