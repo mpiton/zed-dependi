@@ -129,7 +129,9 @@ The same safety rules apply to individual and bulk updates:
 
 Operators, spacing, exact-version wrappers, and range-shaping precision are
 retained when Dependi can prove that replacing the single version anchor is
-safe. Go module updates also retain exactly one `v` prefix.
+safe. Go module updates preserve exactly one existing `v` prefix. Unprefixed,
+multiply-prefixed, or otherwise unsupported prefix shapes receive no automatic
+update.
 
 Compound ranges and indirect versions do not receive automatic update actions.
 This includes multiple bounds, unions, wildcards, strict or exclusion

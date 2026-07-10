@@ -218,6 +218,7 @@ fn validate_latest(latest: &str, file_type: FileType) -> Option<&str> {
 
 fn is_version_token(token: &str, file_type: FileType) -> bool {
     if token.is_empty()
+        || (file_type != FileType::Go && token.starts_with('v'))
         || token.contains("..")
         || token.ends_with(['.', '-', '+', '_', '!'])
         || token.bytes().any(|byte| {
@@ -513,6 +514,28 @@ mod tests {
         for (file_type, original) in cases {
             assert_eq!(
                 render_version_update(&dependency(original), "9.8.7", file_type),
+                None,
+                "unexpectedly rendered {file_type:?} {original:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn rejects_v_prefixed_versions_outside_go() {
+        let cases = [
+            (FileType::Cargo, "^v1.2"),
+            (FileType::Npm, "^v1.2"),
+            (FileType::Python, "==v1.2"),
+            (FileType::Php, "^v1.2"),
+            (FileType::Dart, "^v1.2"),
+            (FileType::Csharp, "[v1.2]"),
+            (FileType::Ruby, "~> v1.2"),
+            (FileType::Maven, "v1.2"),
+        ];
+
+        for (file_type, original) in cases {
+            assert_eq!(
+                render_version_update(&dependency(original), "2.3.4", file_type),
                 None,
                 "unexpectedly rendered {file_type:?} {original:?}"
             );
