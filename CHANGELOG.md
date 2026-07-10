@@ -15,6 +15,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   individual and bulk updates instead of being replaced with a bare version.
   ([#351](https://github.com/mpiton/zed-dependi/issues/351))
 
+### Security
+
+- Updated `quick-xml` to 0.41.0 and `crossbeam-epoch` to 0.9.20 to address
+  RUSTSEC-2026-0194, RUSTSEC-2026-0195, and RUSTSEC-2026-0204.
+
 ## [1.9.1] - 2026-06-29
 
 ### Documentation
