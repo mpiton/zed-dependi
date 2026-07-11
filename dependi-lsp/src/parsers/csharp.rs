@@ -10,7 +10,8 @@
 //! ```
 
 use super::{Dependency, Parser, Span};
-use quick_xml::events::{BytesDecl, BytesStart, BytesText, Event};
+use quick_xml::escape::resolve_xml_entity;
+use quick_xml::events::{BytesDecl, BytesRef, BytesStart, BytesText, Event};
 use quick_xml::{Reader, XmlVersion};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -223,7 +224,7 @@ impl<'a> ParseState<'a> {
         Ok(())
     }
 
-    fn handle_general_reference(&mut self, reference: &[u8]) -> Result<(), ()> {
+    fn handle_general_reference(&mut self, reference: &BytesRef<'_>) -> Result<(), ()> {
         if !is_supported_xml_reference(reference) {
             return Err(());
         }
@@ -324,7 +325,7 @@ fn parse_xml(content: &str) -> Result<Vec<Dependency>, ()> {
             Event::Comment(_) | Event::PI(_) => state.handle_fragmented_content(false)?,
             Event::CData(_) => state.handle_fragmented_content(true)?,
             Event::GeneralRef(reference) => {
-                state.handle_general_reference(reference.as_ref())?;
+                state.handle_general_reference(&reference)?;
             }
             Event::Decl(declaration) => state.handle_declaration(&declaration)?,
             Event::DocType(_) => return Err(()),
@@ -373,36 +374,17 @@ fn is_valid_xml_encoding(value: &[u8]) -> bool {
             .all(|byte| byte.is_ascii_alphanumeric() || matches!(byte, b'.' | b'_' | b'-'))
 }
 
-fn is_supported_xml_reference(reference: &[u8]) -> bool {
-    if matches!(reference, b"amp" | b"apos" | b"gt" | b"lt" | b"quot") {
-        return true;
+fn is_supported_xml_reference(reference: &BytesRef<'_>) -> bool {
+    match reference.resolve_char_ref() {
+        Ok(Some(character)) => matches!(
+            u32::from(character),
+            0x9 | 0xA | 0xD | 0x20..=0xD7FF | 0xE000..=0xFFFD | 0x10000..=0x10FFFF
+        ),
+        Ok(None) => reference
+            .decode()
+            .is_ok_and(|entity| resolve_xml_entity(&entity).is_some()),
+        Err(_) => false,
     }
-
-    let (radix, digits) = if let Some(digits) = reference.strip_prefix(b"#x") {
-        (16, digits)
-    } else if let Some(digits) = reference.strip_prefix(b"#") {
-        (10, digits)
-    } else {
-        return false;
-    };
-    let valid_digits = match radix {
-        10 => digits.iter().all(u8::is_ascii_digit),
-        16 => digits.iter().all(u8::is_ascii_hexdigit),
-        _ => false,
-    };
-    if digits.is_empty() || !valid_digits {
-        return false;
-    }
-    let Ok(digits) = std::str::from_utf8(digits) else {
-        return false;
-    };
-    let Ok(codepoint) = u32::from_str_radix(digits, radix) else {
-        return false;
-    };
-    matches!(
-        codepoint,
-        0x9 | 0xA | 0xD | 0x20..=0xD7FF | 0xE000..=0xFFFD | 0x10000..=0x10FFFF
-    )
 }
 
 fn contains_msbuild_expression(value: &str) -> bool {
@@ -878,6 +860,9 @@ mod tests {
         let signed_character_reference = r#"<Project><Description>&#+65;</Description>
   <PackageVersion Include="First" Version="1.0.0" />
 </Project>"#;
+        let illegal_xml_character = r#"<Project><Description>&#1;</Description>
+  <PackageVersion Include="First" Version="1.0.0" />
+</Project>"#;
         let incomplete_declaration = r#"<?xml?><Project>
   <PackageVersion Include="First" Version="1.0.0" />
 </Project>"#;
@@ -900,6 +885,7 @@ mod tests {
             undefined_entity,
             uppercase_hex_reference,
             signed_character_reference,
+            illegal_xml_character,
             incomplete_declaration,
             invalid_declaration_value,
             unsupported_doctype,
