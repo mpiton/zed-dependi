@@ -53,7 +53,7 @@ Dependency management extension for the [Zed](https://zed.dev) editor.
 | Go | `go.mod` | proxy.golang.org | ✅ |
 | PHP | `composer.json` | Packagist | ✅ |
 | Dart/Flutter | `pubspec.yaml` | pub.dev | ✅ |
-| C#/.NET | `*.csproj` | NuGet | ✅ |
+| C#/.NET | `*.csproj`, `Directory.Build.props`, `Directory.Packages.props` | NuGet | ✅ |
 | Ruby | `Gemfile` | RubyGems.org | ✅ |
 | Java | `pom.xml` | Maven Central | ✅ |
 
@@ -117,7 +117,7 @@ zed-dependi/
 │   │   │   ├── gemfile_lock.rs # Gemfile.lock lockfile
 │   │   │   ├── dart.rs    # pubspec.yaml parser
 │   │   │   ├── pubspec_lock.rs # pubspec.lock lockfile
-│   │   │   ├── csharp.rs  # *.csproj parser
+│   │   │   ├── csharp.rs  # .NET/NuGet MSBuild manifest parser
 │   │   │   ├── packages_lock_json.rs # packages.lock.json lockfile
 │   │   │   ├── maven.rs   # pom.xml parser
 │   │   │   ├── json_spans.rs # Shared JSON span tracking
@@ -541,7 +541,7 @@ security-scan:
 │  │ • go.mod     │  └──────────────┘  │ • pub.dev    │      │
 │  │ • composer   │                    │ • NuGet      │      │
 │  │ • pubspec    │                    │ • RubyGems   │      │
-│  │ • *.csproj   │                    │ • Maven Cent.│      │
+│  │ • .NET files │                    │ • Maven Cent.│      │
 │  │ • Gemfile    │                    └──────────────┘      │
 │  │ • pom.xml    │                                           │
 │  └──────────────┘                                           │

@@ -3,13 +3,13 @@ title: C#/.NET
 layout: default
 parent: Languages
 nav_order: 7
-description: ".NET project file (csproj) support"
+description: ".NET/NuGet MSBuild manifest support"
 ---
 
 # C#/.NET
 {: .no_toc }
 
-Support for .NET projects using *.csproj files.
+Support for concrete NuGet declarations in .NET/MSBuild manifests.
 {: .fs-6 .fw-300 }
 
 ## Table of contents
@@ -25,10 +25,12 @@ Support for .NET projects using *.csproj files.
 | File | Description |
 |------|-------------|
 | `*.csproj` | C# project file |
+| `Directory.Build.props` | Shared versioned `PackageReference` declarations |
+| `Directory.Packages.props` | Central `PackageVersion` and `GlobalPackageReference` declarations |
 
 ### Lockfile Resolution
 
-Dependi reads `packages.lock.json` to show resolved versions and eliminate false-positive "update available" warnings.
+For `*.csproj` documents, Dependi reads `packages.lock.json` to show resolved versions and eliminate false-positive "update available" warnings. Directory props files are analyzed directly and are never associated with a project lockfile.
 
 ## Registry
 
@@ -71,9 +73,25 @@ Dependi reads `packages.lock.json` to show resolved versions and eliminate false
   </PropertyGroup>
   <ItemGroup>
     <PackageVersion Include="Newtonsoft.Json" Version="13.0.3" />
+    <PackageVersion Update="Serilog" Version="3.1.1" />
+    <GlobalPackageReference Include="Nerdbank.GitVersioning" Version="3.7.115" />
   </ItemGroup>
 </Project>
 ```
+
+`PackageVersion` accepts `Include`, or `Update` for a nested central-package override. `GlobalPackageReference` entries are treated as development dependencies. Supported items may also place a concrete version in a child element:
+
+```xml
+<PackageVersion Include="Newtonsoft.Json">
+  <Version>13.0.3</Version>
+</PackageVersion>
+```
+
+### Static Analysis Boundary
+
+Dependi analyzes concrete declarations in the open document. It does not evaluate MSBuild imports, properties such as `$(PackageVersion)`, conditions, target frameworks, or import order. Conditional concrete declarations are each analyzed in source order.
+
+The extension does not resolve a versionless `PackageReference` in a `.csproj` from `Directory.Packages.props`, and it does not determine whether a central entry is consumed by a project. Central declarations still receive the existing NuGet version, security, link, hover, diagnostic, hint, and update features.
 
 ## Version Specification
 
@@ -153,7 +171,7 @@ NuGet package IDs are case-insensitive but URLs use lowercase. Dependi handles t
 
 ## Tooling Integration
 
-After updating `.csproj` with Dependi:
+After updating a .NET manifest with Dependi:
 
 ```bash
 # Restore packages
