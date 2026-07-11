@@ -263,7 +263,7 @@ cargo +nightly fuzz run fuzz_cargo -- -max_total_time=60
 | `fuzz_ruby` | RubyParser | Gemfile |
 | `fuzz_php` | PhpParser | composer.json |
 | `fuzz_dart` | DartParser | pubspec.yaml |
-| `fuzz_csharp` | CsharpParser | *.csproj |
+| `fuzz_csharp` | CsharpParser | *.csproj, Directory.Build.props, Directory.Packages.props |
 
 #### Analyzing Crashes
 

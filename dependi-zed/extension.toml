@@ -16,7 +16,7 @@ name = "Dependi LSP"
 # - Python constraints: constraints.txt (Python with zed-python-requirements extension)
 # - Python requirements: requirements.txt (Python with zed-python-requirements extension)
 # - YAML: pubspec.yaml (Dart/Flutter)
-# - XML: *.csproj (C#/.NET)
+# - XML: *.csproj, Directory.Build.props, Directory.Packages.props (C#/.NET)
 # - Ruby: Gemfile
 languages = [
   "TOML",

@@ -24,7 +24,7 @@ Dependi supports 8 programming languages and their package ecosystems.
 | [Go]({% link languages/go.md %}) | `go.mod` | proxy.golang.org | Full support |
 | [PHP]({% link languages/php.md %}) | `composer.json` | Packagist | Full support |
 | [Dart/Flutter]({% link languages/dart.md %}) | `pubspec.yaml` | pub.dev | Full support |
-| [C#/.NET]({% link languages/dotnet.md %}) | `*.csproj` | NuGet | Full support |
+| [C#/.NET]({% link languages/dotnet.md %}) | `*.csproj`, `Directory.Build.props`, `Directory.Packages.props` | NuGet | Full support |
 | [Ruby]({% link languages/ruby.md %}) | `Gemfile` | RubyGems.org | Full support |
 
 ## Features by Language
@@ -48,7 +48,9 @@ pyproject.toml    → Python
 go.mod            → Go
 composer.json     → PHP
 pubspec.yaml      → Dart
-*.csproj          → .NET
+*.csproj                    → .NET
+Directory.Build.props       → .NET
+Directory.Packages.props    → .NET
 Gemfile           → Ruby
 ```
 

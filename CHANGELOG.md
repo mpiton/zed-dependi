@@ -7,6 +7,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- Direct LSP support for `Directory.Build.props` and
+  `Directory.Packages.props`, including concrete `PackageVersion` and
+  `GlobalPackageReference` declarations with the existing NuGet version,
+  security, and update features.
+  ([#352](https://github.com/mpiton/zed-dependi/issues/352))
+
 ### Fixed
 
 - Dependency update actions now preserve recognized version constraint
