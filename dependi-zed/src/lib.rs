@@ -55,7 +55,7 @@ fn compute_file_sha256(path: &str) -> Result<String> {
     let mut hasher = Sha256::new();
     hasher.update(&contents);
     let hash = hasher.finalize();
-    Ok(hex::encode(hash))
+    Ok(hash.iter().map(|byte| format!("{byte:02x}")).collect())
 }
 
 /// Verifies that a binary's SHA256 checksum matches the expected value.
@@ -195,6 +195,25 @@ impl zed::Extension for DependiExtension {
             args: vec![],
             env: Default::default(),
         })
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn computes_lowercase_sha256() {
+        let path = std::env::temp_dir().join(format!("dependi-sha256-{}", std::process::id()));
+        std::fs::write(&path, b"abc").unwrap();
+
+        let hash = compute_file_sha256(path.to_str().unwrap()).unwrap();
+
+        std::fs::remove_file(path).unwrap();
+        assert_eq!(
+            hash,
+            "ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad"
+        );
     }
 }
 

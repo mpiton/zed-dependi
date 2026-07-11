@@ -331,7 +331,7 @@ Configure scoped registries to use private npm packages alongside public ones:
 - Authentication tokens are read from environment variables (never hardcoded)
 - Auth headers are only sent over HTTPS
 
-For detailed configuration including supported registry types, authentication setup, and troubleshooting, see the [Private Registries Guide](docs/private-registries.md).
+For detailed configuration including supported registry types, authentication setup, and troubleshooting, see the [Private Registries Guide](docs/registries/private.md).
 
 ## CI/CD Integration
 
