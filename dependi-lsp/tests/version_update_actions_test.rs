@@ -230,3 +230,18 @@ async fn compound_python_and_ruby_declarations_have_no_update_action() {
         );
     }
 }
+
+#[tokio::test]
+async fn fragmented_csharp_child_version_has_no_update_action() {
+    let case = UpdateCase {
+        parser: Box::new(CsharpParser::new()),
+        file_type: FileType::Csharp,
+        uri: "file:///test/Directory.Packages.props",
+        package: "Package",
+        manifest: "<Project><PackageVersion Include=\"Package\"><Version>1<!-- split -->.2.3</Version></PackageVersion></Project>\n",
+        latest: "2.0",
+        expected: "",
+    };
+
+    assert_eq!(apply_individual_update(&case).await, None);
+}

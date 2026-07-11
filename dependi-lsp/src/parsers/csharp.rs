@@ -10,7 +10,7 @@
 //! ```
 
 use super::{Dependency, Parser, Span};
-use quick_xml::events::{BytesStart, BytesText, Event};
+use quick_xml::events::{BytesDecl, BytesStart, BytesText, Event};
 use quick_xml::{Reader, XmlVersion};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -56,12 +56,12 @@ impl PendingItem {
         event_start: usize,
     ) -> Result<Self, ()> {
         let include = located_attribute(event, event_start, b"Include")?;
-        let name = if include.is_some() {
-            include
-        } else if kind == NugetItemKind::PackageVersion {
-            located_attribute(event, event_start, b"Update")?
-        } else {
-            None
+        let update = located_attribute(event, event_start, b"Update")?;
+        let name = match kind {
+            NugetItemKind::PackageVersion => include.or(update),
+            NugetItemKind::PackageReference | NugetItemKind::GlobalPackageReference => {
+                if update.is_some() { None } else { include }
+            }
         };
 
         Ok(Self {
@@ -69,6 +69,215 @@ impl PendingItem {
             name,
             version: located_attribute(event, event_start, b"Version")?,
         })
+    }
+}
+
+#[derive(Debug)]
+struct ActiveItem {
+    item: PendingItem,
+    item_depth: usize,
+    version_depth: Option<usize>,
+    invalid_child_version: bool,
+}
+
+impl ActiveItem {
+    fn new(item: PendingItem, item_depth: usize) -> Self {
+        Self {
+            item,
+            item_depth,
+            version_depth: None,
+            invalid_child_version: false,
+        }
+    }
+
+    fn begin_child_version(&mut self, local_name: &[u8], event_depth: usize) {
+        if local_name == b"Version"
+            && self.item.version.is_none()
+            && self.item_depth.checked_add(1) == Some(event_depth)
+        {
+            self.version_depth = Some(event_depth);
+        }
+    }
+
+    fn mark_fragmented_version(&mut self) {
+        if self.version_depth.is_some() {
+            self.invalid_child_version = true;
+        }
+    }
+
+    fn record_version_text(&mut self, value: Option<LocatedValue>) {
+        if value.is_some() && self.item.version.is_some() {
+            self.invalid_child_version = true;
+        } else if value.is_some() {
+            self.item.version = value;
+        }
+    }
+
+    fn is_version_text_depth(&self, depth: usize) -> bool {
+        self.version_depth.and_then(|depth| depth.checked_add(1)) == Some(depth)
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum DocumentPhase {
+    Start,
+    Prolog,
+    Root,
+}
+
+struct ParseState<'a> {
+    content: &'a str,
+    newline_starts: Vec<usize>,
+    dependencies: Vec<Dependency>,
+    active: Option<ActiveItem>,
+    depth: usize,
+    document_phase: DocumentPhase,
+}
+
+impl<'a> ParseState<'a> {
+    fn new(content: &'a str) -> Self {
+        Self {
+            content,
+            newline_starts: newline_starts(content),
+            dependencies: Vec::new(),
+            active: None,
+            depth: 0,
+            document_phase: DocumentPhase::Start,
+        }
+    }
+
+    fn register_root_element(&mut self) -> Result<(), ()> {
+        if self.depth != 0 {
+            return Ok(());
+        }
+        if self.document_phase == DocumentPhase::Root {
+            return Err(());
+        }
+        self.document_phase = DocumentPhase::Root;
+        Ok(())
+    }
+
+    fn handle_empty(&mut self, event: &BytesStart<'_>, event_end: u64) -> Result<(), ()> {
+        validate_attributes(event)?;
+        self.register_root_element()?;
+
+        if let Some(active) = self.active.as_mut() {
+            active.mark_fragmented_version();
+            return Ok(());
+        }
+        let Some(kind) = NugetItemKind::from_local_name(event.local_name().as_ref()) else {
+            return Ok(());
+        };
+        let event_start = event_content_start(event_end, event, true).ok_or(())?;
+        let item = PendingItem::from_event(kind, event, event_start)?;
+        self.push_dependency(item);
+        Ok(())
+    }
+
+    fn handle_start(&mut self, event: &BytesStart<'_>, event_end: u64) -> Result<(), ()> {
+        validate_attributes(event)?;
+        self.register_root_element()?;
+
+        let event_depth = self.depth;
+        if let Some(active) = self.active.as_mut() {
+            active.mark_fragmented_version();
+            active.begin_child_version(event.local_name().as_ref(), event_depth);
+        } else if let Some(kind) = NugetItemKind::from_local_name(event.local_name().as_ref()) {
+            let event_start = event_content_start(event_end, event, false).ok_or(())?;
+            let item = PendingItem::from_event(kind, event, event_start)?;
+            self.active = Some(ActiveItem::new(item, event_depth));
+        }
+
+        self.depth = self.depth.checked_add(1).ok_or(())?;
+        Ok(())
+    }
+
+    fn handle_text(&mut self, text: &BytesText<'_>, event_end: u64) -> Result<(), ()> {
+        if self.depth == 0 && self.document_phase == DocumentPhase::Start {
+            self.document_phase = DocumentPhase::Prolog;
+        }
+        if self.depth == 0 && !is_xml_whitespace(text.as_ref()) {
+            return Err(());
+        }
+        let Some(active) = self.active.as_mut() else {
+            return Ok(());
+        };
+        if !active.is_version_text_depth(self.depth) {
+            return Ok(());
+        }
+        let value = located_text(text, event_end, self.content)?;
+        active.record_version_text(value);
+        Ok(())
+    }
+
+    fn handle_fragmented_content(&mut self, invalid_outside_root: bool) -> Result<(), ()> {
+        if invalid_outside_root && self.depth == 0 {
+            return Err(());
+        }
+        if self.depth == 0 && self.document_phase == DocumentPhase::Start {
+            self.document_phase = DocumentPhase::Prolog;
+        }
+        if let Some(active) = self.active.as_mut() {
+            active.mark_fragmented_version();
+        }
+        Ok(())
+    }
+
+    fn handle_general_reference(&mut self, reference: &[u8]) -> Result<(), ()> {
+        if !is_supported_xml_reference(reference) {
+            return Err(());
+        }
+        self.handle_fragmented_content(true)
+    }
+
+    fn handle_declaration(&mut self, declaration: &BytesDecl<'_>) -> Result<(), ()> {
+        if self.depth != 0 || self.document_phase != DocumentPhase::Start {
+            return Err(());
+        }
+        validate_xml_declaration(declaration)?;
+        self.document_phase = DocumentPhase::Prolog;
+        Ok(())
+    }
+
+    fn handle_end(&mut self, local_name: &[u8]) -> Result<(), ()> {
+        let event_depth = self.depth.checked_sub(1).ok_or(())?;
+        self.depth = event_depth;
+
+        if self.active.as_ref().and_then(|active| active.version_depth) == Some(event_depth) {
+            if local_name != b"Version" {
+                return Err(());
+            }
+            self.active.as_mut().ok_or(())?.version_depth = None;
+        }
+
+        if self
+            .active
+            .as_ref()
+            .is_some_and(|active| active.item_depth == event_depth)
+        {
+            let active = self.active.take().ok_or(())?;
+            if NugetItemKind::from_local_name(local_name) != Some(active.item.kind) {
+                return Err(());
+            }
+            if !active.invalid_child_version {
+                self.push_dependency(active.item);
+            }
+        }
+        Ok(())
+    }
+
+    fn push_dependency(&mut self, item: PendingItem) {
+        if let Some(dependency) = build_dependency(item, self.content, &self.newline_starts) {
+            self.dependencies.push(dependency);
+        }
+    }
+
+    fn finish(self) -> Result<Vec<Dependency>, ()> {
+        if self.document_phase == DocumentPhase::Root && self.depth == 0 && self.active.is_none() {
+            Ok(self.dependencies)
+        } else {
+            Err(())
+        }
     }
 }
 
@@ -98,131 +307,108 @@ impl CsharpParser {
 
 impl Parser for CsharpParser {
     fn parse(&self, content: &str) -> Vec<Dependency> {
-        let newline_starts = newline_starts(content);
-        let mut reader = Reader::from_str(content);
-        let mut dependencies = Vec::new();
-        let mut depth = 0usize;
-        let mut pending = None;
-        let mut pending_depth = None;
-        let mut version_depth = None;
+        parse_xml(content).unwrap_or_default()
+    }
+}
 
-        loop {
-            match reader.read_event() {
-                Ok(Event::Empty(event)) => {
-                    if validate_attributes(&event).is_err() {
-                        return Vec::new();
-                    }
-                    if pending.is_some() {
-                        continue;
-                    }
-                    let Some(kind) = NugetItemKind::from_local_name(event.local_name().as_ref())
-                    else {
-                        continue;
-                    };
-                    let Some(event_start) =
-                        event_content_start(reader.buffer_position(), &event, true)
-                    else {
-                        return Vec::new();
-                    };
-                    let pending = match PendingItem::from_event(kind, &event, event_start) {
-                        Ok(pending) => pending,
-                        Err(()) => return Vec::new(),
-                    };
-                    if let Some(dependency) = build_dependency(pending, content, &newline_starts) {
-                        dependencies.push(dependency);
-                    }
-                }
-                Ok(Event::Start(event)) => {
-                    if validate_attributes(&event).is_err() {
-                        return Vec::new();
-                    }
+fn parse_xml(content: &str) -> Result<Vec<Dependency>, ()> {
+    let mut reader = Reader::from_str(content);
+    reader.config_mut().check_comments = true;
+    let mut state = ParseState::new(content);
 
-                    let event_depth = depth;
-                    if pending.is_none() {
-                        if let Some(kind) =
-                            NugetItemKind::from_local_name(event.local_name().as_ref())
-                        {
-                            let Some(event_start) =
-                                event_content_start(reader.buffer_position(), &event, false)
-                            else {
-                                return Vec::new();
-                            };
-                            pending = match PendingItem::from_event(kind, &event, event_start) {
-                                Ok(pending) => Some(pending),
-                                Err(()) => return Vec::new(),
-                            };
-                            pending_depth = Some(event_depth);
-                        }
-                    } else if event.local_name().as_ref() == b"Version"
-                        && pending
-                            .as_ref()
-                            .is_some_and(|item: &PendingItem| item.version.is_none())
-                        && pending_depth.and_then(|depth| depth.checked_add(1)) == Some(event_depth)
-                    {
-                        version_depth = Some(event_depth);
-                    }
-
-                    let Some(next_depth) = depth.checked_add(1) else {
-                        return Vec::new();
-                    };
-                    depth = next_depth;
-                }
-                Ok(Event::Text(text)) => {
-                    if version_depth.and_then(|depth| depth.checked_add(1)) != Some(depth) {
-                        continue;
-                    }
-                    let Some(item) = pending.as_mut() else {
-                        return Vec::new();
-                    };
-                    if item.version.is_some() {
-                        continue;
-                    }
-                    item.version = match located_text(&text, reader.buffer_position(), content) {
-                        Ok(value) => value,
-                        Err(()) => return Vec::new(),
-                    };
-                }
-                Ok(Event::End(event)) => {
-                    let Some(event_depth) = depth.checked_sub(1) else {
-                        return Vec::new();
-                    };
-                    depth = event_depth;
-
-                    if version_depth == Some(event_depth) {
-                        if event.local_name().as_ref() != b"Version" {
-                            return Vec::new();
-                        }
-                        version_depth = None;
-                    }
-
-                    if pending_depth == Some(event_depth) {
-                        let Some(item) = pending.take() else {
-                            return Vec::new();
-                        };
-                        if NugetItemKind::from_local_name(event.local_name().as_ref())
-                            != Some(item.kind)
-                        {
-                            return Vec::new();
-                        }
-                        if let Some(dependency) = build_dependency(item, content, &newline_starts) {
-                            dependencies.push(dependency);
-                        }
-                        pending_depth = None;
-                        version_depth = None;
-                    }
-                }
-                Ok(Event::Eof) => {
-                    return if depth == 0 && pending.is_none() {
-                        dependencies
-                    } else {
-                        Vec::new()
-                    };
-                }
-                Ok(_) => {}
-                Err(_) => return Vec::new(),
+    loop {
+        match reader.read_event().map_err(|_| ())? {
+            Event::Empty(event) => state.handle_empty(&event, reader.buffer_position())?,
+            Event::Start(event) => state.handle_start(&event, reader.buffer_position())?,
+            Event::Text(text) => state.handle_text(&text, reader.buffer_position())?,
+            Event::Comment(_) | Event::PI(_) => state.handle_fragmented_content(false)?,
+            Event::CData(_) => state.handle_fragmented_content(true)?,
+            Event::GeneralRef(reference) => {
+                state.handle_general_reference(reference.as_ref())?;
             }
+            Event::Decl(declaration) => state.handle_declaration(&declaration)?,
+            Event::DocType(_) => return Err(()),
+            Event::End(event) => state.handle_end(event.local_name().as_ref())?,
+            Event::Eof => return state.finish(),
         }
     }
+}
+
+fn is_xml_whitespace(value: &[u8]) -> bool {
+    value.iter().all(u8::is_ascii_whitespace)
+}
+
+fn validate_xml_declaration(declaration: &BytesDecl<'_>) -> Result<(), ()> {
+    let raw = std::str::from_utf8(declaration.as_ref()).map_err(|_| ())?;
+    if !raw.as_bytes().get(3).is_some_and(u8::is_ascii_whitespace) {
+        return Err(());
+    }
+
+    let event = BytesStart::from_content(raw, 3);
+    let mut attribute_position = 0usize;
+    for attribute in event.attributes() {
+        let attribute = attribute.map_err(|_| ())?;
+        let key = attribute.key.as_ref();
+        let value = attribute.value.as_ref();
+        attribute_position = match (attribute_position, key) {
+            (0, b"version") if matches!(value, b"1.0" | b"1.1") => 1,
+            (1, b"encoding") if is_valid_xml_encoding(value) => 2,
+            (1 | 2, b"standalone") if matches!(value, b"yes" | b"no") => 3,
+            _ => return Err(()),
+        };
+    }
+
+    if attribute_position == 0 {
+        Err(())
+    } else {
+        Ok(())
+    }
+}
+
+fn is_valid_xml_encoding(value: &[u8]) -> bool {
+    value.first().is_some_and(u8::is_ascii_alphabetic)
+        && value
+            .iter()
+            .skip(1)
+            .all(|byte| byte.is_ascii_alphanumeric() || matches!(byte, b'.' | b'_' | b'-'))
+}
+
+fn is_supported_xml_reference(reference: &[u8]) -> bool {
+    if matches!(reference, b"amp" | b"apos" | b"gt" | b"lt" | b"quot") {
+        return true;
+    }
+
+    let (radix, digits) = if let Some(digits) = reference.strip_prefix(b"#x") {
+        (16, digits)
+    } else if let Some(digits) = reference.strip_prefix(b"#") {
+        (10, digits)
+    } else {
+        return false;
+    };
+    let valid_digits = match radix {
+        10 => digits.iter().all(u8::is_ascii_digit),
+        16 => digits.iter().all(u8::is_ascii_hexdigit),
+        _ => false,
+    };
+    if digits.is_empty() || !valid_digits {
+        return false;
+    }
+    let Ok(digits) = std::str::from_utf8(digits) else {
+        return false;
+    };
+    let Ok(codepoint) = u32::from_str_radix(digits, radix) else {
+        return false;
+    };
+    matches!(
+        codepoint,
+        0x9 | 0xA | 0xD | 0x20..=0xD7FF | 0xE000..=0xFFFD | 0x10000..=0x10FFFF
+    )
+}
+
+fn contains_msbuild_expression(value: &str) -> bool {
+    ["$(", "@(", "%("]
+        .iter()
+        .any(|expression| value.contains(expression))
 }
 
 fn build_dependency(
@@ -233,8 +419,9 @@ fn build_dependency(
     let name = pending.name?;
     let version = pending.version?;
     if name.value.trim().is_empty()
+        || contains_msbuild_expression(&name.value)
         || version.value.trim().is_empty()
-        || version.value.contains("$(")
+        || contains_msbuild_expression(&version.value)
     {
         return None;
     }
@@ -468,6 +655,10 @@ mod tests {
                 false,
             ),
             (
+                r#"<Project><PackageVersion Include="Package" Update="Other" Version="1.2.3" /></Project>"#,
+                false,
+            ),
+            (
                 r#"<Project><GlobalPackageReference Include="Package" Version="1.2.3" /></Project>"#,
                 true,
             ),
@@ -614,10 +805,34 @@ mod tests {
             r#"<Project><PackageVersion Include="Package" Version="" /></Project>"#,
             r#"<Project><PackageVersion Include="Package" Version="   " /></Project>"#,
             r#"<Project><PackageReference Update="Package" Version="1.2.3" /></Project>"#,
+            r#"<Project><PackageReference Include="Package" Update="Other" Version="1.2.3" /></Project>"#,
+            r#"<Project><GlobalPackageReference Include="Package" Update="Other" Version="1.2.3" /></Project>"#,
             r#"<Project><PackageReference Include="Package" Version="$(PackageVersion)" /></Project>"#,
+            r#"<Project><PackageReference Include="Package" Version="@(PackageVersions)" /></Project>"#,
+            r#"<Project><PackageReference Include="Package" Version="%(Version)" /></Project>"#,
             r#"<Project><PackageReference Include="Package"><Version>$(PackageVersion)</Version></PackageReference></Project>"#,
             r#"<Project><PackageReference Include="Package"><Metadata><Version>1.2.3</Version></Metadata></PackageReference></Project>"#,
             r#"<Project><PackageReference Include="Package"><Version>  </Version></PackageReference></Project>"#,
+            r#"<Project><PackageReference Include="Package"><Version>1<!-- split -->.2.3</Version></PackageReference></Project>"#,
+            r#"<Project><PackageReference Include="Package"><Version>1&#46;2.3</Version></PackageReference></Project>"#,
+            r#"<Project><PackageReference Include="Package"><Version>1<Metadata/>.2.3</Version></PackageReference></Project>"#,
+            r#"<Project><PackageReference Include="Package"><Version>1<![CDATA[.2]]>.3</Version></PackageReference></Project>"#,
+            r#"<Project><PackageReference Include="Package"><Version>1<?split data?>.2.3</Version></PackageReference></Project>"#,
+        ] {
+            assert!(
+                CsharpParser::new().parse(content).is_empty(),
+                "unexpected dependency from {content}"
+            );
+        }
+    }
+
+    #[test]
+    fn test_skip_indirect_package_names() {
+        for content in [
+            r#"<Project><PackageReference Include="$(PackageName)" Version="1.2.3" /></Project>"#,
+            r#"<Project><PackageReference Include="@(PackageNames)" Version="1.2.3" /></Project>"#,
+            r#"<Project><PackageReference Include="%(Identity)" Version="1.2.3" /></Project>"#,
+            r#"<Project><PackageVersion Update="$(PackageName)" Version="1.2.3" /></Project>"#,
         ] {
             assert!(
                 CsharpParser::new().parse(content).is_empty(),
@@ -634,9 +849,79 @@ mod tests {
         let malformed_attribute = r#"<Project broken=unquoted>
   <PackageVersion Include="First" Version="1.0.0" />
 </Project>"#;
+        let multiple_roots = r#"<Project>
+  <PackageVersion Include="First" Version="1.0.0" />
+</Project><Extra />"#;
+        let invalid_comment = r#"<Project>
+  <!-- invalid -- comment -->
+  <PackageVersion Include="First" Version="1.0.0" />
+</Project>"#;
+        let declaration_in_version = r#"<Project>
+  <PackageVersion Include="First"><Version>1.0<?xml version="1.0"?>.0</Version></PackageVersion>
+</Project>"#;
+        let doctype_in_version = r#"<Project>
+  <PackageVersion Include="First"><Version>1.0<!DOCTYPE Project>.0</Version></PackageVersion>
+</Project>"#;
+        let duplicate_doctype = r#"<!DOCTYPE Project><!DOCTYPE Project><Project>
+  <PackageVersion Include="First" Version="1.0.0" />
+</Project>"#;
+        let declaration_after_whitespace = r#"
+<?xml version="1.0"?><Project>
+  <PackageVersion Include="First" Version="1.0.0" />
+</Project>"#;
+        let undefined_entity = r#"<Project>&undefined;
+  <PackageVersion Include="First" Version="1.0.0" />
+</Project>"#;
+        let uppercase_hex_reference = r#"<Project><Description>&#X41;</Description>
+  <PackageVersion Include="First" Version="1.0.0" />
+</Project>"#;
+        let signed_character_reference = r#"<Project><Description>&#+65;</Description>
+  <PackageVersion Include="First" Version="1.0.0" />
+</Project>"#;
+        let incomplete_declaration = r#"<?xml?><Project>
+  <PackageVersion Include="First" Version="1.0.0" />
+</Project>"#;
+        let invalid_declaration_value = r#"<?xml version="1.0" standalone="maybe"?><Project>
+  <PackageVersion Include="First" Version="1.0.0" />
+</Project>"#;
+        let unsupported_doctype = r#"<!DOCTYPE Project><Project>
+  <PackageVersion Include="First" Version="1.0.0" />
+</Project>"#;
 
-        assert!(CsharpParser::new().parse(unclosed).is_empty());
-        assert!(CsharpParser::new().parse(malformed_attribute).is_empty());
+        for content in [
+            unclosed,
+            malformed_attribute,
+            multiple_roots,
+            invalid_comment,
+            declaration_in_version,
+            doctype_in_version,
+            duplicate_doctype,
+            declaration_after_whitespace,
+            undefined_entity,
+            uppercase_hex_reference,
+            signed_character_reference,
+            incomplete_declaration,
+            invalid_declaration_value,
+            unsupported_doctype,
+        ] {
+            assert!(
+                CsharpParser::new().parse(content).is_empty(),
+                "unexpected dependency from malformed XML: {content}"
+            );
+        }
+    }
+
+    #[test]
+    fn test_accept_valid_xml_prolog() {
+        let content = r#"<?xml version="1.0" encoding="UTF-8" standalone="yes"?><Project>
+  <Description>&amp;&#46;&#x2E;</Description>
+  <PackageVersion Include="Package" Version="1.2.3" />
+</Project>"#;
+
+        let dependencies = CsharpParser::new().parse(content);
+
+        assert_eq!(dependencies.len(), 1);
+        assert_dependency(content, &dependencies[0], "Package", "1.2.3", false);
     }
 
     #[test]
