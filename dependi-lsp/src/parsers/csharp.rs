@@ -56,8 +56,36 @@ impl PendingItem {
         event: &BytesStart<'_>,
         event_start: usize,
     ) -> Result<Self, ()> {
-        let include = located_attribute(event, event_start, b"Include")?;
-        let update = located_attribute(event, event_start, b"Update")?;
+        let mut include = None;
+        let mut update = None;
+        let mut version = None;
+
+        for attribute in event.attributes() {
+            let attribute = attribute.map_err(|_| ())?;
+            let key = attribute.key.as_ref();
+            if !matches!(key, b"Include" | b"Update" | b"Version") {
+                continue;
+            }
+
+            let raw_value = attribute.value.as_ref();
+            let (relative_start, relative_end) =
+                attribute_value_range(event, raw_value).ok_or(())?;
+            let value = LocatedValue {
+                value: attribute
+                    .decoded_and_normalized_value(XmlVersion::Implicit1_0, event.decoder())
+                    .map_err(|_| ())?
+                    .into_owned(),
+                absolute_start: event_start.checked_add(relative_start).ok_or(())?,
+                absolute_end: event_start.checked_add(relative_end).ok_or(())?,
+            };
+            match key {
+                b"Include" => include = Some(value),
+                b"Update" => update = Some(value),
+                b"Version" => version = Some(value),
+                _ => {}
+            }
+        }
+
         let name = match kind {
             NugetItemKind::PackageVersion => include.or(update),
             NugetItemKind::PackageReference | NugetItemKind::GlobalPackageReference => {
@@ -68,7 +96,7 @@ impl PendingItem {
         Ok(Self {
             kind,
             name,
-            version: located_attribute(event, event_start, b"Version")?,
+            version,
         })
     }
 }
@@ -159,33 +187,50 @@ impl<'a> ParseState<'a> {
     }
 
     fn handle_empty(&mut self, event: &BytesStart<'_>, event_end: u64) -> Result<(), ()> {
-        validate_attributes(event)?;
+        let kind = self
+            .active
+            .is_none()
+            .then(|| NugetItemKind::from_local_name(event.local_name().as_ref()))
+            .flatten();
+        let item = if let Some(kind) = kind {
+            let event_start = event_content_start(event_end, event, true).ok_or(())?;
+            Some(PendingItem::from_event(kind, event, event_start)?)
+        } else {
+            validate_attributes(event)?;
+            None
+        };
         self.register_root_element()?;
 
         if let Some(active) = self.active.as_mut() {
             active.mark_fragmented_version();
             return Ok(());
         }
-        let Some(kind) = NugetItemKind::from_local_name(event.local_name().as_ref()) else {
-            return Ok(());
-        };
-        let event_start = event_content_start(event_end, event, true).ok_or(())?;
-        let item = PendingItem::from_event(kind, event, event_start)?;
-        self.push_dependency(item);
+        if let Some(item) = item {
+            self.push_dependency(item);
+        }
         Ok(())
     }
 
     fn handle_start(&mut self, event: &BytesStart<'_>, event_end: u64) -> Result<(), ()> {
-        validate_attributes(event)?;
+        let kind = self
+            .active
+            .is_none()
+            .then(|| NugetItemKind::from_local_name(event.local_name().as_ref()))
+            .flatten();
+        let item = if let Some(kind) = kind {
+            let event_start = event_content_start(event_end, event, false).ok_or(())?;
+            Some(PendingItem::from_event(kind, event, event_start)?)
+        } else {
+            validate_attributes(event)?;
+            None
+        };
         self.register_root_element()?;
 
         let event_depth = self.depth;
         if let Some(active) = self.active.as_mut() {
             active.mark_fragmented_version();
             active.begin_child_version(event.local_name().as_ref(), event_depth);
-        } else if let Some(kind) = NugetItemKind::from_local_name(event.local_name().as_ref()) {
-            let event_start = event_content_start(event_end, event, false).ok_or(())?;
-            let item = PendingItem::from_event(kind, event, event_start)?;
+        } else if let Some(item) = item {
             self.active = Some(ActiveItem::new(item, event_depth));
         }
 
@@ -475,35 +520,6 @@ fn event_content_start(event_end: u64, event: &BytesStart<'_>, is_empty: bool) -
         .checked_sub(closing_delimiter_len)
 }
 
-fn located_attribute(
-    event: &BytesStart<'_>,
-    event_start: usize,
-    attribute_name: &[u8],
-) -> Result<Option<LocatedValue>, ()> {
-    let mut located = None;
-    for attribute in event.attributes() {
-        let attribute = attribute.map_err(|_| ())?;
-        if attribute.key.as_ref() != attribute_name {
-            continue;
-        }
-
-        let (relative_start, relative_end) =
-            raw_attribute_value_range(event, attribute_name).ok_or(())?;
-        let absolute_start = event_start.checked_add(relative_start).ok_or(())?;
-        let absolute_end = event_start.checked_add(relative_end).ok_or(())?;
-        let value = attribute
-            .decoded_and_normalized_value(XmlVersion::Implicit1_0, event.decoder())
-            .map_err(|_| ())?
-            .into_owned();
-        located = Some(LocatedValue {
-            value,
-            absolute_start,
-            absolute_end,
-        });
-    }
-    Ok(located)
-}
-
 fn validate_attributes(event: &BytesStart<'_>) -> Result<(), ()> {
     for attribute in event.attributes() {
         attribute.map_err(|_| ())?;
@@ -538,60 +554,12 @@ fn located_text(
     }))
 }
 
-fn raw_attribute_value_range(
-    event: &BytesStart<'_>,
-    attribute_name: &[u8],
-) -> Option<(usize, usize)> {
+fn attribute_value_range(event: &BytesStart<'_>, value: &[u8]) -> Option<(usize, usize)> {
     let raw: &[u8] = event.as_ref();
-    let mut cursor = event.name().as_ref().len();
-
-    while cursor < raw.len() {
-        while raw.get(cursor).is_some_and(u8::is_ascii_whitespace) {
-            cursor += 1;
-        }
-        if cursor == raw.len() {
-            return None;
-        }
-
-        let name_start = cursor;
-        while raw
-            .get(cursor)
-            .is_some_and(|byte| !byte.is_ascii_whitespace() && *byte != b'=')
-        {
-            cursor += 1;
-        }
-        let name_end = cursor;
-
-        while raw.get(cursor).is_some_and(u8::is_ascii_whitespace) {
-            cursor += 1;
-        }
-        if raw.get(cursor) != Some(&b'=') {
-            return None;
-        }
-        cursor += 1;
-        while raw.get(cursor).is_some_and(u8::is_ascii_whitespace) {
-            cursor += 1;
-        }
-
-        let quote = *raw.get(cursor)?;
-        if !matches!(quote, b'\'' | b'"') {
-            return None;
-        }
-        cursor += 1;
-        let value_start = cursor;
-        while raw.get(cursor) != Some(&quote) {
-            cursor += 1;
-            raw.get(cursor)?;
-        }
-        let value_end = cursor;
-        cursor += 1;
-
-        if raw.get(name_start..name_end)? == attribute_name {
-            return Some((value_start, value_end));
-        }
-    }
-
-    None
+    let start = (value.as_ptr() as usize).checked_sub(raw.as_ptr() as usize)?;
+    let end = start.checked_add(value.len())?;
+    raw.get(start..end)?;
+    Some((start, end))
 }
 
 #[cfg(test)]
@@ -831,6 +799,12 @@ mod tests {
         let malformed_attribute = r#"<Project broken=unquoted>
   <PackageVersion Include="First" Version="1.0.0" />
 </Project>"#;
+        let malformed_package_attribute = r#"<Project>
+  <PackageVersion Include="First" Version="1.0.0" broken=unquoted />
+</Project>"#;
+        let duplicate_package_attribute = r#"<Project>
+  <PackageVersion Include="First" Include="Second" Version="1.0.0" />
+</Project>"#;
         let multiple_roots = r#"<Project>
   <PackageVersion Include="First" Version="1.0.0" />
 </Project><Extra />"#;
@@ -876,6 +850,8 @@ mod tests {
         for content in [
             unclosed,
             malformed_attribute,
+            malformed_package_attribute,
+            duplicate_package_attribute,
             multiple_roots,
             invalid_comment,
             declaration_in_version,
