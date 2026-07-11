@@ -208,7 +208,7 @@ For multi-targeting projects:
 <TargetFrameworks>net6.0;net7.0;net8.0</TargetFrameworks>
 ```
 
-Dependi shows the latest version compatible with any target framework.
+Dependi reports the latest registry version without evaluating target-framework compatibility. Run `dotnet restore` or build the project to verify compatibility after an update.
 
 ### Private NuGet Feeds
 
