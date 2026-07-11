@@ -35,6 +35,9 @@ docs/superpowers/
 # Test files
 test-files/
 
+# Generated coverage reports
+/coverage/
+
 # Fuzz corpus (generated, large)
 dependi-lsp/fuzz/corpus/
 

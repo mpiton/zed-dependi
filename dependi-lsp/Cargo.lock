@@ -559,7 +559,6 @@ dependencies = [
  "json-spanned-value",
  "quick-xml",
  "r2d2",
- "regex",
  "reqwest",
  "rusqlite",
  "semver",
@@ -568,14 +567,12 @@ dependencies = [
  "serial_test",
  "taplo",
  "tempfile",
- "thiserror 2.0.18",
  "tokio",
  "toml",
  "tower-lsp",
  "tracing",
  "tracing-subscriber",
  "url",
- "walkdir",
  "wiremock",
 ]
 

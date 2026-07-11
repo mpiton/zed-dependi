@@ -11,12 +11,6 @@ description: "Step-by-step guide for adding support for a new package manager / 
 Step-by-step guide to adding a new language/ecosystem to Dependi. Worked example: Swift Package Manager.
 {: .fs-6 .fw-300 }
 
-<!--
-  Every fenced ```rust block in this file (without `ignore`) is mirrored as
-  a doctest in `dependi-lsp/src/docs/swift_tutorial_fixture.rs`. Edits to
-  the snippets MUST be reflected there or the doctests drift.
--->
-
 <details open markdown="block">
   <summary>Table of contents</summary>
   {: .text-delta }
@@ -289,7 +283,7 @@ Expected: compilation error mentioning `cannot find type SwiftParser`.
 
 ### 4.3 Implement
 
-Replace the rest of `dependi-lsp/src/parsers/swift.rs` body with the implementation. The doctest "Example 3 — Implementing the `Parser` trait" in `dependi-lsp/src/docs/swift_tutorial_fixture.rs` contains a complete implementation you can copy. The full file:
+Add this minimal implementation above the existing `#[cfg(test)] mod tests` from Section 4.2. Keep that test module unchanged so the file defines it exactly once:
 
 ```rust,ignore
 //! `Package.swift` parser for Swift Package Manager.
@@ -307,18 +301,55 @@ impl SwiftParser {
 
 impl Parser for SwiftParser {
     fn parse(&self, content: &str) -> Vec<Dependency> {
-        // Body identical to Example 3 of `swift_tutorial_fixture.rs`.
-        // See the doctest for the worked-out logic; this comment exists so
-        // a reader doesn't read past it expecting more code.
-        unimplemented!("copy the body from Example 3");
+        let mut deps = Vec::new();
+        for (line_idx, line) in content.lines().enumerate() {
+            let trimmed = line.trim_start();
+            if !trimmed.starts_with(".package(url:") {
+                continue;
+            }
+            let url_start = match line.find('"') {
+                Some(idx) => idx + 1,
+                None => continue,
+            };
+            let url_end = match line[url_start..].find('"') {
+                Some(idx) => url_start + idx,
+                None => continue,
+            };
+            let url = &line[url_start..url_end];
+            let name = url.rsplit('/').next().unwrap_or(url).to_string();
+            let version_marker = match line
+                .rfind('"')
+                .and_then(|end| line[..end].rfind('"').map(|start| (start + 1, end)))
+            {
+                Some(pair) if pair.0 > url_end => pair,
+                _ => continue,
+            };
+            let version = line[version_marker.0..version_marker.1].to_string();
+            deps.push(Dependency {
+                name,
+                version,
+                name_span: Span {
+                    line: line_idx as u32,
+                    line_start: url_start as u32,
+                    line_end: url_end as u32,
+                },
+                version_span: Span {
+                    line: line_idx as u32,
+                    line_start: version_marker.0 as u32,
+                    line_end: version_marker.1 as u32,
+                },
+                dev: false,
+                optional: false,
+                registry: None,
+                resolved_version: None,
+            });
+        }
+        deps
     }
 }
-
-#[cfg(test)]
-mod tests { /* defined above */ }
 ```
 
-> **In a real PR**, replace the `unimplemented!()` body with the parsing logic from Example 3 verbatim. Keeping the two in sync is the contributor's responsibility — the doctest catches API drift but not logic drift.
+> **In a real PR**, cover escaping, comments, alternate requirement forms, malformed input, and checked LSP position conversions before shipping this illustrative parser.
 
 ### 4.4 Run the tests
 
@@ -699,7 +730,7 @@ Take any existing language doc as a template (`docs/languages/rust.md` is the mo
 - **Registry quirks** — Swift Package Index API, OSV ecosystem name, rate limits.
 - **Known limitations** — naïve parser doesn't handle multi-line declarations.
 
-### 8.2 Update `docs/registries.md`
+### 8.2 Update `docs/registries/index.md`
 
 Add a new row to the registry table covering the Swift Package Index endpoint, license, rate limit, and OSV ecosystem string.
 
@@ -793,7 +824,7 @@ Use this list as a final review before opening your PR. Every item must be done 
 ### Docs
 
 - [ ] `docs/languages/<your_lang>.md` (new).
-- [ ] Row in `docs/registries.md`.
+- [ ] Row in `docs/registries/index.md`.
 - [ ] `[Unreleased] / Added` entry in `CHANGELOG.md` referencing your issue/PR.
 
 ### CI
@@ -837,7 +868,3 @@ Rust's exhaustive `match` is your friend. The `parse_document` switch in `backen
 ### 11.6 Rate-limiting your way to a ban
 
 Aggressive registry clients get IP-blocked. crates.io enforces 1 req/s strictly; npm tolerates ~1 req/s before blocking; PyPI is CDN-cached but still asks for politeness. If your registry has a documented limit, copy the `RateLimiter` pattern from `dependi-lsp/src/registries/crates_io.rs` rather than burst-firing requests in tests.
-
-### 11.7 Skipping the doctest gate
-
-This guide ships with doctests that lock the snippets to the real `Parser`/`Registry` API. If you change a trait signature in your PR, run `cd dependi-lsp && cargo test --doc` to confirm the tutorial doctests still compile. They will fail loudly if anything has drifted.

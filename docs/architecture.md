@@ -287,7 +287,7 @@ There is no HTTP-level cache. Caching happens at the application layer (see [§7
 
 ### Bounded concurrency
 
-`process_document` builds a `tokio::sync::Semaphore::new(5)` per request (created inline; not a field of `ProcessingContext`) and acquires a permit before each `get_version_info` call. Five in-flight requests is enough to saturate a slow-path lockfile while staying polite to public registries. For per-registry rate limits and HTTP API details see [Registries]({% link registries.md %}).
+`process_document` builds a `tokio::sync::Semaphore::new(5)` per request (created inline; not a field of `ProcessingContext`) and acquires a permit before each `get_version_info` call. Five in-flight requests is enough to saturate a slow-path lockfile while staying polite to public registries. For per-registry rate limits and HTTP API details see [Registries]({% link registries/index.md %}).
 
 ### Per-ecosystem clients
 
@@ -446,7 +446,7 @@ The labels rendered next to versions are produced exclusively by `create_inlay_h
 
 ## 10. Authentication & Private Registries
 
-> **Status — two parallel paths.** Production auth flows through **direct config injection** today: tokens from LSP config and `~/.cargo/credentials.toml` (parsed by `cargo_credentials::parse_credentials_content`, a plain `pub fn`) are fed into `CargoSparseRegistry::with_client_and_config`, and npm registry config tokens are fed into `NpmRegistry::with_client_and_config` — both build `Authorization: Bearer …` headers at construction time. The **`TokenProviderManager` dynamic-dispatch path** (the `TokenProvider` trait + longest-prefix lookup described below) is structurally complete and instantiated in `DependiBackend`, but `TokenProviderManager::get_auth_headers` and the `.npmrc` parsers (`parse_token_from_content`, `parse_registry_from_content`, `extract_auth_token`, `resolve_env_var`) are still `#[cfg(test)]`-gated — they are the planned mechanism for runtime-resolved per-request auth (e.g. matching a request URL against many registered scopes), which lands in a follow-up. See [Private Registries]({% link private-registries.md %}) for user-facing setup.
+> **Status — two parallel paths.** Production auth flows through **direct config injection** today: tokens from LSP config and `~/.cargo/credentials.toml` (parsed by `cargo_credentials::parse_credentials_content`, a plain `pub fn`) are fed into `CargoSparseRegistry::with_client_and_config`, and npm registry config tokens are fed into `NpmRegistry::with_client_and_config` — both build `Authorization: Bearer …` headers at construction time. The **`TokenProviderManager` dynamic-dispatch path** (the `TokenProvider` trait + longest-prefix lookup described below) is structurally complete and instantiated in `DependiBackend`, but `TokenProviderManager::get_auth_headers` and the `.npmrc` parsers (`parse_token_from_content`, `parse_registry_from_content`, `extract_auth_token`, `resolve_env_var`) are still `#[cfg(test)]`-gated — they are the planned mechanism for runtime-resolved per-request auth (e.g. matching a request URL against many registered scopes), which lands in a follow-up. See [Private Registries]({% link registries/private.md %}) for user-facing setup.
 
 ### `TokenProvider` trait
 
@@ -553,7 +553,7 @@ This section captures non-obvious choices and their rationale. Each subsection a
 
 - [README.md](../README.md) — high-level overview and feature list.
 - [Configuration]({% link configuration.md %}) — user-facing settings reference (registries, TTLs, debounce).
-- [Private registries]({% link private-registries.md %}) — user-facing private-registry setup.
+- [Private registries]({% link registries/private.md %}) — user-facing private-registry setup.
 - [Adding a language]({% link adding-a-language.md %}) — tutorial that mirrors the layered architecture described here.
 - [Features overview]({% link features/index.md %}) — per-feature deep dives (inlay hints, diagnostics, code actions, security).
 - [Contributing]({% link contributing.md %}) — how to set up a development environment.

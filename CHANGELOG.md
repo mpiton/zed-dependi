@@ -15,6 +15,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   security, and update features.
   ([#352](https://github.com/mpiton/zed-dependi/issues/352))
 
+### Changed
+
+- Removed generated coverage artifacts, duplicate registry guides, redundant
+  documentation fixtures, and unused direct dependencies. The Tokio feature
+  guard now checks the manifest directly without compiling temporary crates.
+
 ### Fixed
 
 - Dependency update actions now preserve recognized version constraint
