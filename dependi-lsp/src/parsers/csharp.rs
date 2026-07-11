@@ -1,23 +1,77 @@
-//! Parser for C# `.csproj` files (NuGet `PackageReference` format).
+//! Parser for concrete NuGet items in .NET/MSBuild manifests.
 //!
-//! Two XML formats are supported on the same line:
+//! Supported items use `PackageReference`, `PackageVersion`, or
+//! `GlobalPackageReference` with literal package names and versions.
 //!
 //! ```xml
-//! <!-- Self-closing attribute form -->
 //! <PackageReference Include="Serilog" Version="3.1.1" />
-//!
-//! <!-- Expanded element form -->
-//! <PackageReference Include="Serilog"><Version>3.1.1</Version></PackageReference>
+//! <PackageVersion Include="Serilog" Version="3.1.1" />
 //! ```
-//!
-//! `PackageReference` entries that have no `Version` attribute or element are
-//! silently skipped (typically managed centrally via `Directory.Packages.props`).
-//! NuGet does not have an explicit dev-dependency concept, so all parsed
-//! dependencies have `dev = false`.
 
 use super::{Dependency, Parser, Span};
+use quick_xml::events::{BytesStart, Event};
+use quick_xml::{Reader, XmlVersion};
 
-/// Parser for C# `.csproj` files.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum NugetItemKind {
+    PackageReference,
+    PackageVersion,
+    GlobalPackageReference,
+}
+
+impl NugetItemKind {
+    fn from_local_name(name: &[u8]) -> Option<Self> {
+        match name {
+            b"PackageReference" => Some(Self::PackageReference),
+            b"PackageVersion" => Some(Self::PackageVersion),
+            b"GlobalPackageReference" => Some(Self::GlobalPackageReference),
+            _ => None,
+        }
+    }
+
+    fn is_development(self) -> bool {
+        self == Self::GlobalPackageReference
+    }
+}
+
+#[derive(Debug)]
+struct LocatedValue {
+    value: String,
+    absolute_start: usize,
+    absolute_end: usize,
+}
+
+#[derive(Debug)]
+struct PendingItem {
+    kind: NugetItemKind,
+    name: Option<LocatedValue>,
+    version: Option<LocatedValue>,
+}
+
+impl PendingItem {
+    fn from_event(
+        kind: NugetItemKind,
+        event: &BytesStart<'_>,
+        event_start: usize,
+    ) -> Result<Self, ()> {
+        let include = located_attribute(event, event_start, b"Include")?;
+        let name = if include.is_some() {
+            include
+        } else if kind == NugetItemKind::PackageVersion {
+            located_attribute(event, event_start, b"Update")?
+        } else {
+            None
+        };
+
+        Ok(Self {
+            kind,
+            name,
+            version: located_attribute(event, event_start, b"Version")?,
+        })
+    }
+}
+
+/// Parser for NuGet items in .NET/MSBuild manifests.
 ///
 /// # Examples
 ///
@@ -43,74 +97,63 @@ impl CsharpParser {
 
 impl Parser for CsharpParser {
     fn parse(&self, content: &str) -> Vec<Dependency> {
+        let newline_starts = newline_starts(content);
+        let mut reader = Reader::from_str(content);
         let mut dependencies = Vec::new();
 
-        for (line_idx, line) in content.lines().enumerate() {
-            let line_num = line_idx as u32;
-            let trimmed = line.trim();
-
-            // Look for PackageReference elements
-            // Format 1: <PackageReference Include="Package" Version="1.0.0" />
-            // Format 2: <PackageReference Include="Package"><Version>1.0.0</Version></PackageReference>
-            if trimmed.contains("<PackageReference")
-                && trimmed.contains("Include=")
-                && let Some(dep) = parse_package_reference(line, line_num)
-            {
-                dependencies.push(dep);
+        loop {
+            match reader.read_event() {
+                Ok(Event::Empty(event)) => {
+                    let Some(kind) = NugetItemKind::from_local_name(event.local_name().as_ref())
+                    else {
+                        continue;
+                    };
+                    let Some(event_start) =
+                        event_content_start(reader.buffer_position(), &event, true)
+                    else {
+                        return Vec::new();
+                    };
+                    let pending = match PendingItem::from_event(kind, &event, event_start) {
+                        Ok(pending) => pending,
+                        Err(()) => return Vec::new(),
+                    };
+                    if let Some(dependency) = build_dependency(pending, content, &newline_starts) {
+                        dependencies.push(dependency);
+                    }
+                }
+                Ok(Event::Eof) => return dependencies,
+                Ok(_) => {}
+                Err(_) => return Vec::new(),
             }
         }
-
-        dependencies
     }
 }
 
-/// Parses a single `<PackageReference …>` line and returns the corresponding [`Dependency`].
-///
-/// Returns `None` when no `Include` attribute is found, or when no version can
-/// be extracted from either the `Version=""` attribute or a `<Version>` child element.
-fn parse_package_reference(line: &str, line_num: u32) -> Option<Dependency> {
-    // Extract Include attribute (package name)
-    let include_start = line.find("Include=\"")? + 9;
-    let include_content = &line[include_start..];
-    let include_end = include_content.find('"')?;
-    let name = &include_content[..include_end];
-
-    // Try to find Version attribute on same line
-    let version = if let Some(version_attr_start) = line.find("Version=\"") {
-        let version_content = &line[version_attr_start + 9..];
-        let version_end = version_content.find('"')?;
-        version_content[..version_end].to_string()
-    } else {
-        let version_elem_start = line.find("<Version>")?;
-        // Format: <Version>1.0.0</Version>
-        let version_content = &line[version_elem_start + 9..];
-        let version_end = version_content.find('<')?;
-        version_content[..version_end].to_string()
-    };
-
-    // Calculate positions
-    let name_pattern = format!(r#""{name}""#);
-    let name_pos = line.find(&name_pattern)?;
-    let name_start = (name_pos + 1) as u32;
-    let name_end = name_start + name.len() as u32;
-
-    let version_start = line.find(&version)? as u32;
-    let version_end = version_start + version.len() as u32;
-
+fn build_dependency(
+    pending: PendingItem,
+    content: &str,
+    newline_starts: &[usize],
+) -> Option<Dependency> {
+    let name = pending.name?;
+    let version = pending.version?;
+    let name_span = span_from_absolute(
+        content,
+        newline_starts,
+        name.absolute_start,
+        name.absolute_end,
+    )?;
+    let version_span = span_from_absolute(
+        content,
+        newline_starts,
+        version.absolute_start,
+        version.absolute_end,
+    )?;
     Some(Dependency {
-        name: name.to_string(),
-        version,
-        name_span: Span {
-            line: line_num,
-            line_start: name_start,
-            line_end: name_end,
-        },
-        version_span: Span {
-            line: line_num,
-            line_start: version_start,
-            line_end: version_end,
-        },
-        dev: false, // NuGet doesn't have explicit dev dependencies in .csproj
+        name: name.value,
+        version: version.value,
+        name_span,
+        version_span,
+        dev: pending.kind.is_development(),
         optional: false,
         registry: None,
         resolved_version: None,
@@ -118,9 +161,250 @@ fn parse_package_reference(line: &str, line_num: u32) -> Option<Dependency> {
     })
 }
 
+fn newline_starts(content: &str) -> Vec<usize> {
+    let mut starts = vec![0];
+    starts.extend(
+        content
+            .bytes()
+            .enumerate()
+            .filter_map(|(offset, byte)| (byte == b'\n').then_some(offset + 1)),
+    );
+    starts
+}
+
+fn span_from_absolute(
+    content: &str,
+    newline_starts: &[usize],
+    absolute_start: usize,
+    absolute_end: usize,
+) -> Option<Span> {
+    let value = content.get(absolute_start..absolute_end)?;
+    if value.is_empty() || value.bytes().any(|byte| matches!(byte, b'\n' | b'\r')) {
+        return None;
+    }
+
+    let line_index = newline_starts
+        .partition_point(|line_start| *line_start <= absolute_start)
+        .checked_sub(1)?;
+    let line_absolute_start = *newline_starts.get(line_index)?;
+
+    Some(Span {
+        line: u32::try_from(line_index).ok()?,
+        line_start: u32::try_from(absolute_start.checked_sub(line_absolute_start)?).ok()?,
+        line_end: u32::try_from(absolute_end.checked_sub(line_absolute_start)?).ok()?,
+    })
+}
+
+fn event_content_start(event_end: u64, event: &BytesStart<'_>, is_empty: bool) -> Option<usize> {
+    let event_end = usize::try_from(event_end).ok()?;
+    let event_raw: &[u8] = event.as_ref();
+    let closing_delimiter_len = if is_empty { 2 } else { 1 };
+    event_end
+        .checked_sub(event_raw.len())?
+        .checked_sub(closing_delimiter_len)
+}
+
+fn located_attribute(
+    event: &BytesStart<'_>,
+    event_start: usize,
+    attribute_name: &[u8],
+) -> Result<Option<LocatedValue>, ()> {
+    let mut located = None;
+    for attribute in event.attributes() {
+        let attribute = attribute.map_err(|_| ())?;
+        if attribute.key.as_ref() != attribute_name {
+            continue;
+        }
+
+        let (relative_start, relative_end) =
+            raw_attribute_value_range(event, attribute_name).ok_or(())?;
+        let absolute_start = event_start.checked_add(relative_start).ok_or(())?;
+        let absolute_end = event_start.checked_add(relative_end).ok_or(())?;
+        let value = attribute
+            .decoded_and_normalized_value(XmlVersion::Implicit1_0, event.decoder())
+            .map_err(|_| ())?
+            .into_owned();
+        located = Some(LocatedValue {
+            value,
+            absolute_start,
+            absolute_end,
+        });
+    }
+    Ok(located)
+}
+
+fn raw_attribute_value_range(
+    event: &BytesStart<'_>,
+    attribute_name: &[u8],
+) -> Option<(usize, usize)> {
+    let raw: &[u8] = event.as_ref();
+    let mut cursor = event.name().as_ref().len();
+
+    while cursor < raw.len() {
+        while raw.get(cursor).is_some_and(u8::is_ascii_whitespace) {
+            cursor += 1;
+        }
+        if cursor == raw.len() {
+            return None;
+        }
+
+        let name_start = cursor;
+        while raw
+            .get(cursor)
+            .is_some_and(|byte| !byte.is_ascii_whitespace() && *byte != b'=')
+        {
+            cursor += 1;
+        }
+        let name_end = cursor;
+
+        while raw.get(cursor).is_some_and(u8::is_ascii_whitespace) {
+            cursor += 1;
+        }
+        if raw.get(cursor) != Some(&b'=') {
+            return None;
+        }
+        cursor += 1;
+        while raw.get(cursor).is_some_and(u8::is_ascii_whitespace) {
+            cursor += 1;
+        }
+
+        let quote = *raw.get(cursor)?;
+        if !matches!(quote, b'\'' | b'"') {
+            return None;
+        }
+        cursor += 1;
+        let value_start = cursor;
+        while raw.get(cursor) != Some(&quote) {
+            cursor += 1;
+            raw.get(cursor)?;
+        }
+        let value_end = cursor;
+        cursor += 1;
+
+        if raw.get(name_start..name_end)? == attribute_name {
+            return Some((value_start, value_end));
+        }
+    }
+
+    None
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn span_text(content: &str, span: Span) -> &str {
+        let line = content.lines().nth(span.line as usize).unwrap();
+        &line[span.line_start as usize..span.line_end as usize]
+    }
+
+    fn assert_dependency(
+        content: &str,
+        dependency: &Dependency,
+        name: &str,
+        version: &str,
+        dev: bool,
+    ) {
+        assert_eq!(dependency.name, name);
+        assert_eq!(dependency.version, version);
+        assert_eq!(span_text(content, dependency.name_span), name);
+        assert_eq!(span_text(content, dependency.version_span), version);
+        assert_eq!(dependency.dev, dev);
+        assert!(!dependency.optional);
+        assert_eq!(dependency.registry, None);
+        assert_eq!(dependency.resolved_version, None);
+        assert!(!dependency.has_additional_version_constraints);
+    }
+
+    #[test]
+    fn test_parse_attribute_forms() {
+        let cases = [
+            (
+                r#"<Project><PackageReference Include="Package" Version="1.2.3" /></Project>"#,
+                false,
+            ),
+            (
+                r#"<Project><PackageVersion Include="Package" Version="1.2.3" /></Project>"#,
+                false,
+            ),
+            (
+                r#"<Project><PackageVersion Update="Package" Version="1.2.3" /></Project>"#,
+                false,
+            ),
+            (
+                r#"<Project><GlobalPackageReference Include="Package" Version="1.2.3" /></Project>"#,
+                true,
+            ),
+            (
+                r#"<Project><PackageVersion Include = 'Package' Version = '1.2.3' /></Project>"#,
+                false,
+            ),
+            (
+                r#"<Project><PackageVersion Version="1.2.3" Include="Package" /></Project>"#,
+                false,
+            ),
+        ];
+
+        let parser = CsharpParser::new();
+        for (content, dev) in cases {
+            let dependencies = parser.parse(content);
+            assert_eq!(dependencies.len(), 1, "failed to parse {content}");
+            assert_dependency(content, &dependencies[0], "Package", "1.2.3", dev);
+        }
+    }
+
+    #[test]
+    fn test_parse_multiline_start_tag() {
+        let content = r#"<Project>
+  <PackageVersion
+    Include="Package"
+    Version="1.2.3" />
+</Project>"#;
+
+        let dependencies = CsharpParser::new().parse(content);
+
+        assert_eq!(dependencies.len(), 1);
+        assert_dependency(content, &dependencies[0], "Package", "1.2.3", false);
+    }
+
+    #[test]
+    fn test_ignore_package_declaration_in_comment() {
+        let content =
+            r#"<Project><!-- <PackageReference Include="Package" Version="1.2.3" /> --></Project>"#;
+
+        assert!(CsharpParser::new().parse(content).is_empty());
+    }
+
+    #[test]
+    fn test_skip_empty_or_multiline_attribute_values() {
+        for content in [
+            r#"<Project><PackageReference Include="" Version="1.2.3" /></Project>"#,
+            r#"<Project><PackageReference Include="Package" Version="" /></Project>"#,
+            "<Project><PackageReference Include=\"Package\" Version=\"1.2\n.3\" /></Project>",
+        ] {
+            assert!(
+                CsharpParser::new().parse(content).is_empty(),
+                "unexpected dependency from {content}"
+            );
+        }
+    }
+
+    #[test]
+    fn test_attribute_value_positions() {
+        let content = r#"<PackageVersion Include="Package" Version="1.2.3" />"#;
+
+        let dependencies = CsharpParser::new().parse(content);
+
+        assert_eq!(dependencies.len(), 1);
+        let dependency = &dependencies[0];
+        assert_eq!(dependency.name_span.line, 0);
+        assert_eq!(dependency.name_span.line_start, 25);
+        assert_eq!(dependency.name_span.line_end, 32);
+        assert_eq!(dependency.version_span.line, 0);
+        assert_eq!(dependency.version_span.line_start, 43);
+        assert_eq!(dependency.version_span.line_end, 48);
+        assert_dependency(content, dependency, "Package", "1.2.3", false);
+    }
 
     #[test]
     fn test_parse_self_closing() {
