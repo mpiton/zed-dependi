@@ -142,6 +142,24 @@ async fn parsed_manifests_keep_safe_constraint_shapes_when_updated() {
             expected: "<Project><ItemGroup><PackageReference Include=\"Package\" Version=\"[2.0]\" /></ItemGroup></Project>\n",
         },
         UpdateCase {
+            parser: Box::new(CsharpParser::new()),
+            file_type: FileType::Csharp,
+            uri: "file:///test/Directory.Packages.props",
+            package: "Package",
+            manifest: "<Project><ItemGroup><PackageVersion Include=\"Package\" Version=\"[1.0]\" /></ItemGroup></Project>\n",
+            latest: "2.0",
+            expected: "<Project><ItemGroup><PackageVersion Include=\"Package\" Version=\"[2.0]\" /></ItemGroup></Project>\n",
+        },
+        UpdateCase {
+            parser: Box::new(CsharpParser::new()),
+            file_type: FileType::Csharp,
+            uri: "file:///test/Directory.Packages.props",
+            package: "Package",
+            manifest: "<Project>\n  <ItemGroup>\n    <PackageVersion Update=\"Package\">\n      <Version>[1.0]</Version>\n    </PackageVersion>\n  </ItemGroup>\n</Project>\n",
+            latest: "2.0",
+            expected: "<Project>\n  <ItemGroup>\n    <PackageVersion Update=\"Package\">\n      <Version>[2.0]</Version>\n    </PackageVersion>\n  </ItemGroup>\n</Project>\n",
+        },
+        UpdateCase {
             parser: Box::new(RubyParser::new()),
             file_type: FileType::Ruby,
             uri: "file:///test/Gemfile",
@@ -211,4 +229,19 @@ async fn compound_python_and_ruby_declarations_have_no_update_action() {
             case.file_type
         );
     }
+}
+
+#[tokio::test]
+async fn fragmented_csharp_child_version_has_no_update_action() {
+    let case = UpdateCase {
+        parser: Box::new(CsharpParser::new()),
+        file_type: FileType::Csharp,
+        uri: "file:///test/Directory.Packages.props",
+        package: "Package",
+        manifest: "<Project><PackageVersion Include=\"Package\"><Version>1<!-- split -->.2.3</Version></PackageVersion></Project>\n",
+        latest: "2.0",
+        expected: "",
+    };
+
+    assert_eq!(apply_individual_update(&case).await, None);
 }

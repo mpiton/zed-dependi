@@ -58,7 +58,7 @@ Dependi provides comprehensive dependency management directly in your editor:
 | [Go]({% link languages/go.md %}) | `go.mod` | proxy.golang.org |
 | [PHP]({% link languages/php.md %}) | `composer.json` | Packagist |
 | [Dart/Flutter]({% link languages/dart.md %}) | `pubspec.yaml` | pub.dev |
-| [C#/.NET]({% link languages/dotnet.md %}) | `*.csproj` | NuGet |
+| [C#/.NET]({% link languages/dotnet.md %}) | `*.csproj`, `Directory.Build.props`, `Directory.Packages.props` | NuGet |
 | [Ruby]({% link languages/ruby.md %}) | `Gemfile` | RubyGems.org |
 
 ## Quick Start

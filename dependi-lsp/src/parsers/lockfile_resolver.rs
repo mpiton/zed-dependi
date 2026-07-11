@@ -12,6 +12,7 @@
 //!   mutating each [`crate::parsers::Dependency`]'s `resolved_version` field in place.
 
 use async_trait::async_trait;
+use std::ffi::OsStr;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
@@ -81,8 +82,8 @@ pub trait LockfileResolver: Send + Sync {
 ///
 /// # Returns
 ///
-/// `Some(resolver)` for all supported ecosystems; `None` for
-/// [`FileType::Maven`] which has no lockfile support.
+/// `Some(resolver)` for supported manifest/lockfile pairs. Returns `None` for
+/// [`FileType::Maven`] and for C# manifests that are not `.csproj` files.
 pub async fn select_resolver(
     file_type: FileType,
     manifest_path: &Path,
@@ -115,7 +116,13 @@ pub async fn select_resolver(
         FileType::Go => Some(Box::new(crate::parsers::go_sum::GoResolver)),
         FileType::Php => Some(Box::new(crate::parsers::composer_lock::PhpResolver)),
         FileType::Dart => Some(Box::new(crate::parsers::pubspec_lock::DartResolver)),
-        FileType::Csharp => Some(Box::new(crate::parsers::packages_lock_json::CsharpResolver)),
+        FileType::Csharp => {
+            if manifest_path.extension().and_then(OsStr::to_str) == Some("csproj") {
+                Some(Box::new(crate::parsers::packages_lock_json::CsharpResolver))
+            } else {
+                None
+            }
+        }
         FileType::Ruby => Some(Box::new(crate::parsers::gemfile_lock::RubyResolver)),
         FileType::Maven => None,
     }
@@ -186,6 +193,18 @@ version = "0.0.1"
         let path = Path::new("/tmp/pom.xml");
         let result = select_resolver(FileType::Maven, path, "").await;
         assert!(result.is_none(), "Maven should not produce a resolver");
+    }
+
+    #[tokio::test]
+    async fn select_resolver_restricts_csharp_lockfiles_to_csproj() {
+        for (path, expected) in [
+            ("/tmp/App.csproj", true),
+            ("/tmp/Directory.Build.props", false),
+            ("/tmp/Directory.Packages.props", false),
+        ] {
+            let resolver = select_resolver(FileType::Csharp, Path::new(path), "").await;
+            assert_eq!(resolver.is_some(), expected, "unexpected result for {path}");
+        }
     }
 
     struct StubResolver {

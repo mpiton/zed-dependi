@@ -53,7 +53,7 @@ Dependency management extension for the [Zed](https://zed.dev) editor.
 | Go | `go.mod` | proxy.golang.org | ✅ |
 | PHP | `composer.json` | Packagist | ✅ |
 | Dart/Flutter | `pubspec.yaml` | pub.dev | ✅ |
-| C#/.NET | `*.csproj` | NuGet | ✅ |
+| C#/.NET | `*.csproj`, `Directory.Build.props`, `Directory.Packages.props` | NuGet | ✅ |
 | Ruby | `Gemfile` | RubyGems.org | ✅ |
 | Java | `pom.xml` | Maven Central | ✅ |
 
@@ -117,7 +117,7 @@ zed-dependi/
 │   │   │   ├── gemfile_lock.rs # Gemfile.lock lockfile
 │   │   │   ├── dart.rs    # pubspec.yaml parser
 │   │   │   ├── pubspec_lock.rs # pubspec.lock lockfile
-│   │   │   ├── csharp.rs  # *.csproj parser
+│   │   │   ├── csharp.rs  # .NET/NuGet MSBuild manifest parser
 │   │   │   ├── packages_lock_json.rs # packages.lock.json lockfile
 │   │   │   ├── maven.rs   # pom.xml parser
 │   │   │   ├── json_spans.rs # Shared JSON span tracking
@@ -366,9 +366,9 @@ dependi-lsp scan --file <path> [options]
 - Java: `pom.xml`
 
 > **Note:** The CLI `scan` subcommand only routes the files listed above.
-> Inside the LSP (when editing in Zed) `constraints.txt` and `hatch.toml`
-> are also recognised as Python manifests; the standalone CLI scanner does
-> not currently route them.
+> Inside the LSP (when editing in Zed), `constraints.txt`, `hatch.toml`,
+> `Directory.Build.props`, and `Directory.Packages.props` are also recognised;
+> the standalone CLI scanner does not currently route them.
 
 #### Exit Codes
 
@@ -541,7 +541,7 @@ security-scan:
 │  │ • go.mod     │  └──────────────┘  │ • pub.dev    │      │
 │  │ • composer   │                    │ • NuGet      │      │
 │  │ • pubspec    │                    │ • RubyGems   │      │
-│  │ • *.csproj   │                    │ • Maven Cent.│      │
+│  │ • .NET files │                    │ • Maven Cent.│      │
 │  │ • Gemfile    │                    └──────────────┘      │
 │  │ • pom.xml    │                                           │
 │  └──────────────┘                                           │
