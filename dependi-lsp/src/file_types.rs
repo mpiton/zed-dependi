@@ -27,7 +27,7 @@ pub enum FileType {
     Php,
     /// Dart/Flutter packages (pubspec.yaml)
     Dart,
-    /// C#/.NET packages (*.csproj)
+    /// C#/.NET packages (.NET/NuGet MSBuild manifests)
     Csharp,
     /// Ruby gems (Gemfile)
     Ruby,
@@ -58,7 +58,10 @@ impl FileType {
             Some(FileType::Php)
         } else if path.ends_with("pubspec.yaml") {
             Some(FileType::Dart)
-        } else if path.ends_with(".csproj") {
+        } else if path.ends_with(".csproj")
+            || filename == "Directory.Build.props"
+            || filename == "Directory.Packages.props"
+        {
             Some(FileType::Csharp)
         } else if path.ends_with("Gemfile") {
             Some(FileType::Ruby)
@@ -240,6 +243,32 @@ mod tests {
     fn test_detect_csharp() {
         let uri = Url::parse("file:///project/MyProject.csproj").unwrap();
         assert_eq!(FileType::detect(&uri), Some(FileType::Csharp));
+    }
+
+    #[test]
+    fn test_detect_dotnet_directory_props() {
+        for uri in [
+            "file:///Directory.Build.props",
+            "file:///project/Directory.Build.props",
+            "file:///Directory.Packages.props",
+            "file:///project/src/Directory.Packages.props",
+        ] {
+            let uri = Url::parse(uri).unwrap();
+            assert_eq!(FileType::detect(&uri), Some(FileType::Csharp));
+        }
+    }
+
+    #[test]
+    fn test_reject_other_msbuild_props_files() {
+        for uri in [
+            "file:///project/Common.props",
+            "file:///project/Directory.Build.targets",
+            "file:///project/Directory.Packages.Props",
+            "file:///project/not-Directory.Packages.props",
+        ] {
+            let uri = Url::parse(uri).unwrap();
+            assert_eq!(FileType::detect(&uri), None);
+        }
     }
 
     #[test]
