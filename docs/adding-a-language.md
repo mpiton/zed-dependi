@@ -283,7 +283,7 @@ Expected: compilation error mentioning `cannot find type SwiftParser`.
 
 ### 4.3 Implement
 
-Replace the rest of `dependi-lsp/src/parsers/swift.rs` body with this minimal implementation:
+Add this minimal implementation above the existing `#[cfg(test)] mod tests` from Section 4.2. Keep that test module unchanged so the file defines it exactly once:
 
 ```rust,ignore
 //! `Package.swift` parser for Swift Package Manager.
@@ -347,9 +347,6 @@ impl Parser for SwiftParser {
         deps
     }
 }
-
-#[cfg(test)]
-mod tests { /* defined above */ }
 ```
 
 > **In a real PR**, cover escaping, comments, alternate requirement forms, malformed input, and checked LSP position conversions before shipping this illustrative parser.
@@ -871,7 +868,3 @@ Rust's exhaustive `match` is your friend. The `parse_document` switch in `backen
 ### 11.6 Rate-limiting your way to a ban
 
 Aggressive registry clients get IP-blocked. crates.io enforces 1 req/s strictly; npm tolerates ~1 req/s before blocking; PyPI is CDN-cached but still asks for politeness. If your registry has a documented limit, copy the `RateLimiter` pattern from `dependi-lsp/src/registries/crates_io.rs` rather than burst-firing requests in tests.
-
-### 11.7 Skipping the doctest gate
-
-This guide ships with doctests that lock the snippets to the real `Parser`/`Registry` API. If you change a trait signature in your PR, run `cd dependi-lsp && cargo test --doc` to confirm the tutorial doctests still compile. They will fail loudly if anything has drifted.
