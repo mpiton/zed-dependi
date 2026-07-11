@@ -6,10 +6,11 @@
 //! ```xml
 //! <PackageReference Include="Serilog" Version="3.1.1" />
 //! <PackageVersion Include="Serilog" Version="3.1.1" />
+//! <PackageVersion Include="Serilog"><Version>3.1.1</Version></PackageVersion>
 //! ```
 
 use super::{Dependency, Parser, Span};
-use quick_xml::events::{BytesStart, Event};
+use quick_xml::events::{BytesStart, BytesText, Event};
 use quick_xml::{Reader, XmlVersion};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -100,10 +101,20 @@ impl Parser for CsharpParser {
         let newline_starts = newline_starts(content);
         let mut reader = Reader::from_str(content);
         let mut dependencies = Vec::new();
+        let mut depth = 0usize;
+        let mut pending = None;
+        let mut pending_depth = None;
+        let mut version_depth = None;
 
         loop {
             match reader.read_event() {
                 Ok(Event::Empty(event)) => {
+                    if validate_attributes(&event).is_err() {
+                        return Vec::new();
+                    }
+                    if pending.is_some() {
+                        continue;
+                    }
                     let Some(kind) = NugetItemKind::from_local_name(event.local_name().as_ref())
                     else {
                         continue;
@@ -121,7 +132,92 @@ impl Parser for CsharpParser {
                         dependencies.push(dependency);
                     }
                 }
-                Ok(Event::Eof) => return dependencies,
+                Ok(Event::Start(event)) => {
+                    if validate_attributes(&event).is_err() {
+                        return Vec::new();
+                    }
+
+                    let event_depth = depth;
+                    if pending.is_none() {
+                        if let Some(kind) =
+                            NugetItemKind::from_local_name(event.local_name().as_ref())
+                        {
+                            let Some(event_start) =
+                                event_content_start(reader.buffer_position(), &event, false)
+                            else {
+                                return Vec::new();
+                            };
+                            pending = match PendingItem::from_event(kind, &event, event_start) {
+                                Ok(pending) => Some(pending),
+                                Err(()) => return Vec::new(),
+                            };
+                            pending_depth = Some(event_depth);
+                        }
+                    } else if event.local_name().as_ref() == b"Version"
+                        && pending
+                            .as_ref()
+                            .is_some_and(|item: &PendingItem| item.version.is_none())
+                        && pending_depth.and_then(|depth| depth.checked_add(1)) == Some(event_depth)
+                    {
+                        version_depth = Some(event_depth);
+                    }
+
+                    let Some(next_depth) = depth.checked_add(1) else {
+                        return Vec::new();
+                    };
+                    depth = next_depth;
+                }
+                Ok(Event::Text(text)) => {
+                    if version_depth.and_then(|depth| depth.checked_add(1)) != Some(depth) {
+                        continue;
+                    }
+                    let Some(item) = pending.as_mut() else {
+                        return Vec::new();
+                    };
+                    if item.version.is_some() {
+                        continue;
+                    }
+                    item.version = match located_text(&text, reader.buffer_position(), content) {
+                        Ok(value) => value,
+                        Err(()) => return Vec::new(),
+                    };
+                }
+                Ok(Event::End(event)) => {
+                    let Some(event_depth) = depth.checked_sub(1) else {
+                        return Vec::new();
+                    };
+                    depth = event_depth;
+
+                    if version_depth == Some(event_depth) {
+                        if event.local_name().as_ref() != b"Version" {
+                            return Vec::new();
+                        }
+                        version_depth = None;
+                    }
+
+                    if pending_depth == Some(event_depth) {
+                        let Some(item) = pending.take() else {
+                            return Vec::new();
+                        };
+                        if NugetItemKind::from_local_name(event.local_name().as_ref())
+                            != Some(item.kind)
+                        {
+                            return Vec::new();
+                        }
+                        if let Some(dependency) = build_dependency(item, content, &newline_starts) {
+                            dependencies.push(dependency);
+                        }
+                        pending_depth = None;
+                        version_depth = None;
+                    }
+                }
+                Ok(Event::Eof) => {
+                    return if depth == 0 && pending.is_none() {
+                        dependencies
+                    } else {
+                        Vec::new()
+                    };
+                }
                 Ok(_) => {}
                 Err(_) => return Vec::new(),
             }
@@ -136,6 +232,12 @@ fn build_dependency(
 ) -> Option<Dependency> {
     let name = pending.name?;
     let version = pending.version?;
+    if name.value.trim().is_empty()
+        || version.value.trim().is_empty()
+        || version.value.contains("$(")
+    {
+        return None;
+    }
     let name_span = span_from_absolute(
         content,
         newline_starts,
@@ -231,6 +333,40 @@ fn located_attribute(
         });
     }
     Ok(located)
+}
+
+fn validate_attributes(event: &BytesStart<'_>) -> Result<(), ()> {
+    for attribute in event.attributes() {
+        attribute.map_err(|_| ())?;
+    }
+    Ok(())
+}
+
+fn located_text(
+    text: &BytesText<'_>,
+    event_end: u64,
+    content: &str,
+) -> Result<Option<LocatedValue>, ()> {
+    let event_end = usize::try_from(event_end).map_err(|_| ())?;
+    let raw_text: &[u8] = text.as_ref();
+    let raw_start = event_end.checked_sub(raw_text.len()).ok_or(())?;
+    let raw = content.get(raw_start..event_end).ok_or(())?;
+    let raw_without_leading = raw.trim_start();
+    let leading_len = raw.len().checked_sub(raw_without_leading.len()).ok_or(())?;
+    let trimmed_raw = raw_without_leading.trim_end();
+    if trimmed_raw.is_empty() {
+        return Ok(None);
+    }
+
+    let absolute_start = raw_start.checked_add(leading_len).ok_or(())?;
+    let absolute_end = absolute_start.checked_add(trimmed_raw.len()).ok_or(())?;
+    let value = text.decode().map_err(|_| ())?.trim().to_string();
+
+    Ok(Some(LocatedValue {
+        value,
+        absolute_start,
+        absolute_end,
+    }))
 }
 
 fn raw_attribute_value_range(
@@ -433,19 +569,92 @@ mod tests {
 
     #[test]
     fn test_parse_expanded_format() {
-        let content = r#"
-<Project Sdk="Microsoft.NET.Sdk">
-  <ItemGroup>
-    <PackageReference Include="Microsoft.Extensions.Logging" Version="8.0.0" />
-  </ItemGroup>
-</Project>
-"#;
-        let parser = CsharpParser::new();
-        let deps = parser.parse(content);
+        let content = r#"<Project>
+  <PackageReference Include="Package">
+    <Version>1.2.3</Version>
+  </PackageReference>
+  <PackageVersion Update="Central.Package">
+    <Version>
+      2.3.4
+    </Version>
+  </PackageVersion>
+  <GlobalPackageReference Include="Global.Package">
+    <Version>3.4.5</Version>
+  </GlobalPackageReference>
+  <PackageVersion Include="Attribute.Package" Version="4.5.6"></PackageVersion>
+</Project>"#;
 
-        assert_eq!(deps.len(), 1);
-        assert_eq!(deps[0].name, "Microsoft.Extensions.Logging");
-        assert_eq!(deps[0].version, "8.0.0");
+        let dependencies = CsharpParser::new().parse(content);
+
+        assert_eq!(dependencies.len(), 4);
+        assert_dependency(content, &dependencies[0], "Package", "1.2.3", false);
+        assert_dependency(content, &dependencies[1], "Central.Package", "2.3.4", false);
+        assert_dependency(content, &dependencies[2], "Global.Package", "3.4.5", true);
+        assert_dependency(
+            content,
+            &dependencies[3],
+            "Attribute.Package",
+            "4.5.6",
+            false,
+        );
+        assert_eq!(dependencies[1].version_span.line, 6);
+        assert_eq!(dependencies[1].version_span.line_start, 6);
+        assert_eq!(dependencies[1].version_span.line_end, 11);
+    }
+
+    #[test]
+    fn test_skip_unsafe_declarations() {
+        for content in [
+            r#"<Project><PackageReference Include="Package" /></Project>"#,
+            r#"<Project><PackageVersion Include="Package" /></Project>"#,
+            r#"<Project><PackageReference Version="1.2.3" /></Project>"#,
+            r#"<Project><PackageVersion Version="1.2.3" /></Project>"#,
+            r#"<Project><PackageVersion Include="" Version="1.2.3" /></Project>"#,
+            r#"<Project><PackageVersion Update="" Version="1.2.3" /></Project>"#,
+            r#"<Project><PackageVersion Include="Package" Version="" /></Project>"#,
+            r#"<Project><PackageVersion Include="Package" Version="   " /></Project>"#,
+            r#"<Project><PackageReference Update="Package" Version="1.2.3" /></Project>"#,
+            r#"<Project><PackageReference Include="Package" Version="$(PackageVersion)" /></Project>"#,
+            r#"<Project><PackageReference Include="Package"><Version>$(PackageVersion)</Version></PackageReference></Project>"#,
+            r#"<Project><PackageReference Include="Package"><Metadata><Version>1.2.3</Version></Metadata></PackageReference></Project>"#,
+            r#"<Project><PackageReference Include="Package"><Version>  </Version></PackageReference></Project>"#,
+        ] {
+            assert!(
+                CsharpParser::new().parse(content).is_empty(),
+                "unexpected dependency from {content}"
+            );
+        }
+    }
+
+    #[test]
+    fn test_malformed_xml_returns_no_partial_dependencies() {
+        let unclosed = r#"<Project>
+  <PackageVersion Include="First" Version="1.0.0" />
+  <PackageVersion Include="Second" Version="2.0.0">"#;
+        let malformed_attribute = r#"<Project broken=unquoted>
+  <PackageVersion Include="First" Version="1.0.0" />
+</Project>"#;
+
+        assert!(CsharpParser::new().parse(unclosed).is_empty());
+        assert!(CsharpParser::new().parse(malformed_attribute).is_empty());
+    }
+
+    #[test]
+    fn test_preserve_conditional_declarations_in_source_order() {
+        let content = r#"<Project>
+  <ItemGroup Condition="'$(TargetFramework)' == 'net8.0'">
+    <PackageVersion Include="Package" Version="1.0.0" />
+  </ItemGroup>
+  <ItemGroup Condition="'$(TargetFramework)' == 'net9.0'">
+    <PackageVersion Include="Package" Version="2.0.0" />
+  </ItemGroup>
+</Project>"#;
+
+        let dependencies = CsharpParser::new().parse(content);
+
+        assert_eq!(dependencies.len(), 2);
+        assert_dependency(content, &dependencies[0], "Package", "1.0.0", false);
+        assert_dependency(content, &dependencies[1], "Package", "2.0.0", false);
     }
 
     #[test]
